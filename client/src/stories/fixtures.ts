@@ -10,7 +10,7 @@ import type {
   ListedTxn,
   Overview,
   Pot,
-  PotHistoryPoint,
+  TrendPoint,
   Txn,
 } from "../App";
 
@@ -167,21 +167,16 @@ export const fixtureReviewTxns: Txn[] = [
   makeTxn({ id: 103, description: "Mock refund posted twice", user_cents: 4500, amount_cents: 4500, review_reason: "Possible duplicate of a cleared entry", status: "pending_review" }),
 ];
 
-export const fixtureHistory: PotHistoryPoint[] = [
-  { month: "2026-04", spentCents: 48210 },
-  { month: "2026-05", spentCents: 55263 },
-  { month: "2026-06", spentCents: 51040 },
-  { month: "2026-07", spentCents: 60312 },
-  { month: "2026-08", spentCents: 54877 },
-  { month: "2026-09", spentCents: 55263 },
+/* Six months of total spend, oldest first: backs the /api/trend mock and
+   the Pots-page summary sparkline. Amounts are cents, like the API. */
+export const fixtureTrend: TrendPoint[] = [
+  { month: "2026-04", spent: 251200 },
+  { month: "2026-05", spent: 289400 },
+  { month: "2026-06", spent: 264800 },
+  { month: "2026-07", spent: 301500 },
+  { month: "2026-08", spent: 276300 },
+  { month: "2026-09", spent: 272123 },
 ];
-
-export const fixtureDonutSegments = [
-  { label: "Joint Living", cents: 194768 },
-  { label: "Food", cents: 83563 },
-  { label: "Transport", cents: 18210 },
-  { label: "Savings", cents: 0 },
-].filter((s) => s.cents > 0);
 
 /* Transactions-page rows: outflows, an inflow, a transfer, splits, a
    pending-review item, and an uncategorized one. */

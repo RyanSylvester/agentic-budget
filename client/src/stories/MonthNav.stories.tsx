@@ -10,7 +10,7 @@ const meta: Meta<typeof MonthNav> = {
     docs: {
       description: {
         component:
-          "The month stepper used above the budget table and insights. Borderless chevrons move one month at a time; the forward chevron disables on the current month.",
+          "The month stepper used above the budget table. Borderless chevrons move one month at a time; the forward chevron disables on the current month.",
       },
     },
   },

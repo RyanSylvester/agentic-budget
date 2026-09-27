@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { userEvent, within } from "storybook/test";
 import { PotsTab } from "../App";
-import { fixtureContacts, fixturePots, MONTH } from "./fixtures";
+import { fixtureContacts, fixturePots, fixtureTrend, MONTH } from "./fixtures";
 import type { MockApiConfig } from "./mockApi";
 
 const meta: Meta<typeof PotsTab> = {
@@ -11,7 +11,7 @@ const meta: Meta<typeof PotsTab> = {
   parameters: {
     docs: {
       description: {
-        component: "The full Pots tab: the budget table with loading, error, and empty states around it.",
+        component: "The full Pots tab: the month summary card, then the budget table, with loading, error, and empty states around them.",
       },
     },
   },
@@ -21,11 +21,12 @@ export default meta;
 type Story = StoryObj<typeof PotsTab>;
 
 const url = `/api/pots?month=${MONTH}`;
+const trend = { "/api/trend": { trend: fixtureTrend } };
 
 export const Loaded: Story = {
   parameters: {
-    mockApi: { get: { [url]: { pots: fixturePots } } } satisfies MockApiConfig,
-    docs: { description: { story: "Pots loaded for the month." } },
+    mockApi: { get: { [url]: { pots: fixturePots, rtaCents: 8633 }, ...trend } } satisfies MockApiConfig,
+    docs: { description: { story: "Pots loaded for the month, with the summary card on top." } },
   },
 };
 
@@ -45,7 +46,7 @@ export const Error: Story = {
 
 export const Empty: Story = {
   parameters: {
-    mockApi: { get: { [url]: { pots: [] } } } satisfies MockApiConfig,
+    mockApi: { get: { [url]: { pots: [], rtaCents: 503394 }, ...trend } } satisfies MockApiConfig,
     docs: { description: { story: "No pots for the month." } },
   },
 };
@@ -54,7 +55,8 @@ export const AddPotFlow: Story = {
   parameters: {
     mockApi: {
       get: {
-        [url]: { pots: fixturePots },
+        [url]: { pots: fixturePots, rtaCents: 8633 },
+        ...trend,
         "/api/contacts": { contacts: fixtureContacts },
       },
       post: { "/api/pots": { ok: true, id: 999 } },

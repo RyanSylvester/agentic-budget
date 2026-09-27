@@ -4,10 +4,10 @@ import App from "../App";
 import {
   fixtureAccounts,
   fixtureContacts,
-  fixtureHistory,
   fixtureListedTxns,
   fixturePots,
   fixtureReviewTxns,
+  fixtureTrend,
   makeAttention,
   makeClosePreview,
   makeOverview,
@@ -17,18 +17,17 @@ import type { MockApiConfig } from "./mockApi";
 /* Full app shell: sidebar, content, and tab navigation, all API routes mocked. */
 
 const CUR = new Date().toISOString().slice(0, 7);
-const topPot = [...fixturePots].sort((a, b) => b.spentCents - a.spentCents)[0];
 
 const fullApi = {
   get: {
     "/api/attention": makeAttention({ unsettledSharedCents: 42180, sharedOwedBy: [{ contactId: 1, name: "Alex", cents: 42180 }] }),
     "/api/review": { transactions: fixtureReviewTxns },
     [`/api/overview?month=${CUR}`]: makeOverview({ month: CUR }),
-    [`/api/pots?month=${CUR}`]: { pots: fixturePots },
+    [`/api/pots?month=${CUR}`]: { pots: fixturePots, rtaCents: 8633 },
+    "/api/trend": { trend: fixtureTrend },
     [`/api/close-preview?month=${CUR}`]: makeClosePreview({ sharedOwedCents: 42180, sharedOwedBy: [{ name: "Alex", cents: 42180 }], month: CUR }),
     "/api/contacts": { contacts: fixtureContacts },
     "/api/accounts": { accounts: fixtureAccounts },
-    [`/api/pot-history?potId=${topPot.id}&months=6`]: { history: fixtureHistory },
     [`/api/transactions?month=${CUR}`]: { month: CUR, transactions: fixtureListedTxns },
   },
 } satisfies MockApiConfig;
@@ -42,7 +41,7 @@ const meta: Meta<typeof App> = {
     docs: {
       description: {
         component:
-          "The whole app: sidebar navigation, month context, and all eight tabs, with every API route mocked. Use these stories to click through the full experience and to capture screens.",
+          "The whole app: sidebar navigation, month context, and all seven tabs, with every API route mocked. Use these stories to click through the full experience and to capture screens.",
       },
     },
   },
@@ -70,16 +69,6 @@ export const Pots: Story = {
   play: async ({ canvasElement }) => {
     await goToTab(canvasElement, "Pots");
     await within(canvasElement).findByText("Rent share");
-  },
-};
-
-export const Insights: Story = {
-  parameters: {
-    docs: { description: { story: "Navigating to the Insights tab. (Interaction test.)" } },
-  },
-  play: async ({ canvasElement }) => {
-    await goToTab(canvasElement, "Insights");
-    await within(canvasElement).findByText("Where the money went");
   },
 };
 

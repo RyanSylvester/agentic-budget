@@ -964,7 +964,8 @@ export function PotSheet({ pot, groups, onClose, onSaved }: {
 }
 
 export function PotsTab({ month }: { month: string }) {
-  const { data, error, loading, retry } = useApi<{ pots: Pot[] }>(`/api/pots?month=${month}`);
+  const { data, error, loading, retry } = useApi<{ pots: Pot[]; rtaCents: number }>(`/api/pots?month=${month}`);
+  const { data: trendData } = useApi<{ trend: TrendPoint[] }>("/api/trend");
   const [sheetPot, setSheetPot] = useState<Pot | "new" | null>(null);
   const pots = data?.pots ?? [];
   const groups = [...new Set(pots.map((p) => p.group))].sort();
@@ -982,7 +983,10 @@ export function PotsTab({ month }: { month: string }) {
       ) : error ? (
         <FetchError onRetry={retry} label="Couldn't load pots." />
       ) : (
-        <BudgetTable pots={pots} month={month} onAssigned={retry} onEditPot={(p) => setSheetPot(p)} />
+        <>
+          <PotsSummary month={month} pots={pots} rtaCents={data?.rtaCents ?? 0} trend={trendData?.trend ?? []} />
+          <BudgetTable pots={pots} month={month} onAssigned={retry} onEditPot={(p) => setSheetPot(p)} />
+        </>
       )}
       {sheetPot && (
         <PotSheet
@@ -996,207 +1000,94 @@ export function PotsTab({ month }: { month: string }) {
   );
 }
 
-/* ---------- insights ---------- */
+/* ---------- pots summary ---------- */
 
-const CHART_VARS = ["--chart-1", "--chart-2", "--chart-3", "--chart-4", "--chart-5", "--chart-6", "--chart-7", "--chart-8"];
-const chartColor = (i: number) => `var(${CHART_VARS[i % CHART_VARS.length]})`;
-
-// Donut of this month's user spend by pot group. Hand-rolled SVG; segment
-// colors come from CSS variables so dark mode keeps working.
-export function Donut({ segments }: { segments: { label: string; cents: number }[] }) {
-  const total = segments.reduce((a, s) => a + s.cents, 0);
-  if (total <= 0)
-    return <p className="py-6 text-center text-[19px] italic text-[var(--muted)]">No spending this month yet.</p>;
-  const R = 80;
-  const C = 2 * Math.PI * R;
-  let acc = 0;
-  return (
-    <div className="flex flex-col items-center gap-6 sm:flex-row sm:gap-10">
-      <div className="relative shrink-0">
-        <svg viewBox="0 0 200 200" className="h-52 w-52" role="img" aria-label="Spending by pot group">
-          {segments.map((s, i) => {
-            const frac = s.cents / total;
-            const len = Math.max(0, frac * C - 3);
-            const rot = (acc / total) * 360 - 90;
-            acc += s.cents;
-            return (
-              <circle
-                key={s.label}
-                cx="100"
-                cy="100"
-                r={R}
-                fill="none"
-                strokeWidth="30"
-                style={{
-                  stroke: chartColor(i),
-                  strokeDasharray: `${len} ${C}`,
-                  transform: `rotate(${rot}deg)`,
-                  transformOrigin: "100px 100px",
-                  opacity: 0.92,
-                }}
-              />
-            );
-          })}
-        </svg>
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <div className="t-nums font-serif-d text-[24px] font-medium">{money(total)}</div>
-          <div className="text-[12px] text-[var(--muted)]">spent</div>
-        </div>
-      </div>
-      <ul className="w-full max-w-xs flex-1 space-y-2">
-        {segments.map((s, i) => (
-          <li key={s.label} className="flex items-center gap-2.5 text-[14px]">
-            <span className="h-3 w-3 shrink-0 rounded-[4px]" style={{ background: chartColor(i), opacity: 0.92 }} />
-            <span className="min-w-0 flex-1 truncate">{titleCase(s.label)}</span>
-            <span className="t-nums text-[var(--muted)]">{Math.round((s.cents / total) * 100)}%</span>
-            <span className="t-nums w-20 shrink-0 text-right font-medium">{money(s.cents)}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-// Six months of one pot's spend, with the 3-month average as a solid
-// reference line in ink: the same number next month's target is wireframed from.
-export function PotBars({ history }: { history: PotHistoryPoint[] }) {
-  if (history.length === 0) return null;
-  const max = Math.max(...history.map((h) => h.spentCents), 1);
-  const last3 = history.slice(-3);
-  const avg = last3.length > 0 ? Math.round(last3.reduce((a, h) => a + h.spentCents, 0) / last3.length) : 0;
-  const avgPct = Math.min(100, (avg / max) * 100);
+// Compact month summary shown at the top of the Pots page: this month's
+// spend, ready-to-assign, top spending groups, and a six-month sparkline.
+// A summary, not a dashboard: a few glanceable numbers and one small visual.
+export function TrendSpark({ trend }: { trend: TrendPoint[] }) {
+  if (trend.length === 0) return null;
+  const max = Math.max(...trend.map((t) => t.spent), 1);
+  const cur = trend[trend.length - 1].month;
   return (
     <div>
-      <div className="relative h-44">
-        <div className="absolute inset-0 flex items-end gap-2.5 sm:gap-3">
-          {history.map((h) => (
-            <div key={h.month} className="flex h-full flex-1 items-end" title={`${monthLabel(h.month)}: ${money(h.spentCents)}`}>
-              <div
-                className="w-full rounded-t-[6px]"
-                style={{
-                  height: `${Math.max(3, (h.spentCents / max) * 100)}%`,
-                  background: "var(--bar)",
-                }}
-              />
-            </div>
-          ))}
-        </div>
-        {avg > 0 && (
-          <div
-            className="pointer-events-none absolute left-0 right-0"
-            style={{ bottom: `${avgPct}%`, height: 2, background: "var(--ink)", opacity: 0.4 }}
-          />
-        )}
+      <div className="flex h-12 items-end gap-1.5" role="img" aria-label="Spending trend, last six months">
+        {trend.map((t) => (
+          <div key={t.month} className="flex h-full flex-1 items-end" title={`${monthLabel(t.month)}: ${money(t.spent)}`}>
+            <div
+              className="w-full rounded-t-[3px]"
+              style={{
+                height: `${Math.max(5, (t.spent / max) * 100)}%`,
+                background: t.month === cur ? "var(--ink)" : "var(--bar)",
+              }}
+            />
+          </div>
+        ))}
       </div>
-      <div className="mt-1.5 flex gap-2.5 sm:gap-3">
-        {history.map((h) => (
-          <span key={h.month} className="t-nums flex-1 text-center text-[11px] text-[var(--faint)]">
-            {trendLabel(h.month)}
+      <div className="mt-1 flex gap-1.5">
+        {trend.map((t) => (
+          <span key={t.month} className="t-nums flex-1 text-center text-[10px] text-[var(--faint)]">
+            {trendLabel(t.month)}
           </span>
         ))}
       </div>
-      {avg > 0 && (
-        <div className="mt-2.5 flex items-center gap-2 text-[12px] text-[var(--muted)]">
-          <span className="inline-block h-[2px] w-6" style={{ background: "var(--ink)", opacity: 0.4 }} />
-          <span className="t-nums">3-month avg {money(avg)}</span>
-        </div>
-      )}
     </div>
   );
 }
 
-export function InsightsTab({ month }: { month: string }) {
-  const { data, error, loading, retry } = useApi<{ pots: Pot[] }>(`/api/pots?month=${month}`);
-  const [potId, setPotId] = useState<number | null>(null);
-  const [query, setQuery] = useState("");
-  const [pickerOpen, setPickerOpen] = useState(false);
-
-  const pots = data?.pots ?? [];
-
-  // Default to the highest-spend pot once pots load.
-  useEffect(() => {
-    if (potId === null && pots.length > 0) {
-      const top = [...pots].sort((a, b) => b.spentCents - a.spentCents)[0];
-      setPotId(top.id);
-    }
-  }, [pots, potId]);
-
-  const { data: histData, error: histError, loading: histLoading, retry: histRetry } = useApi<{ history: PotHistoryPoint[] }>(
-    potId !== null ? `/api/pot-history?potId=${potId}&months=6` : null
-  );
-
+export function PotsSummary({
+  month,
+  pots,
+  rtaCents,
+  trend,
+}: {
+  month: string;
+  pots: Pot[];
+  rtaCents: number;
+  trend: TrendPoint[];
+}) {
+  const spent = pots.reduce((a, p) => a + p.spentCents, 0);
   const byGroup = new Map<string, number>();
   for (const p of pots) {
     if (p.spentCents > 0) byGroup.set(p.group, (byGroup.get(p.group) ?? 0) + p.spentCents);
   }
-  const segments = [...byGroup.entries()]
-    .map(([label, cents]) => ({ label, cents }))
-    .sort((a, b) => b.cents - a.cents);
-
-  const selected = pots.find((p) => p.id === potId) ?? null;
-  const q = query.trim().toLowerCase();
-  const matches = pots.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 8);
+  const top = [...byGroup.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
 
   return (
-    <div className="space-y-10">
-      <div>
-        <div className="mb-5 font-serif-d text-[24px] font-medium">Insights</div>
-        <div className="card p-5">
-          <div className="mb-1 text-[17px] font-semibold">Where the money went</div>
-          <div className="mb-4 text-[13px] text-[var(--muted)]">{monthLabel(month)}</div>
-          {loading ? (
-            <div className="flex justify-center py-6"><Skeleton className="h-52 w-52 rounded-full" /></div>
-          ) : error ? (
-            <FetchError onRetry={retry} label="Couldn't load spending." />
-          ) : (
-            <Donut segments={segments} />
-          )}
+    <section className="card mb-6 p-5" aria-label={`Summary for ${monthLabel(month)}`}>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-[12px] text-[var(--muted)]">Spent in {monthLabel(month)}</div>
+          <div className="t-nums font-serif-d mt-0.5 text-[28px] font-medium leading-none">{money(spent)}</div>
+        </div>
+        <div className="text-right">
+          <div className="text-[12px] text-[var(--muted)]">Ready to assign</div>
+          <div className="t-nums mt-0.5 text-[20px] font-medium leading-none">{money(rtaCents)}</div>
         </div>
       </div>
-      <div>
-        <div className="card p-5">
-          <div className="mb-4 text-[17px] font-semibold">Spending over time</div>
-          <div className="relative mb-5">
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => { setQuery(e.target.value); setPickerOpen(true); }}
-              onFocus={() => setPickerOpen(true)}
-              onBlur={() => window.setTimeout(() => setPickerOpen(false), 120)}
-              onKeyDown={(e) => { if (e.key === "Escape") setPickerOpen(false); }}
-              placeholder={selected ? selected.name : "Search pots…"}
-              aria-label="Search pots"
-              className="field w-full px-3 py-2.5 text-[15px]"
-            />
-            {pickerOpen && matches.length > 0 && (
-              <ul className="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-[var(--r-md)] border border-[var(--hairline)] bg-[var(--surface)] py-1" style={{ boxShadow: "var(--shadow-elev)" }}>
-                {matches.map((p) => (
-                  <li key={p.id}>
-                    <button
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => { setPotId(p.id); setQuery(""); setPickerOpen(false); }}
-                      className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-[15px] transition hover:bg-[var(--bg-sunken)] active:bg-[var(--bg-sunken)]"
-                    >
-                      <span className="truncate">{p.name}</span>
-                      <span className="t-nums shrink-0 text-[13px] text-[var(--muted)]">{money(p.spentCents)}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          {histLoading ? (
-            <div className="flex h-44 items-end gap-3">
-              {[0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-24 flex-1" />)}
-            </div>
-          ) : histError || !histData ? (
-            <FetchError onRetry={histRetry} label="Couldn't load pot history." />
-          ) : (
-            <PotBars history={histData.history} />
-          )}
+      {top.length > 0 && (
+        <div className="mt-4 border-t border-[var(--hairline)] pt-3">
+          <div className="mb-1.5 text-[12px] text-[var(--muted)]">Top groups</div>
+          <ul className="space-y-1.5">
+            {top.map(([group, cents]) => (
+              <li key={group} className="flex items-baseline justify-between gap-3 text-[14px]">
+                <span className="truncate text-[var(--ink-2)]">{titleCase(group)}</span>
+                <span className="t-nums shrink-0 font-medium">{money(cents)}</span>
+              </li>
+            ))}
+          </ul>
         </div>
-      </div>
-    </div>
+      )}
+      {trend.length > 0 && (
+        <div className="mt-4 border-t border-[var(--hairline)] pt-3">
+          <div className="mb-2 text-[12px] text-[var(--muted)]">Six-month spend</div>
+          <TrendSpark trend={trend} />
+        </div>
+      )}
+      {spent === 0 && trend.length === 0 && (
+        <p className="mt-3 text-[14px] italic text-[var(--muted)]">No spending recorded yet.</p>
+      )}
+    </section>
   );
 }
 
@@ -2122,13 +2013,12 @@ export function TransactionsTab({ month }: { month: string }) {
 
 /* ---------- app ---------- */
 
-export type Tab = "overview" | "pots" | "transactions" | "insights" | "close" | "sharing" | "review" | "accounts";
+export type Tab = "overview" | "pots" | "transactions" | "close" | "sharing" | "review" | "accounts";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "pots", label: "Pots" },
   { id: "transactions", label: "Transactions" },
-  { id: "insights", label: "Insights" },
   { id: "close", label: "Close" },
   { id: "sharing", label: "Sharing" },
   { id: "review", label: "Review" },
@@ -2137,10 +2027,10 @@ const TABS: { id: Tab; label: string }[] = [
 
 const tabLabel = (id: Tab) => TABS.find((t) => t.id === id)?.label ?? id;
 
-const MONTH_TABS: Tab[] = ["overview", "pots", "transactions", "insights", "close"];
+const MONTH_TABS: Tab[] = ["overview", "pots", "transactions", "close"];
 
-// Mobile bottom bar: five tabs plus a "More" sheet for the rest.
-const MOBILE_TABS: Tab[] = ["overview", "pots", "transactions", "insights", "close"];
+// Mobile bottom bar: four tabs plus a "More" sheet for the rest.
+const MOBILE_TABS: Tab[] = ["overview", "pots", "transactions", "close"];
 const SHEET_TABS: Tab[] = ["sharing", "review", "accounts"];
 
 /* Icon-only mobile tab bar: one clean inline SVG per tab, no icon library.
@@ -2169,10 +2059,6 @@ function TabIcon({ id }: { id: Tab | "more" }) {
     case "transactions":
       return (
         <svg {...common}><path d="M6 3.5h12V21l-2.2-1.6-1.8 1.6-2-1.6-2 1.6-1.8-1.6L6 21V3.5Z" /><path d="M9.5 8.5h5M9.5 12h5" /></svg>
-      );
-    case "insights":
-      return (
-        <svg {...common}><path d="M4 4v15.5h16" /><path d="M9 15.5v-4M13.5 15.5v-7M18 15.5v-2.5" /></svg>
       );
     case "close":
       return (
@@ -2271,8 +2157,6 @@ export default function App() {
 
           {tab === "transactions" && <TransactionsTab key={`t-${refreshKey}-${month}`} month={month} />}
 
-          {tab === "insights" && <InsightsTab key={`i-${refreshKey}-${month}`} month={month} />}
-
           {tab === "close" && <CloseTab key={`c-${refreshKey}-${month}`} month={month} onGo={go} />}
 
           {tab === "sharing" && <SharingTab key={`s-${refreshKey}`} />}
@@ -2298,7 +2182,7 @@ export default function App() {
 
       {/* mobile bottom tab bar: icon-only, same tabs in the same order */}
       <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--hairline)] bg-[var(--surface)] pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Primary">
-        <div className="grid grid-cols-6">
+        <div className="grid grid-cols-5">
           {MOBILE_TABS.map((id) => {
             const active = tab === id;
             return (

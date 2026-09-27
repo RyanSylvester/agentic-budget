@@ -287,6 +287,7 @@ app.get("/api/pots", (c) => {
   ).all() as any[];
   return c.json({
     month,
+    rtaCents: rtaCents(db, month),
     pots: pots.map((p) => {
       const { userCents, sharedCents } = potSpend(db, p.id, month);
       return {
