@@ -18,6 +18,9 @@ RUN cd client && bun install
 COPY client ./client
 RUN cd client && bun run build
 
+# Server source (used by the runtime stage)
+COPY src ./src
+
 FROM oven/bun:1-slim
 WORKDIR /app
 
