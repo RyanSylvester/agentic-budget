@@ -216,7 +216,7 @@ function Hero({ overview, isCurrent, loading }: { overview: Overview | null; isC
   );
 }
 
-function PotCard({ p, partnerName, month, onAssigned }: { p: Pot; partnerName: string; month: string; onAssigned: () => void }) {
+function PotCard({ p, month, onAssigned }: { p: Pot; month: string; onAssigned: () => void }) {
   const hasTarget = p.targetCents > 0;
   const pct = hasTarget ? (p.spentCents / p.targetCents) * 100 : 0;
   const over = hasTarget && p.spentCents > p.targetCents;
@@ -261,7 +261,7 @@ function PotCard({ p, partnerName, month, onAssigned }: { p: Pot; partnerName: s
           <span className="text-[var(--ink)]">{money(p.spentCents)}</span>
         )}
         {p.partnerCents > 0 && (
-          <span> · {p.partnerCents === p.spentCents ? `${partnerName}'s half` : `${money(p.partnerCents)} ${partnerName}'s`}</span>
+          <span> · {p.partnerCents === p.spentCents ? "split 50/50" : `partner ${money(p.partnerCents)}`}</span>
         )}
       </div>
       {hasTarget && (
@@ -308,7 +308,7 @@ function PotCard({ p, partnerName, month, onAssigned }: { p: Pot; partnerName: s
   );
 }
 
-function PotsGrid({ pots, partnerName, month, onAssigned }: { pots: Pot[]; partnerName: string; month: string; onAssigned: () => void }) {
+function PotsGrid({ pots, month, onAssigned }: { pots: Pot[]; month: string; onAssigned: () => void }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   if (pots.length === 0)
     return <p className="font-serif-d text-[17px] italic text-[var(--muted)]">No pots yet. They'll appear here once the budget is set up.</p>;
@@ -340,7 +340,7 @@ function PotsGrid({ pots, partnerName, month, onAssigned }: { pots: Pot[]; partn
             </button>
             {isOpen && (
               <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
-                {g.pots.map((p) => <PotCard key={p.id} p={p} partnerName={partnerName} month={month} onAssigned={onAssigned} />)}
+                {g.pots.map((p) => <PotCard key={p.id} p={p} month={month} onAssigned={onAssigned} />)}
               </div>
             )}
           </div>
@@ -350,7 +350,7 @@ function PotsGrid({ pots, partnerName, month, onAssigned }: { pots: Pot[]; partn
   );
 }
 
-function RecentActivity({ txns, partnerName, loading }: { txns: Txn[]; partnerName: string; loading?: boolean }) {
+function RecentActivity({ txns, loading }: { txns: Txn[]; loading?: boolean }) {
   // Transfer pairs (e.g. +$891.82 / -$891.82 between own accounts) are net-zero
   // noise, not spending: keep them out of the activity feed.
   const visible = txns.filter((t) => !t.is_transfer);
@@ -382,7 +382,7 @@ function RecentActivity({ txns, partnerName, loading }: { txns: Txn[]; partnerNa
               <div className="truncate text-[15px]">{t.description}</div>
               <div className="mt-0.5 text-[13px] text-[var(--muted)]">
                 {fmtDate(t.date)}
-                {t.split_with_partner ? ` · split with ${partnerName}` : ""}
+                {t.split_with_partner ? " · split" : ""}
               </div>
             </div>
             <span className={`t-nums shrink-0 text-[15px] ${t.user_cents < 0 ? "" : "font-medium text-[var(--success)]"}`}>
@@ -395,7 +395,7 @@ function RecentActivity({ txns, partnerName, loading }: { txns: Txn[]; partnerNa
   );
 }
 
-function CloseCard({ preview, partnerName, onGo }: { preview: ClosePreviewData; partnerName: string; onGo: (t: Tab) => void }) {
+function CloseCard({ preview, onGo }: { preview: ClosePreviewData; onGo: (t: Tab) => void }) {
   return (
     <div className="card p-5">
       <div className="mb-3"><Eyebrow>Month-end preview</Eyebrow></div>
@@ -415,11 +415,11 @@ function CloseCard({ preview, partnerName, onGo }: { preview: ClosePreviewData; 
           onClick={() => onGo("partner")}
           className="mt-3 flex w-full items-center justify-between rounded-[var(--r-md)] bg-[var(--bg-sunken)] px-4 py-3 text-left text-[15px] transition active:scale-[0.99]"
         >
-          <span>{partnerName} owes <span className="t-nums font-medium">{money(preview.partnerOwedCents)}</span></span>
+          <span>Partner owes <span className="t-nums font-medium">{money(preview.partnerOwedCents)}</span></span>
           <span className="text-[var(--faint)]">→</span>
         </button>
       )}
-      <p className="mt-3 text-[13px] text-[var(--muted)]">Closes automatically at month-end.</p>
+      <p className="mt-3 text-[13px] text-[var(--muted)]">Applied at month-end once ready-to-assign is $0.</p>
     </div>
   );
 }
@@ -473,7 +473,6 @@ function OverviewTab({ month, onGo }: { month: string; onGo: (t: Tab) => void })
   const { data: accountsData } = useApi<{ accounts: Account[] }>("/api/accounts");
 
   const current = new Date().toISOString().slice(0, 7);
-  const partnerName = overview?.partnerName ?? "Partner";
 
   return (
     <div className="space-y-7">
@@ -490,19 +489,17 @@ function OverviewTab({ month, onGo }: { month: string; onGo: (t: Tab) => void })
         attention={attention}
         overview={overview}
         accounts={accountsData?.accounts ?? []}
-        partnerName={partnerName}
         onGo={onGo}
       />
-      <RecentActivity txns={overview?.recent ?? []} partnerName={partnerName} loading={loading} />
+      <RecentActivity txns={overview?.recent ?? []} loading={loading} />
     </div>
   );
 }
 
-function AttentionCard({ attention, overview, accounts, partnerName, onGo }: {
+function AttentionCard({ attention, overview, accounts, onGo }: {
   attention: Attention | null;
   overview: Overview | null;
   accounts: Account[];
-  partnerName: string;
   onGo: (t: Tab) => void;
 }) {
   const items: { label: React.ReactNode; tab: Tab }[] = [];
@@ -518,7 +515,7 @@ function AttentionCard({ attention, overview, accounts, partnerName, onGo }: {
     }
     if (attention.unsettledPartnerCents > 0)
       items.push({
-        label: <>{partnerName} owes <span className="t-nums font-medium">{money(attention.unsettledPartnerCents)}</span></>,
+        label: <>Partner owes <span className="t-nums font-medium">{money(attention.unsettledPartnerCents)}</span></>,
         tab: "partner",
       });
     if (attention.rtaCents > 0)
@@ -608,7 +605,7 @@ function PartnerCard() {
 
   return (
     <div className="card p-5">
-      <Eyebrow>{settled ? `${info.partnerName} · settled up` : `${info.partnerName} owes you`}</Eyebrow>
+      <Eyebrow>{settled ? "Partner · settled up" : "Partner owes you"}</Eyebrow>
       {settled ? (
         <div className="font-serif-d mt-1.5 text-[24px] italic">All settled.</div>
       ) : (
@@ -676,9 +673,7 @@ function PartnerCard() {
 
 function PotsTab({ month }: { month: string }) {
   const { data, error, loading, retry } = useApi<{ pots: Pot[] }>(`/api/pots?month=${month}`);
-  const { data: partnerData } = useApi<PartnerInfo>("/api/partner");
   const { data: trendData } = useApi<{ trend: TrendPoint[] }>("/api/trend");
-  const partnerName = partnerData?.partnerName ?? "Partner";
 
   return (
     <div className="space-y-7">
@@ -692,7 +687,7 @@ function PotsTab({ month }: { month: string }) {
         ) : error ? (
           <FetchError onRetry={retry} label="Couldn't load pots." />
         ) : (
-          <PotsGrid pots={data?.pots ?? []} partnerName={partnerName} month={month} onAssigned={retry} />
+          <PotsGrid pots={data?.pots ?? []} month={month} onAssigned={retry} />
         )}
       </div>
       <Trend data={trendData?.trend ?? []} />
@@ -702,8 +697,6 @@ function PotsTab({ month }: { month: string }) {
 
 function CloseTab({ month, onGo }: { month: string; onGo: (t: Tab) => void }) {
   const { data: preview, error, loading, retry } = useApi<ClosePreviewData>(`/api/close-preview?month=${month}`);
-  const { data: partnerData } = useApi<PartnerInfo>("/api/partner");
-  const partnerName = partnerData?.partnerName ?? "Partner";
 
   return (
     <div>
@@ -718,7 +711,7 @@ function CloseTab({ month, onGo }: { month: string; onGo: (t: Tab) => void }) {
       ) : error || !preview ? (
         <FetchError onRetry={retry} label="Couldn't load the close preview." />
       ) : (
-        <CloseCard preview={preview} partnerName={partnerName} onGo={onGo} />
+        <CloseCard preview={preview} onGo={onGo} />
       )}
     </div>
   );
