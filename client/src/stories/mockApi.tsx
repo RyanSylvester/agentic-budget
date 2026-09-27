@@ -13,6 +13,10 @@ export interface MockApiConfig {
   get?: Record<string, unknown | ((url: string) => unknown | Promise<unknown>)>;
   /** Exact "POST <url>" matches; values may be JSON or a (body) => JSON fn */
   post?: Record<string, unknown | ((body: unknown) => unknown)>;
+  /** Exact "PUT <url>" matches; values may be JSON or a (body) => JSON fn */
+  put?: Record<string, unknown | ((body: unknown) => unknown)>;
+  /** Exact "DELETE <url>" matches; values may be JSON or a () => JSON fn */
+  delete?: Record<string, unknown | (() => unknown)>;
   /** GET urls that should fail with a 500 */
   failGet?: string[];
   /** POST urls that should fail with a 500 */
@@ -47,6 +51,22 @@ export function createFetchStub(config: MockApiConfig): typeof fetch {
           body = undefined;
         }
         return json(typeof handler === "function" ? (handler as (b: unknown) => unknown)(body) : handler);
+      }
+    } else if (method === "PUT") {
+      const handler = config.put?.[url];
+      if (handler !== undefined) {
+        let body: unknown;
+        try {
+          body = init?.body ? JSON.parse(init.body as string) : undefined;
+        } catch {
+          body = undefined;
+        }
+        return json(typeof handler === "function" ? (handler as (b: unknown) => unknown)(body) : handler);
+      }
+    } else if (method === "DELETE") {
+      const handler = config.delete?.[url];
+      if (handler !== undefined) {
+        return json(typeof handler === "function" ? (handler as () => unknown)() : handler);
       }
     }
     return new Response("not mocked", { status: 404 });

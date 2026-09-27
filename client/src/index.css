@@ -116,6 +116,15 @@
   input[type="text"] {
     cursor: text;
   }
+  input[type="date"] {
+    cursor: text;
+  }
+  input[type="checkbox"] {
+    cursor: pointer;
+  }
+  select {
+    cursor: pointer;
+  }
 }
 
 @layer components {

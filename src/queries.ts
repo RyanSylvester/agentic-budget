@@ -113,3 +113,49 @@ export function assignedTotal(db: Database, month: string): number {
 export function rtaCents(db: Database, month: string): number {
   return monthInflows(db, month) - assignedTotal(db, month);
 }
+
+/** One row of the Transactions page: the transaction plus its user-side pot
+ *  and the partner's share. Newest first. Voided transactions never appear. */
+export interface ListedTransaction {
+  id: number;
+  date: string;
+  description: string;
+  amountCents: number;
+  isTransfer: number;
+  status: string;
+  cleared: string;
+  source: string;
+  accountId: number;
+  accountName: string;
+  potId: number | null;
+  potName: string | null;
+  potGroup: string | null;
+  splitWithPartner: number;
+  partnerCents: number;
+}
+
+export function listTransactions(db: Database, month: string): ListedTransaction[] {
+  return db.query(
+    `SELECT t.id, t.date, t.description,
+            t.amount_cents AS amountCents, t.is_transfer AS isTransfer,
+            t.status, t.cleared, t.source,
+            t.account_id AS accountId, a.name AS accountName,
+            (SELECT s2.pot_id FROM splits s2
+             WHERE s2.transaction_id = t.id AND s2.owner = 'user'
+             ORDER BY ABS(s2.amount_cents) DESC LIMIT 1) AS potId,
+            (SELECT p.name FROM splits s2 JOIN pots p ON p.id = s2.pot_id
+             WHERE s2.transaction_id = t.id AND s2.owner = 'user'
+             ORDER BY ABS(s2.amount_cents) DESC LIMIT 1) AS potName,
+            (SELECT p.pot_group FROM splits s2 JOIN pots p ON p.id = s2.pot_id
+             WHERE s2.transaction_id = t.id AND s2.owner = 'user'
+             ORDER BY ABS(s2.amount_cents) DESC LIMIT 1) AS potGroup,
+            CASE WHEN SUM(CASE WHEN s.owner = 'partner' THEN 1 ELSE 0 END) > 0 THEN 1 ELSE 0 END AS splitWithPartner,
+            COALESCE(-SUM(CASE WHEN s.owner = 'partner' THEN s.amount_cents ELSE 0 END), 0) AS partnerCents
+     FROM transactions t
+     JOIN accounts a ON a.id = t.account_id
+     LEFT JOIN splits s ON s.transaction_id = t.id
+     WHERE t.voided = 0 AND substr(t.date, 1, 7) = ?
+     GROUP BY t.id
+     ORDER BY t.date DESC, t.id DESC`
+  ).all(month) as ListedTransaction[];
+}

@@ -5,6 +5,7 @@ import type {
   Account,
   Attention,
   ClosePreviewData,
+  ListedTxn,
   Overview,
   PartnerInfo,
   Pot,
@@ -168,3 +169,45 @@ export const fixtureDonutSegments = [
   { label: "Transport", cents: 18210 },
   { label: "Savings", cents: 0 },
 ].filter((s) => s.cents > 0);
+
+/* Transactions-page rows: outflows, an inflow, a transfer, splits, a
+   pending-review item, and an uncategorized one. */
+
+const fixtureChequing = fixtureAccounts[0];
+const groceriesPot = fixturePots.find((p) => p.name === "Groceries")!;
+const transitPot = fixturePots.find((p) => p.name === "Transit")!;
+const paycheckPot = fixturePots.find((p) => p.name === "Paycheck")!;
+const diningPot = fixturePots.find((p) => p.name === "Dining out")!;
+const coffeePot = fixturePots.find((p) => p.name === "Coffee")!;
+
+export function makeListedTxn(over: Partial<ListedTxn> = {}): ListedTxn {
+  return {
+    id: nid(),
+    date: "2026-09-26",
+    description: "Mock purchase",
+    amountCents: -2599,
+    isTransfer: 0,
+    status: "confirmed",
+    cleared: "uncleared",
+    source: "manual",
+    accountId: fixtureChequing.id,
+    accountName: fixtureChequing.name,
+    potId: groceriesPot.id,
+    potName: groceriesPot.name,
+    potGroup: groceriesPot.group,
+    splitWithPartner: 0,
+    partnerCents: 0,
+    ...over,
+  };
+}
+
+export const fixtureListedTxns: ListedTxn[] = [
+  makeListedTxn({ date: "2026-09-27", description: "Mock grocery run", amountCents: -8421, splitWithPartner: 1, partnerCents: 4210 }),
+  makeListedTxn({ date: "2026-09-26", description: "Mock transit top-up", amountCents: -15000, potId: transitPot.id, potName: transitPot.name, potGroup: transitPot.group }),
+  makeListedTxn({ date: "2026-09-25", description: "Mock paycheck deposit", amountCents: 250000, potId: paycheckPot.id, potName: paycheckPot.name, potGroup: paycheckPot.group }),
+  makeListedTxn({ date: "2026-09-24", description: "Mock transfer between accounts", amountCents: -89182, isTransfer: 1, potId: null, potName: null, potGroup: null }),
+  makeListedTxn({ date: "2026-09-23", description: "Mock dinner out", amountCents: -9650, splitWithPartner: 1, partnerCents: 4825, potId: diningPot.id, potName: diningPot.name, potGroup: diningPot.group }),
+  makeListedTxn({ date: "2026-09-22", description: "Mock coffee stop", amountCents: -485, potId: coffeePot.id, potName: coffeePot.name, potGroup: coffeePot.group }),
+  makeListedTxn({ date: "2026-09-21", description: "Mock ambiguous charge", amountCents: -1299, status: "pending_review" }),
+  makeListedTxn({ date: "2026-09-20", description: "Mock uncategorized import", amountCents: -3200, potId: null, potName: null, potGroup: null }),
+];

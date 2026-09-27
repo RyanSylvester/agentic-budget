@@ -4,6 +4,7 @@ import App from "../App";
 import {
   fixtureAccounts,
   fixtureHistory,
+  fixtureListedTxns,
   fixturePots,
   fixtureReviewTxns,
   makeAttention,
@@ -28,6 +29,7 @@ const fullApi = {
     "/api/partner": makePartnerInfo(),
     "/api/accounts": { accounts: fixtureAccounts },
     [`/api/pot-history?potId=${topPot.id}&months=6`]: { history: fixtureHistory },
+    [`/api/transactions?month=${CUR}`]: { month: CUR, transactions: fixtureListedTxns },
   },
 } satisfies MockApiConfig;
 
@@ -40,7 +42,7 @@ const meta: Meta<typeof App> = {
     docs: {
       description: {
         component:
-          "The whole app: sidebar navigation, month context, and all seven tabs, with every API route mocked. Use these stories to click through the full experience and to capture screens.",
+          "The whole app: sidebar navigation, month context, and all eight tabs, with every API route mocked. Use these stories to click through the full experience and to capture screens.",
       },
     },
   },
@@ -78,6 +80,16 @@ export const Insights: Story = {
   play: async ({ canvasElement }) => {
     await goToTab(canvasElement, "Insights");
     await within(canvasElement).findByText("Where the money went");
+  },
+};
+
+export const Transactions: Story = {
+  parameters: {
+    docs: { description: { story: "Navigating to the Transactions tab. (Interaction test.)" } },
+  },
+  play: async ({ canvasElement }) => {
+    await goToTab(canvasElement, "Transactions");
+    await within(canvasElement).findByText("Mock grocery run");
   },
 };
 

@@ -4,11 +4,12 @@ import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { existsSync } from "node:fs";
 import { openDb, getSetting } from "./db";
-import { monthSpend, potSpend, recentTransactions, spendTrend, assignedTotal, rtaCents, potHistory } from "./queries";
+import { monthSpend, potSpend, recentTransactions, listTransactions, spendTrend, assignedTotal, rtaCents, potHistory } from "./queries";
 import { applySettlement, partnerCredit, partnerOwed } from "./settle";
 import { reconcile, suggestClear } from "./reconcile";
 import { closePreview } from "./close";
 import { assignToPot, assignedToPot } from "./assign";
+import { createTransaction, updateTransaction } from "./transactions";
 import { validMonth } from "./money";
 
 const app = new Hono();
@@ -208,6 +209,56 @@ app.post("/api/transactions/:id/clear", (c) => {
   const id = badId(c, "id");
   if (id === null) return c.json({ error: "bad transaction id" }, 400);
   db.query("UPDATE transactions SET cleared = 'cleared' WHERE id = ? AND cleared = 'uncleared'").run(id);
+  return c.json({ ok: true });
+});
+
+/** Every non-voided transaction in a month, newest first, with pot and
+ *  partner-share detail. Powers the Transactions page. */
+app.get("/api/transactions", (c) => {
+  const db = openDb();
+  const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
+  if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
+  return c.json({ month, transactions: listTransactions(db, month) });
+});
+
+/** Record a manually entered transaction. Body: { date, accountId, potId,
+ *  amountCents (signed, nonzero), description, isTransfer?, partnerCents? }. */
+app.post("/api/transactions", async (c) => {
+  const db = openDb();
+  const { ok, body } = await readJson(c);
+  if (!ok) return c.json({ error: "malformed JSON" }, 400);
+  try {
+    const id = createTransaction(db, body ?? {});
+    return c.json({ ok: true, id });
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 400);
+  }
+});
+
+/** Replace a transaction's fields and splits. Same body shape as POST. */
+app.put("/api/transactions/:id", async (c) => {
+  const db = openDb();
+  const id = badId(c, "id");
+  if (id === null) return c.json({ error: "bad transaction id" }, 400);
+  if (!txnExists(db, id)) return c.json({ error: `no transaction ${id}` }, 404);
+  const { ok, body } = await readJson(c);
+  if (!ok) return c.json({ error: "malformed JSON" }, 400);
+  try {
+    updateTransaction(db, id, body ?? {});
+    return c.json({ ok: true });
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 400);
+  }
+});
+
+/** Delete a transaction. This is a soft void: excluded from spend, inflow,
+ *  and RTA math, kept for audit. Same semantics as the existing void route. */
+app.delete("/api/transactions/:id", (c) => {
+  const db = openDb();
+  const id = badId(c, "id");
+  if (id === null) return c.json({ error: "bad transaction id" }, 400);
+  if (!txnExists(db, id)) return c.json({ error: `no transaction ${id}` }, 404);
+  db.query("UPDATE transactions SET voided = 1 WHERE id = ?").run(id);
   return c.json({ ok: true });
 });
 
