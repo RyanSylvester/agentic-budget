@@ -9,8 +9,9 @@ import { applySettlement, contactCredit, contactOwed } from "./settle";
 import { contactBalances, createContact, renameContact, deleteContact } from "./contacts";
 import { createPot, updatePot, deletePot, potExists } from "./pots";
 import { reconcile, suggestClear } from "./reconcile";
-import { closePreview } from "./close";
+import { closePreview, applyClose } from "./close";
 import { assignToPot, assignedToPot } from "./assign";
+import { scaffoldMonth, type ScaffoldStrategy } from "./scaffold";
 import { createTransaction, updateTransaction } from "./transactions";
 import { validMonth } from "./money";
 
@@ -116,6 +117,22 @@ app.post("/api/assign", async (c) => {
   try {
     const r = assignToPot(db, month, potId, cents);
     return c.json({ ok: true, ...r });
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 400);
+  }
+});
+
+/** Bulk-fill a month's assignments from history. Body: { month: "YYYY-MM",
+ *  strategy: "average_3mo" | "last_month" | "target", dryRun?: boolean }.
+ *  With dryRun the computed lines are returned without writing anything. */
+app.post("/api/assign/scaffold", async (c) => {
+  const db = openDb();
+  const { ok, body } = await readJson(c);
+  if (!ok) return c.json({ error: "malformed JSON" }, 400);
+  const { month, strategy, dryRun } = body ?? {};
+  try {
+    const lines = scaffoldMonth(db, month, strategy as ScaffoldStrategy, dryRun === true);
+    return c.json({ ok: true, month, strategy, lines });
   } catch (e) {
     return c.json({ error: (e as Error).message }, 400);
   }
@@ -425,6 +442,23 @@ app.get("/api/close-preview", (c) => {
   const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
   if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
   return c.json(closePreview(db, month));
+});
+
+/** Apply the month-end close. Body: { month: "YYYY-MM" }. The $0 rule binds
+ *  here: ready-to-assign must be exactly $0, and the month must not already
+ *  be closed. Human review happens before the agent runs this. */
+app.post("/api/close", async (c) => {
+  const db = openDb();
+  const { ok, body } = await readJson(c);
+  if (!ok) return c.json({ error: "malformed JSON" }, 400);
+  const month = body?.month ?? new Date().toISOString().slice(0, 7);
+  if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
+  try {
+    applyClose(db, closePreview(db, month));
+    return c.json({ ok: true, month });
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 400);
+  }
 });
 
 // Record a lump sum from a contact and allocate it against what they owe, oldest first.

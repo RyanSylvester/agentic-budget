@@ -69,6 +69,20 @@ export interface ClosePreview {
   sharedOwedCents: number;
   sharedOwedBy: { name: string; cents: number }[];
   pots: PotCloseLine[];
+  /** True once the month-end close has been applied for this month. */
+  closed: boolean;
+}
+
+/** The close card's three numbers: income in, spend out, savings as the
+ *  residual. Income minus spend minus savings is always zero. */
+export function closeEquation(preview: Pick<ClosePreview, "inflowsCents" | "spentCents">): {
+  incomeCents: number;
+  spendCents: number;
+  savingsCents: number;
+} {
+  const incomeCents = preview.inflowsCents;
+  const spendCents = preview.spentCents;
+  return { incomeCents, spendCents, savingsCents: incomeCents - spendCents };
 }
 
 /** Everything the month-end close needs, read from live data. */
@@ -100,7 +114,9 @@ export function closePreview(db: Database, month: string): ClosePreview {
     .map(([name, cents]) => ({ name, cents }))
     .sort((a, b) => b.cents - a.cents);
 
-  return { month, nextMonth: shiftMonth(month, 1), inflowsCents, spentCents, assignedCents, rtaBeforeCents, movedToSavingsCents, sharedOwedCents, sharedOwedBy, pots: lines };
+  const closed = !!db.query(`SELECT 1 FROM month_closes WHERE month = ?`).get(month);
+
+  return { month, nextMonth: shiftMonth(month, 1), inflowsCents, spentCents, assignedCents, rtaBeforeCents, movedToSavingsCents, sharedOwedCents, sharedOwedBy, pots: lines, closed };
 }
 
 /** Apply the month-end close: record it and wireframe next month's pot targets.

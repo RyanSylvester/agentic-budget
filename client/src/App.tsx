@@ -36,6 +36,7 @@ export interface ClosePreviewData {
   movedToSavingsCents: number;
   sharedOwedCents: number;
   sharedOwedBy: { name: string; cents: number }[];
+  closed: boolean;
 }
 
 export interface Account {
@@ -537,53 +538,148 @@ export function RecentActivity({ txns, loading }: { txns: Txn[]; loading?: boole
   );
 }
 
-export function CloseCard({ preview, onGo }: { preview: ClosePreviewData; onGo: (t: Tab) => void }) {
+/* ---------- close summary card ---------- */
+
+// High-level month view at the top of the Pots tab: Income, Spend, Savings,
+// which net to zero (Income minus Spend minus Savings). Reuses the
+// close-preview data and the month-end close logic: on the current month the
+// close action is offered once ready-to-assign is $0. Past months are
+// read-only; the card is hidden on future months.
+export function CloseSummaryCard({ month, onClosed }: { month: string; onClosed: () => void }) {
+  const current = new Date().toISOString().slice(0, 7);
+  const isFuture = month > current;
+  const isCurrent = month === current;
+  const { data: preview, error, loading, retry } = useApi<ClosePreviewData>(
+    isFuture ? null : `/api/close-preview?month=${month}`
+  );
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  if (isFuture) return null;
+
+  if (loading) {
+    return (
+      <section className="card mb-6 p-5" aria-label="Month close summary">
+        <Skeleton className="h-6 w-44" />
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-16" />
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  if (error || !preview) {
+    return (
+      <div className="mb-6">
+        <FetchError onRetry={retry} label="Couldn't load the close summary." />
+      </div>
+    );
+  }
+
+  const income = preview.inflowsCents;
+  const spend = preview.spentCents;
+  const savings = income - spend;
+  const rta = preview.rtaBeforeCents;
+  const closed = preview.closed;
+
+  const doClose = async () => {
+    setBusy(true);
+    setFailed(null);
+    try {
+      const r = await fetch("/api/close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ month }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
+      setConfirming(false);
+      onClosed();
+    } catch (e) {
+      setFailed((e as Error).message);
+    }
+    setBusy(false);
+  };
+
   return (
-    <div className="card p-5">
-      <div className="mb-3 text-[17px] font-semibold">How the month closes</div>
-      <div className="space-y-1.5 text-[15px]">
-        <div className="flex justify-between"><span className="text-[var(--muted)]">Inflows</span><span className="t-nums">{money(preview.inflowsCents)}</span></div>
-        <div className="flex justify-between"><span className="text-[var(--muted)]">Spent</span><span className="t-nums">{money(preview.spentCents)}</span></div>
-        {preview.assignedCents != null && (
-          <div className="flex justify-between"><span className="text-[var(--muted)]">Assigned</span><span className="t-nums">{money(preview.assignedCents)}</span></div>
+    <section className="card mb-6 p-5" aria-label={`Month close for ${monthLabel(month)}`}>
+      <div className="mb-3 flex items-baseline justify-between">
+        <div className="text-[17px] font-semibold">Month close</div>
+        {closed ? (
+          <span className="rounded-[var(--r-pill)] bg-[var(--bg-sunken)] px-2.5 py-1 text-[12px] font-medium text-[var(--muted)]">
+            Closed
+          </span>
+        ) : (
+          <span className="text-[12px] text-[var(--muted)]">{monthLabel(month)}</span>
         )}
       </div>
-      <div className="mt-2.5 border-t border-[var(--hairline)] pt-2.5 text-[15px]">
-        <span className="t-nums font-semibold">{money(preview.movedToSavingsCents)}</span>
-        <span className="text-[var(--muted)]"> moves to secondary savings; ready-to-assign → $0</span>
+      <div className="grid grid-cols-3 gap-2 text-center">
+        {[
+          { label: "Income", cents: income },
+          { label: "Spend", cents: spend },
+          { label: "Savings", cents: savings },
+        ].map((s) => (
+          <div key={s.label} className="rounded-[var(--r-md)] bg-[var(--bg-sunken)] px-2 py-3">
+            <div className="text-[12px] text-[var(--muted)]">{s.label}</div>
+            <div className="t-nums mt-0.5 text-[17px] font-semibold leading-none">{money(s.cents)}</div>
+          </div>
+        ))}
       </div>
-      {preview.sharedOwedCents > 0 && (
-        <button
-          onClick={() => onGo("sharing")}
-          className="mt-3 flex w-full items-center justify-between rounded-[var(--r-md)] bg-[var(--bg-sunken)] px-4 py-3 text-left text-[15px] transition active:scale-[0.99]"
-        >
-          <span>
-            {preview.sharedOwedBy.length === 1 ? (
-              <>{preview.sharedOwedBy[0].name} owes <span className="t-nums font-medium">{money(preview.sharedOwedBy[0].cents)}</span></>
+      <p className="mt-3 text-center text-[13px] text-[var(--muted)]">
+        Income − Spend − Savings = <span className="t-nums font-medium text-[var(--ink-2)]">{money(income - spend - savings)}</span>
+      </p>
+      {isCurrent && !closed && (
+        <div className="mt-3 border-t border-[var(--hairline)] pt-3">
+          {rta === 0 ? (
+            confirming ? (
+              <div>
+                <p className="text-[14px] text-[var(--ink-2)]">
+                  Close {monthLabel(month)}? This records the close and sets next month's pot targets.
+                </p>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={() => setConfirming(false)}
+                    disabled={busy}
+                    className="flex-1 rounded-[var(--r-md)] border border-[var(--hairline-strong)] px-4 py-2.5 text-[15px] font-medium text-[var(--ink-2)] transition active:scale-[0.99]"
+                  >
+                    Cancel
+                  </button>
+                  <button onClick={doClose} disabled={busy} className="btn-ink flex-1 px-4 py-2.5 text-[15px]">
+                    {busy ? "Closing…" : "Close month"}
+                  </button>
+                </div>
+              </div>
             ) : (
-              <><span className="t-nums font-medium">{money(preview.sharedOwedCents)}</span> in shared balances owed</>
-            )}
-          </span>
-          <span className="text-[var(--faint)]">→</span>
-        </button>
+              <button onClick={() => setConfirming(true)} className="btn-ink w-full py-2.5 text-[15px]">
+                Close {monthLabel(month)}
+              </button>
+            )
+          ) : (
+            <p className="text-center text-[13px] text-[var(--muted)]">
+              <span className="t-nums font-medium text-[var(--ink-2)]">{money(rta)}</span> still to assign before the
+              month can close.
+            </p>
+          )}
+          {failed && <p className="mt-2 text-center text-[13px] text-[var(--danger)]">{failed}</p>}
+        </div>
       )}
-      <p className="mt-3 text-[13px] text-[var(--muted)]">Applied at month-end once ready-to-assign is $0.</p>
-    </div>
+    </section>
   );
 }
 
 export function MonthNav({ month, onChange }: { month: string; onChange: (m: string) => void }) {
-  const current = new Date().toISOString().slice(0, 7);
-  const atCurrent = month >= current;
   const btn =
-    "flex h-11 w-11 items-center justify-center text-[20px] text-[var(--ink-2)] transition active:scale-95 disabled:opacity-40";
+    "flex h-11 w-11 items-center justify-center text-[20px] text-[var(--ink-2)] transition active:scale-95";
   return (
     <div className="mb-5 flex items-center justify-between">
       <button aria-label="Previous month" onClick={() => onChange(shiftMonth(month, -1))} className={btn}>
         ‹
       </button>
       <span className="text-[17px] font-medium">{monthLabel(month)}</span>
-      <button aria-label="Next month" onClick={() => onChange(shiftMonth(month, 1))} disabled={atCurrent} className={btn}>
+      <button aria-label="Next month" onClick={() => onChange(shiftMonth(month, 1))} className={btn}>
         ›
       </button>
     </div>
@@ -964,9 +1060,12 @@ export function PotSheet({ pot, groups, onClose, onSaved }: {
 }
 
 export function PotsTab({ month }: { month: string }) {
+  const current = new Date().toISOString().slice(0, 7);
+  const isFuture = month > current;
   const { data, error, loading, retry } = useApi<{ pots: Pot[]; rtaCents: number }>(`/api/pots?month=${month}`);
   const { data: trendData } = useApi<{ trend: TrendPoint[] }>("/api/trend");
   const [sheetPot, setSheetPot] = useState<Pot | "new" | null>(null);
+  const [scaffoldOpen, setScaffoldOpen] = useState(false);
   const pots = data?.pots ?? [];
   const groups = [...new Set(pots.map((p) => p.group))].sort();
 
@@ -974,7 +1073,14 @@ export function PotsTab({ month }: { month: string }) {
     <div>
       <div className="mb-5 flex items-baseline justify-between">
         <div className="font-serif-d text-[24px] font-medium">Pots</div>
-        <button onClick={() => setSheetPot("new")} className="btn-ink px-4 py-2 text-[14px]">Add pot</button>
+        <div className="flex gap-2">
+          {isFuture && !loading && !error && (
+            <button onClick={() => setScaffoldOpen(true)} className="btn-ink px-4 py-2 text-[14px]">
+              Scaffold month
+            </button>
+          )}
+          <button onClick={() => setSheetPot("new")} className="btn-ink px-4 py-2 text-[14px]">Add pot</button>
+        </div>
       </div>
       {loading ? (
         <div className="space-y-3">
@@ -984,9 +1090,13 @@ export function PotsTab({ month }: { month: string }) {
         <FetchError onRetry={retry} label="Couldn't load pots." />
       ) : (
         <>
+          <CloseSummaryCard month={month} onClosed={retry} />
           <PotsSummary month={month} pots={pots} rtaCents={data?.rtaCents ?? 0} trend={trendData?.trend ?? []} />
           <BudgetTable pots={pots} month={month} onAssigned={retry} onEditPot={(p) => setSheetPot(p)} />
         </>
+      )}
+      {scaffoldOpen && (
+        <ScaffoldSheet month={month} onClose={() => setScaffoldOpen(false)} onScaffolded={retry} />
       )}
       {sheetPot && (
         <PotSheet
@@ -1002,9 +1112,9 @@ export function PotsTab({ month }: { month: string }) {
 
 /* ---------- pots summary ---------- */
 
-// Compact month summary shown at the top of the Pots page: this month's
-// spend, ready-to-assign, top spending groups, and a six-month sparkline.
-// A summary, not a dashboard: a few glanceable numbers and one small visual.
+// Compact month summary shown on the Pots page: ready-to-assign, top
+// spending groups, and a six-month sparkline. The close card above it already
+// covers this month's spend, so this stays a summary, not a dashboard.
 export function TrendSpark({ trend }: { trend: TrendPoint[] }) {
   if (trend.length === 0) return null;
   const max = Math.max(...trend.map((t) => t.spent), 1);
@@ -1055,15 +1165,9 @@ export function PotsSummary({
 
   return (
     <section className="card mb-6 p-5" aria-label={`Summary for ${monthLabel(month)}`}>
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="text-[12px] text-[var(--muted)]">Spent in {monthLabel(month)}</div>
-          <div className="t-nums font-serif-d mt-0.5 text-[28px] font-medium leading-none">{money(spent)}</div>
-        </div>
-        <div className="text-right">
-          <div className="text-[12px] text-[var(--muted)]">Ready to assign</div>
-          <div className="t-nums mt-0.5 text-[20px] font-medium leading-none">{money(rtaCents)}</div>
-        </div>
+      <div>
+        <div className="text-[12px] text-[var(--muted)]">Ready to assign</div>
+        <div className="t-nums font-serif-d mt-0.5 text-[28px] font-medium leading-none">{money(rtaCents)}</div>
       </div>
       {top.length > 0 && (
         <div className="mt-4 border-t border-[var(--hairline)] pt-3">
@@ -1091,24 +1195,149 @@ export function PotsSummary({
   );
 }
 
-export function CloseTab({ month, onGo }: { month: string; onGo: (t: Tab) => void }) {
-  const { data: preview, error, loading, retry } = useApi<ClosePreviewData>(`/api/close-preview?month=${month}`);
+/* ---------- scaffold sheet ---------- */
+
+// Bulk-fill a future month's assignments from history. The user picks one of
+// two strategies, previews the per-pot values, then confirms. Income pots
+// always copy last month's planned income.
+type ScaffoldStrategy = "average_3mo" | "last_month";
+
+const SCAFFOLD_OPTIONS: { value: ScaffoldStrategy; label: string }[] = [
+  { value: "average_3mo", label: "3-month average" },
+  { value: "last_month", label: "Last month" },
+];
+
+interface ScaffoldLine {
+  potId: number;
+  name: string;
+  cents: number;
+  income: boolean;
+}
+
+export function ScaffoldSheet({ month, onClose, onScaffolded }: {
+  month: string;
+  onClose: () => void;
+  onScaffolded: () => void;
+}) {
+  const [strategy, setStrategy] = useState<ScaffoldStrategy>("average_3mo");
+  const [lines, setLines] = useState<ScaffoldLine[] | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(true);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  const loadPreview = async (s: ScaffoldStrategy) => {
+    setLoadingPreview(true);
+    setFailed(null);
+    try {
+      const r = await fetch("/api/assign/scaffold", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ month, strategy: s, dryRun: true }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
+      setLines(d.lines);
+    } catch (e) {
+      setFailed((e as Error).message);
+    }
+    setLoadingPreview(false);
+  };
+
+  useEffect(() => {
+    setConfirming(false);
+    loadPreview(strategy);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [strategy]);
+
+  const apply = async () => {
+    setBusy(true);
+    setFailed(null);
+    try {
+      const r = await fetch("/api/assign/scaffold", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ month, strategy }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
+      onScaffolded();
+      onClose();
+    } catch (e) {
+      setFailed((e as Error).message);
+    }
+    setBusy(false);
+  };
+
+  const total = (lines ?? []).reduce((a, l) => a + l.cents, 0);
 
   return (
-    <div>
-      <div className="mb-5 font-serif-d text-[24px] font-medium">Close</div>
-      {loading ? (
-        <div className="card space-y-2.5 p-5">
-          <Skeleton className="h-5 w-2/3" />
-          <Skeleton className="h-5 w-1/2" />
-          <Skeleton className="h-5 w-3/5" />
-        </div>
-      ) : error || !preview ? (
-        <FetchError onRetry={retry} label="Couldn't load the close preview." />
-      ) : (
-        <CloseCard preview={preview} onGo={onGo} />
-      )}
-    </div>
+    <Sheet label={`Scaffold ${monthLabel(month)}`} onClose={onClose}>
+      <div className="mb-1.5 text-[17px] font-semibold">Scaffold {monthLabel(month)}</div>
+      <p className="mb-3 text-[14px] text-[var(--muted)]">
+        Fill every pot from its assigned history. Income pots copy last month's planned income.
+      </p>
+      <Segmented options={SCAFFOLD_OPTIONS} value={strategy} onChange={setStrategy} ariaLabel="Scaffold strategy" />
+      <div className="mt-4">
+        {loadingPreview ? (
+          <div className="space-y-2">
+            {[0, 1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-6" />
+            ))}
+          </div>
+        ) : failed ? (
+          <FetchError onRetry={() => loadPreview(strategy)} label="Couldn't preview the scaffold." />
+        ) : (
+          <>
+            <ul className="max-h-64 space-y-1.5 overflow-y-auto">
+              {(lines ?? []).map((l) => (
+                <li key={l.potId} className="flex items-baseline justify-between gap-3 text-[14px]">
+                  <span className="truncate text-[var(--ink-2)]">
+                    {l.name}
+                    {l.income && <span className="text-[var(--faint)]"> · planned</span>}
+                  </span>
+                  <span className="t-nums shrink-0 font-medium">{money(l.cents)}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-2 flex justify-between border-t border-[var(--hairline)] pt-2 text-[14px]">
+              <span className="text-[var(--muted)]">Total</span>
+              <span className="t-nums font-semibold">{money(total)}</span>
+            </div>
+          </>
+        )}
+      </div>
+      <div className="mt-4 border-t border-[var(--hairline)] pt-4">
+        {confirming ? (
+          <div>
+            <p className="text-[14px] text-[var(--ink-2)]">
+              Set these assignments for {monthLabel(month)}? This overwrites any values already set.
+            </p>
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={() => setConfirming(false)}
+                disabled={busy}
+                className="flex-1 rounded-[var(--r-md)] border border-[var(--hairline-strong)] px-4 py-2.5 text-[15px] font-medium text-[var(--ink-2)] transition active:scale-[0.99]"
+              >
+                Cancel
+              </button>
+              <button onClick={apply} disabled={busy} className="btn-ink flex-1 px-4 py-2.5 text-[15px]">
+                {busy ? "Scaffolding…" : "Confirm scaffold"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirming(true)}
+            disabled={!lines || loadingPreview}
+            className="btn-ink w-full py-2.5 text-[15px]"
+          >
+            Scaffold {(lines ?? []).length} pots
+          </button>
+        )}
+        {failed && !loadingPreview && <p className="mt-2 text-center text-[13px] text-[var(--danger)]">{failed}</p>}
+      </div>
+    </Sheet>
   );
 }
 
@@ -2013,13 +2242,12 @@ export function TransactionsTab({ month }: { month: string }) {
 
 /* ---------- app ---------- */
 
-export type Tab = "overview" | "pots" | "transactions" | "close" | "sharing" | "review" | "accounts";
+export type Tab = "overview" | "pots" | "transactions" | "sharing" | "review" | "accounts";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "pots", label: "Pots" },
   { id: "transactions", label: "Transactions" },
-  { id: "close", label: "Close" },
   { id: "sharing", label: "Sharing" },
   { id: "review", label: "Review" },
   { id: "accounts", label: "Accounts" },
@@ -2027,10 +2255,10 @@ const TABS: { id: Tab; label: string }[] = [
 
 const tabLabel = (id: Tab) => TABS.find((t) => t.id === id)?.label ?? id;
 
-const MONTH_TABS: Tab[] = ["overview", "pots", "transactions", "close"];
+const MONTH_TABS: Tab[] = ["overview", "pots", "transactions"];
 
-// Mobile bottom bar: four tabs plus a "More" sheet for the rest.
-const MOBILE_TABS: Tab[] = ["overview", "pots", "transactions", "close"];
+// Mobile bottom bar: three tabs plus a "More" sheet for the rest.
+const MOBILE_TABS: Tab[] = ["overview", "pots", "transactions"];
 const SHEET_TABS: Tab[] = ["sharing", "review", "accounts"];
 
 /* Icon-only mobile tab bar: one clean inline SVG per tab, no icon library.
@@ -2059,10 +2287,6 @@ function TabIcon({ id }: { id: Tab | "more" }) {
     case "transactions":
       return (
         <svg {...common}><path d="M6 3.5h12V21l-2.2-1.6-1.8 1.6-2-1.6-2 1.6-1.8-1.6L6 21V3.5Z" /><path d="M9.5 8.5h5M9.5 12h5" /></svg>
-      );
-    case "close":
-      return (
-        <svg {...common}><circle cx="12" cy="12" r="8.5" /><path d="M8.5 12.3l2.4 2.4 4.6-5.4" /></svg>
       );
     default:
       return (
@@ -2098,7 +2322,8 @@ export default function App() {
       .catch(() => {});
   }, [refreshKey, tab]);
 
-  // Near month-end with money still unassigned, the Close tab earns a dot.
+  // Near month-end with money still unassigned, the Pots tab earns a dot:
+  // the close card now lives there.
   const now = new Date();
   const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
   const closeAlert = now.getDate() >= lastDay - 2 && (attention?.rtaCents ?? 0) > 0;
@@ -2111,7 +2336,7 @@ export default function App() {
 
   const navBadge = (id: Tab) => {
     if (id === "review" && pendingCount > 0) return <CountBadge n={pendingCount} className="ml-auto" />;
-    if (id === "close" && closeAlert) return <span className="ml-auto h-2 w-2 rounded-full bg-[var(--warning)]" />;
+    if (id === "pots" && closeAlert) return <span className="ml-auto h-2 w-2 rounded-full bg-[var(--warning)]" />;
     return null;
   };
 
@@ -2157,8 +2382,6 @@ export default function App() {
 
           {tab === "transactions" && <TransactionsTab key={`t-${refreshKey}-${month}`} month={month} />}
 
-          {tab === "close" && <CloseTab key={`c-${refreshKey}-${month}`} month={month} onGo={go} />}
-
           {tab === "sharing" && <SharingTab key={`s-${refreshKey}`} />}
 
           {tab === "review" && (
@@ -2182,7 +2405,7 @@ export default function App() {
 
       {/* mobile bottom tab bar: icon-only, same tabs in the same order */}
       <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--hairline)] bg-[var(--surface)] pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Primary">
-        <div className="grid grid-cols-5">
+        <div className="grid grid-cols-4">
           {MOBILE_TABS.map((id) => {
             const active = tab === id;
             return (
@@ -2197,7 +2420,7 @@ export default function App() {
               >
                 <span className={`h-1.5 w-1.5 rounded-full ${active ? "bg-[var(--ink)]" : "bg-transparent"}`} />
                 <TabIcon id={id} />
-                {id === "close" && closeAlert && (
+                {id === "pots" && closeAlert && (
                   <span className="absolute right-4 top-3 h-2 w-2 rounded-full bg-[var(--warning)]" />
                 )}
               </button>

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
-import { closeMonth, wireframeTarget, closePreview, applyClose, shiftMonth } from "../src/close";
+import { closeMonth, wireframeTarget, closePreview, applyClose, shiftMonth, closeEquation } from "../src/close";
 import { assignToPot } from "../src/assign";
 import { rtaCents, assignedTotal } from "../src/queries";
 
@@ -137,5 +137,38 @@ describe("closePreview / applyClose (live data)", () => {
     const payroll = p.pots.find((l) => l.name === "Payroll")!;
     expect(payroll.assignable).toBe(false);
     expect(payroll.wireframeCents).toBe(0);
+  });
+});
+
+describe("close card equation", () => {
+  test("income minus spend minus savings nets to zero", () => {
+    for (const preview of [
+      { inflowsCents: 512000, spentCents: 272123 },
+      { inflowsCents: 0, spentCents: 0 },
+      { inflowsCents: 300000, spentCents: 300000 },
+    ]) {
+      const { incomeCents, spendCents, savingsCents } = closeEquation(preview);
+      expect(incomeCents).toBe(preview.inflowsCents);
+      expect(spendCents).toBe(preview.spentCents);
+      expect(savingsCents).toBe(preview.inflowsCents - preview.spentCents);
+      expect(incomeCents - spendCents - savingsCents).toBe(0);
+    }
+  });
+
+  test("preview reports closed once the close is applied", () => {
+    const db = new Database(":memory:");
+    db.exec(readFileSync("src/schema.sql", "utf8"));
+    db.exec(`INSERT INTO accounts (name, type) VALUES ('Chequing','chequing')`);
+    db.exec(`INSERT INTO pots (name, pot_group, target_type, target_cents) VALUES ('Housing','essentials','fixed',300000)`);
+    const t = db.query(
+      "INSERT INTO transactions (date, account_id, amount_cents, description, source, entered_by, status, cleared) VALUES ('2026-09-01', 1, 500000, 't', 'manual', 'agent', 'confirmed', 'cleared') RETURNING id"
+    ).get() as { id: number };
+    db.query("INSERT INTO splits (transaction_id, pot_id, owner, amount_cents) VALUES (?, 1, 'user', 500000)").run(t.id);
+    expect(closePreview(db, "2026-09").closed).toBe(false);
+    assignToPot(db, "2026-09", 1, 500000); // every dollar assigned: RTA = 0
+    applyClose(db, closePreview(db, "2026-09"));
+    expect(closePreview(db, "2026-09").closed).toBe(true);
+    // other months stay open
+    expect(closePreview(db, "2026-08").closed).toBe(false);
   });
 });

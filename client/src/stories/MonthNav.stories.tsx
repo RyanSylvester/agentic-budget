@@ -10,7 +10,7 @@ const meta: Meta<typeof MonthNav> = {
     docs: {
       description: {
         component:
-          "The month stepper used above the budget table. Borderless chevrons move one month at a time; the forward chevron disables on the current month.",
+          "The month stepper used above the budget table. Borderless chevrons move one month at a time, forward into future months as well as back.",
       },
     },
   },
@@ -19,12 +19,10 @@ const meta: Meta<typeof MonthNav> = {
 export default meta;
 type Story = StoryObj<typeof MonthNav>;
 
-// NOTE: "current month" is derived from the real clock, so the disabled
-// next-button state only shows when the story month matches today.
 export const CurrentMonth: Story = {
   args: { month: new Date().toISOString().slice(0, 7) },
   parameters: {
-    docs: { description: { story: "On the current month the forward chevron is disabled." } },
+    docs: { description: { story: "The forward chevron stays active on the current month, opening next month for scaffolding." } },
   },
 };
 

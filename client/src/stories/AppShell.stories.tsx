@@ -41,7 +41,7 @@ const meta: Meta<typeof App> = {
     docs: {
       description: {
         component:
-          "The whole app: sidebar navigation, month context, and all seven tabs, with every API route mocked. Use these stories to click through the full experience and to capture screens.",
+          "The whole app: sidebar navigation, month context, and all six tabs, with every API route mocked. Use these stories to click through the full experience and to capture screens.",
       },
     },
   },
@@ -79,16 +79,6 @@ export const Transactions: Story = {
   play: async ({ canvasElement }) => {
     await goToTab(canvasElement, "Transactions");
     await within(canvasElement).findByText("Mock grocery run");
-  },
-};
-
-export const Close: Story = {
-  parameters: {
-    docs: { description: { story: "Navigating to the Close tab. (Interaction test.)" } },
-  },
-  play: async ({ canvasElement }) => {
-    await goToTab(canvasElement, "Close");
-    await within(canvasElement).findByText("How the month closes");
   },
 };
 

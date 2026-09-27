@@ -112,6 +112,7 @@ export function makeClosePreview(over: Partial<ClosePreviewData> = {}): ClosePre
     movedToSavingsCents: 503394,
     sharedOwedCents: 0,
     sharedOwedBy: [],
+    closed: false,
     ...over,
   };
 }

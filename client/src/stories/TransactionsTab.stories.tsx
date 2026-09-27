@@ -193,3 +193,25 @@ export const DeleteConfirmation: Story = {
     await within(canvasElement).findByText("Delete this transaction?");
   },
 };
+
+const nowTx = new Date();
+const FUTURE_TX = `${nowTx.getFullYear() + (nowTx.getMonth() === 11 ? 1 : 0)}-${String(
+  nowTx.getMonth() === 11 ? 1 : nowTx.getMonth() + 2
+).padStart(2, "0")}`;
+
+export const FutureMonth: Story = {
+  args: { month: FUTURE_TX },
+  parameters: {
+    mockApi: {
+      get: {
+        [`/api/transactions?month=${FUTURE_TX}`]: { month: FUTURE_TX, transactions: [] },
+        [`/api/pots?month=${FUTURE_TX}`]: { pots: fixturePots },
+        "/api/accounts": { accounts: fixtureAccounts },
+        "/api/contacts": { contacts: fixtureContacts },
+      },
+    } satisfies MockApiConfig,
+    docs: {
+      description: { story: "A future month with no transactions yet: the empty state, ready for the first entry." },
+    },
+  },
+};
