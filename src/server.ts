@@ -7,14 +7,15 @@ import { openDb } from "./db";
 import { monthSpend, potSpend, recentTransactions, spendTrend } from "./queries";
 import { applySettlement, lillyCredit, lillyOwed } from "./settle";
 import { reconcile, suggestClear } from "./reconcile";
+import { closePreview } from "./close";
 
 const app = new Hono();
 
 app.get("/api/overview", (c) => {
   const db = openDb();
-  const month = new Date().toISOString().slice(0, 7);
+  const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
   const pending = db.query("SELECT COUNT(*) AS n FROM transactions WHERE status = 'pending_review'").get() as { n: number };
-  return c.json({ month, confirmedSpendCents: monthSpend(db, month), pendingCount: pending.n, recent: recentTransactions(db) });
+  return c.json({ month, confirmedSpendCents: monthSpend(db, month), pendingCount: pending.n, recent: recentTransactions(db, 10, month) });
 });
 
 app.get("/api/review", (c) => {
@@ -113,6 +114,14 @@ app.get("/api/pots", (c) => {
 app.get("/api/trend", (c) => {
   const db = openDb();
   return c.json({ trend: spendTrend(db) });
+});
+
+/** Read-only month-end close preview. The agent applies the close after
+ *  Ryan's review; this endpoint never writes. */
+app.get("/api/close-preview", (c) => {
+  const db = openDb();
+  const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
+  return c.json(closePreview(db, month));
 });
 
 // What Lilly owes Ryan: her outstanding shares, oldest first, grouped by pot.

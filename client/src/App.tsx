@@ -6,7 +6,10 @@ interface Txn {
   id: number;
   date: string;
   description: string;
-  amount_cents: number;
+  ryan_cents: number;
+  amount_cents?: number; // present on /api/review items only
+  is_transfer: number;
+  split_with_lilly: number;
   source: string;
   status: string;
   lilly_cents: number;
@@ -18,6 +21,16 @@ interface Overview {
   confirmedSpendCents: number;
   pendingCount: number;
   recent: Txn[];
+}
+
+interface ClosePreviewData {
+  month: string;
+  nextMonth: string;
+  inflowsCents: number;
+  spentCents: number;
+  rtaBeforeCents: number;
+  movedToSavingsCents: number;
+  lillyOwedCents: number;
 }
 
 interface Account {
@@ -87,7 +100,7 @@ function ProgressBar({ pct }: { pct: number }) {
 
 /* ---------- overview pieces ---------- */
 
-function Hero({ overview }: { overview: Overview | null }) {
+function Hero({ overview, isCurrent }: { overview: Overview | null; isCurrent: boolean }) {
   const today = new Date();
   const day = today.getDate();
   const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
@@ -102,35 +115,120 @@ function Hero({ overview }: { overview: Overview | null }) {
         {overview ? money(spent) : "…"}
       </div>
       <div className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-        spent so far · <span className="tabular-nums">{money(Math.round(daily))}/day</span> · day {day} of {daysInMonth}
+        {isCurrent ? (
+          <>spent so far · <span className="tabular-nums">{money(Math.round(daily))}/day</span> · day {day} of {daysInMonth}</>
+        ) : (
+          <>final for the month</>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function PotCard({ p }: { p: Pot }) {
+  const pct = p.targetCents > 0 ? (p.spentCents / p.targetCents) * 100 : 0;
+  const left = p.targetCents - p.spentCents;
+  return (
+    <Card className="p-4">
+      <div className="truncate text-sm font-medium">{p.name}</div>
+      <div className="mt-1 text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
+        <span className="text-zinc-900 dark:text-zinc-100">{money(p.spentCents)}</span> of {money(p.targetCents)}
+        {p.lillyCents > 0 && <span className="text-zinc-400"> · {money(p.lillyCents)} Lilly's share</span>}
+      </div>
+      <div className="mt-2"><ProgressBar pct={pct} /></div>
+      <div className={`mt-1.5 text-xs tabular-nums ${left < 0 ? "text-rose-500" : "text-zinc-400"}`}>
+        {left < 0 ? `${money(left)} over` : `${money(left)} left`}
       </div>
     </Card>
   );
 }
 
 function PotsGrid({ pots }: { pots: Pot[] }) {
+  const [open, setOpen] = useState<Record<string, boolean>>({});
   if (pots.length === 0)
     return <p className="text-sm text-zinc-500">No pots yet. They'll appear here once the budget is set up.</p>;
+
+  const groups: { name: string; pots: Pot[] }[] = [];
+  for (const p of pots) {
+    const g = groups.find((x) => x.name === p.group);
+    if (g) g.pots.push(p);
+    else groups.push({ name: p.group, pots: [p] });
+  }
+
   return (
-    <div className="grid grid-cols-2 gap-3">
-      {pots.map((p) => {
-        const pct = p.targetCents > 0 ? (p.spentCents / p.targetCents) * 100 : 0;
-        const left = p.targetCents - p.spentCents;
+    <div className="space-y-4">
+      {groups.map((g) => {
+        const spent = g.pots.reduce((a, p) => a + p.spentCents, 0);
+        const target = g.pots.reduce((a, p) => a + p.targetCents, 0);
+        const isOpen = open[g.name] ?? spent > 0;
         return (
-          <Card key={p.id} className="p-4">
-            <div className="truncate text-sm font-medium">{p.name}</div>
-            <div className="mt-1 text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
-              <span className="text-zinc-900 dark:text-zinc-100">{money(p.spentCents)}</span> of {money(p.targetCents)}
-              {p.lillyCents > 0 && <span className="text-zinc-400"> · {money(p.lillyCents)} Lilly's share</span>}
-            </div>
-            <div className="mt-2"><ProgressBar pct={pct} /></div>
-            <div className={`mt-1.5 text-xs tabular-nums ${left < 0 ? "text-rose-500" : "text-zinc-400"}`}>
-              {left < 0 ? `${money(left)} over` : `${money(left)} left`}
-            </div>
-          </Card>
+          <div key={g.name}>
+            <button
+              onClick={() => setOpen((o) => ({ ...o, [g.name]: !isOpen }))}
+              className="mb-2 flex w-full items-center justify-between text-left"
+            >
+              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-400 dark:text-zinc-500">
+                {g.name}
+              </span>
+              <span className="text-xs tabular-nums text-zinc-400">
+                {money(spent)}{target > 0 ? ` of ${money(target)}` : ""} · {isOpen ? "▾" : "▸"}
+              </span>
+            </button>
+            {isOpen && (
+              <div className="grid grid-cols-2 gap-3">
+                {g.pots.map((p) => <PotCard key={p.id} p={p} />)}
+              </div>
+            )}
+          </div>
         );
       })}
     </div>
+  );
+}
+
+function RecentActivity({ txns }: { txns: Txn[] }) {
+  if (txns.length === 0) return null;
+  return (
+    <Card>
+      <SectionLabel>Recent activity</SectionLabel>
+      <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+        {txns.slice(0, 8).map((t) => (
+          <li key={t.id} className="flex items-center justify-between gap-3 py-2">
+            <div className="min-w-0">
+              <div className="truncate text-sm">{t.description}</div>
+              <div className="text-xs text-zinc-400">
+                {t.date}
+                {t.is_transfer ? " · transfer" : ""}
+                {t.split_with_lilly ? " · split with Lilly" : ""}
+              </div>
+            </div>
+            <span className={`shrink-0 text-sm tabular-nums ${t.ryan_cents < 0 ? "" : "text-emerald-600 dark:text-emerald-400"}`}>
+              {money(t.ryan_cents)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+function CloseCard({ preview }: { preview: ClosePreviewData | null }) {
+  if (!preview) return null;
+  return (
+    <Card>
+      <SectionLabel>Month-end preview</SectionLabel>
+      <div className="space-y-1.5 text-sm">
+        <div className="flex justify-between"><span className="text-zinc-500">Inflows</span><span className="tabular-nums">{money(preview.inflowsCents)}</span></div>
+        <div className="flex justify-between"><span className="text-zinc-500">Spent</span><span className="tabular-nums">{money(preview.spentCents)}</span></div>
+        <div className="flex justify-between font-medium">
+          <span>Ready to assign</span><span className="tabular-nums">{money(preview.rtaBeforeCents)}</span>
+        </div>
+        <div className="flex justify-between text-xs text-zinc-500">
+          <span>→ moves to secondary savings at close</span><span className="tabular-nums">{money(preview.movedToSavingsCents)}</span>
+        </div>
+      </div>
+      <p className="mt-3 text-xs text-zinc-400">The agent applies the close at month-end after your review.</p>
+    </Card>
   );
 }
 
@@ -156,28 +254,67 @@ function Trend({ data }: { data: TrendPoint[] }) {
   );
 }
 
-function OverviewTab({ onGo }: { onGo: (t: "review" | "accounts") => void }) {
+function shiftMonth(ym: string, delta: number) {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function MonthNav({ month, onChange }: { month: string; onChange: (m: string) => void }) {
+  const current = new Date().toISOString().slice(0, 7);
+  const atCurrent = month >= current;
+  return (
+    <div className="mb-4 flex items-center justify-between">
+      <button
+        onClick={() => onChange(shiftMonth(month, -1))}
+        className="rounded-full border border-zinc-200/80 bg-white px-3 py-1.5 text-sm text-zinc-500 shadow-sm transition hover:text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:text-zinc-100"
+      >
+        ← {monthLabel(shiftMonth(month, -1)).split(" ")[0]}
+      </button>
+      <span className="text-sm font-medium tabular-nums">{monthLabel(month)}</span>
+      <button
+        onClick={() => onChange(shiftMonth(month, 1))}
+        disabled={atCurrent}
+        className="rounded-full border border-zinc-200/80 bg-white px-3 py-1.5 text-sm text-zinc-500 shadow-sm transition hover:text-zinc-900 disabled:opacity-40 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:text-zinc-100"
+      >
+        {monthLabel(shiftMonth(month, 1)).split(" ")[0]} →
+      </button>
+    </div>
+  );
+}
+
+function OverviewTab({ month, onGo }: { month: string; onGo: (t: "review" | "accounts") => void }) {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [pots, setPots] = useState<Pot[]>([]);
   const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [close, setClose] = useState<ClosePreviewData | null>(null);
+
+  const current = new Date().toISOString().slice(0, 7);
 
   useEffect(() => {
-    fetch("/api/overview").then((r) => r.json()).then(setOverview);
-    fetch("/api/pots").then((r) => r.json()).then((d) => setPots(d.pots));
+    setOverview(null);
+    fetch(`/api/overview?month=${month}`).then((r) => r.json()).then(setOverview);
+    fetch(`/api/pots?month=${month}`).then((r) => r.json()).then((d) => setPots(d.pots));
+    fetch(`/api/close-preview?month=${month}`).then((r) => r.json()).then(setClose);
+  }, [month]);
+
+  useEffect(() => {
     fetch("/api/trend").then((r) => r.json()).then((d) => setTrend(d.trend));
     fetch("/api/accounts").then((r) => r.json()).then((d) => setAccounts(d.accounts));
   }, []);
 
   return (
     <div className="space-y-4">
-      <Hero overview={overview} />
+      <Hero overview={overview} isCurrent={month === current} />
       <ClickableAttention overview={overview} accounts={accounts} onGo={onGo} />
       <LillyCard />
       <div>
         <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-400 dark:text-zinc-500">Pots</div>
         <PotsGrid pots={pots} />
       </div>
+      <RecentActivity txns={overview?.recent ?? []} />
+      <CloseCard preview={close} />
       <Trend data={trend} />
     </div>
   );
@@ -448,6 +585,7 @@ type Tab = "overview" | "review" | "accounts";
 export default function App() {
   const [tab, setTab] = useState<Tab>("overview");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">
@@ -467,7 +605,12 @@ export default function App() {
           </nav>
         </header>
 
-        {tab === "overview" && <OverviewTab key={refreshKey} onGo={setTab} />}
+        {tab === "overview" && (
+          <>
+            <MonthNav month={month} onChange={setMonth} />
+            <OverviewTab key={`${refreshKey}-${month}`} month={month} onGo={setTab} />
+          </>
+        )}
 
         {tab === "review" && (
           <Card>

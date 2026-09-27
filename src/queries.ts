@@ -43,15 +43,23 @@ export function spendTrend(db: Database, limit = 6): { month: string; spent: num
   return rows.reverse();
 }
 
-/** Recent transactions with Ryan's share of each. */
-export function recentTransactions(db: Database, limit = 10) {
+/** Recent confirmed transactions with Ryan's share of each. Optional month filter (YYYY-MM). */
+export function recentTransactions(db: Database, limit = 10, month?: string) {
+  const params: (string | number)[] = [];
+  let where = `WHERE t.status = 'confirmed'`;
+  if (month) {
+    where += ` AND substr(t.date, 1, 7) = ?`;
+    params.push(month);
+  }
+  params.push(limit);
   return db.query(
-    `SELECT t.id, t.date, t.description,
+    `SELECT t.id, t.date, t.description, t.is_transfer,
             COALESCE(SUM(CASE WHEN s.owner = 'ryan' THEN s.amount_cents ELSE 0 END), 0) AS ryan_cents,
             CASE WHEN SUM(CASE WHEN s.owner = 'lilly' THEN 1 ELSE 0 END) > 0 THEN 1 ELSE 0 END AS split_with_lilly
      FROM transactions t LEFT JOIN splits s ON s.transaction_id = t.id
-     GROUP BY t.id ORDER BY t.id DESC LIMIT ?`
-  ).all(limit);
+     ${where}
+     GROUP BY t.id ORDER BY t.date DESC, t.id DESC LIMIT ?`
+  ).all(...params);
 }
 
 /** Ryan's confirmed inflows for a month, in cents (positive).
