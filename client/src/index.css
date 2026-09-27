@@ -105,6 +105,17 @@
   ::selection {
     background: var(--accent-soft);
   }
+  /* Functional cursors. The Tailwind v4 preflight leaves buttons on the
+     default arrow, which reads as broken across nav, rows, and cells. */
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  input[type="text"] {
+    cursor: text;
+  }
 }
 
 @layer components {

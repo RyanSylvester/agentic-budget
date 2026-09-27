@@ -226,6 +226,8 @@ export function Hero({ overview, isCurrent, loading }: { overview: Overview | nu
 
 // Inline assign control: the Assigned cell is the button. Click to edit,
 // Enter commits, Escape or click-away cancels. The control is never hidden.
+// Idle and editing states share an identical box (w-24, same padding and
+// border width) so toggling never shifts the surrounding layout.
 export function AssignCell({ pot, month, onAssigned }: { pot: Pot; month: string; onAssigned: () => void }) {
   const [editing, setEditing] = useState(false);
   const [amt, setAmt] = useState("");
@@ -261,7 +263,7 @@ export function AssignCell({ pot, month, onAssigned }: { pot: Pot; month: string
           setEditing(true);
         }}
         title={`Assign to ${pot.name}`}
-        className="t-nums rounded-[var(--r-sm)] px-2 py-2 text-left text-[15px] text-[var(--ink)] underline decoration-[var(--hairline-strong)] decoration-dotted underline-offset-4 transition hover:bg-[var(--surface)] active:scale-95 sm:py-1"
+        className="t-nums w-24 rounded-[var(--r-sm)] border border-transparent px-2 py-1.5 text-left text-[15px] text-[var(--ink)] underline decoration-[var(--hairline-strong)] decoration-dotted underline-offset-4 transition hover:bg-[var(--surface)] active:scale-95"
       >
         {money(pot.assignedCents ?? 0)}
       </button>
@@ -1317,7 +1319,7 @@ export default function App() {
       {/* mobile "More" bottom sheet */}
       {sheetOpen && (
         <div className="fixed inset-0 z-30 md:hidden" role="dialog" aria-label="More">
-          <div className="absolute inset-0 bg-black/30" onClick={() => setSheetOpen(false)} />
+          <div className="absolute inset-0 cursor-pointer bg-black/30" onClick={() => setSheetOpen(false)} />
           <div className="absolute inset-x-0 bottom-0 rounded-t-[var(--r-lg)] border-t border-[var(--hairline)] bg-[var(--surface)] p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
             {SHEET_TABS.map((id) => (
               <button
