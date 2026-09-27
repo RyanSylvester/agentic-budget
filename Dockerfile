@@ -14,9 +14,9 @@ RUN bun install
 
 # Client deps + build
 COPY client/package.json client/bun.lock ./client/
-RUN bun --cwd client install
+RUN cd client && bun install
 COPY client ./client
-RUN bun --cwd client run build
+RUN cd client && bun run build
 
 FROM oven/bun:1-slim
 WORKDIR /app
