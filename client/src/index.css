@@ -6,43 +6,47 @@
 :root {
   color-scheme: light dark;
 
-  --bg: #faf9f5;
-  --bg-sunken: #f1eee4;
+  --bg: #f7f7f5;
+  --bg-sunken: #f0efeb;
   --surface: #ffffff;
 
-  --ink: #141413;
-  --ink-2: #44423c;
-  --muted: #8b887c;
-  --faint: #b7b3a6;
+  --ink: #161616;
+  --ink-2: #4c4c49;
+  --muted: #86867f;
+  --faint: #babab3;
 
-  --hairline: #e7e3d5;
-  --hairline-strong: #d8d3c0;
+  --hairline: #e6e6e1;
+  --hairline-strong: #d6d6d0;
 
-  --accent: #1f6b43;
-  --accent-soft: #e3efe7;
+  --accent: #1e6b42;
+  --accent-soft: #e2eee6;
   --on-accent: #ffffff;
 
   --success: #2e9e5b;
-  --warning: #b97a1b;
-  --warning-soft: #f6ecdb;
+  --warning: #9c6b23;
+  --warning-soft: #f4ebda;
   --danger: #be3b32;
   --danger-soft: #f8e9e5;
 
   --r-sm: 8px;
   --r-md: 12px;
-  --r-lg: 18px;
+  --r-lg: 14px;
   --r-pill: 999px;
 
-  /* Warm categorical ramp for charts. Components reference these tokens,
-     never raw colors, so dark mode keeps working. */
-  --chart-1: #1f6b43;
-  --chart-2: #b97a1b;
-  --chart-3: #be5a32;
-  --chart-4: #c9a227;
-  --chart-5: #7a8b3f;
-  --chart-6: #8a6d4b;
-  --chart-7: #4f7f6b;
-  --chart-8: #a09c8e;
+  /* Neutral categorical ramp for charts, largest segment first.
+     Components reference these tokens, never raw colors, so dark mode
+     keeps working. */
+  --chart-1: #1e6b42;
+  --chart-2: #2b2b28;
+  --chart-3: #6f6f68;
+  --chart-4: #a9a9a0;
+  --chart-5: #d8d8d0;
+  --chart-6: #5b7a8c;
+  --chart-7: #c9c9c4;
+  --chart-8: #8f8f88;
+
+  /* Six-month spend bars: solid ink in both schemes. */
+  --bar: #1a1a1a;
 
   --shadow-card: 0 1px 2px rgba(20, 20, 19, 0.05);
   --shadow-elev: 0 12px 32px rgba(20, 20, 19, 0.1);
@@ -53,39 +57,41 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #131210;
-    --bg-sunken: #0d0c0b;
-    --surface: #1c1b18;
+    --bg: #141412;
+    --bg-sunken: #1a1a17;
+    --surface: #1e1e1b;
 
-    --ink: #f4f1e9;
-    --ink-2: #d8d4c8;
-    --muted: #a09c8e;
-    --faint: #6e6a5e;
+    --ink: #f4f4f0;
+    --ink-2: #d8d8d2;
+    --muted: #9b9b94;
+    --faint: #6a6a63;
 
-    --hairline: rgba(244, 241, 233, 0.1);
-    --hairline-strong: rgba(244, 241, 233, 0.18);
+    --hairline: rgba(244, 244, 240, 0.1);
+    --hairline-strong: rgba(244, 244, 240, 0.18);
 
-    --accent: #4cab7c;
-    --accent-soft: rgba(76, 171, 124, 0.16);
-    --on-accent: #0d0c0b;
+    --accent: #55b37e;
+    --accent-soft: rgba(85, 179, 126, 0.16);
+    --on-accent: #0f120f;
 
     --success: #3fba6f;
-    --warning: #d99a3d;
-    --warning-soft: rgba(217, 154, 61, 0.14);
+    --warning: #c08a3e;
+    --warning-soft: rgba(192, 138, 62, 0.14);
     --danger: #d4695f;
     --danger-soft: rgba(212, 105, 95, 0.14);
 
     --shadow-card: none;
     --shadow-elev: 0 12px 32px rgba(0, 0, 0, 0.4);
 
-    --chart-1: #4cab7c;
-    --chart-2: #d99a3d;
-    --chart-3: #d4695f;
-    --chart-4: #d9b93d;
-    --chart-5: #9aa856;
-    --chart-6: #b08d5f;
-    --chart-7: #6fa08c;
-    --chart-8: #8b877a;
+    --chart-1: #55b37e;
+    --chart-2: #ecece6;
+    --chart-3: #a9a9a0;
+    --chart-4: #76766e;
+    --chart-5: #4c4c46;
+    --chart-6: #7e9bb0;
+    --chart-7: #3b3b37;
+    --chart-8: #55554f;
+
+    --bar: #edede8;
   }
 }
 
@@ -121,11 +127,6 @@
     border: 1px solid var(--hairline);
     border-radius: var(--r-lg);
     box-shadow: var(--shadow-card);
-  }
-  .pill-active {
-    /* Always a black pill, in both color schemes. */
-    background: #161513;
-    color: #faf9f5;
   }
   .btn-ink {
     background: var(--ink);
