@@ -24,6 +24,7 @@
  *    bun src/cli.ts sinking list [--month 2026-10]    # schedules with the derived monthly contribution
  *    bun src/cli.ts sinking paid --pot "Property tax" # roll the due date forward one cadence
  *    bun src/cli.ts sinking remove --pot "Property tax"
+ *    bun src/cli.ts migration new add_water_bill   # stamp a new timestamped migration file (version comes from the clock)
  *    bun src/cli.ts serve             # start the dashboard
  */
 import { openDb } from "./db";
@@ -34,10 +35,11 @@ import { assignToPot } from "./assign";
 import { contactBalances, createContact, deleteContact, listContacts, renameContact } from "./contacts";
 import { createPot, deletePot, updatePot } from "./pots";
 import { createSchedule, listSchedules, markPaid, removeSchedule, sinkingStatus } from "./sinking";
+import { createMigration } from "./migrations";
 import { assertSplitsSum, resolvePotId, validDate, validMonth, fmtCents } from "./money";
 
 function usage(): never {
-  console.error("usage: budget <record|assign|recategorize|void|pot|contact|settle|review|reconcile|close|sinking|serve> [options]");
+  console.error("usage: budget <record|assign|recategorize|void|pot|contact|settle|review|reconcile|close|sinking|migration|serve> [options]");
   process.exit(2);
 }
 
@@ -368,6 +370,19 @@ if (cmd === "record") {
     try {
       removeSchedule(db, pot!);
       console.log(`schedule removed for "${pot}"`);
+    } catch (e) {
+      fail((e as Error).message);
+    }
+  } else {
+    usage();
+  }
+} else if (cmd === "migration") {
+  const [sub, name] = rest;
+  if (sub === "new") {
+    if (!name) fail(`usage: budget migration new <name>`);
+    try {
+      const path = createMigration(name);
+      console.log(`created ${path}`);
     } catch (e) {
       fail((e as Error).message);
     }

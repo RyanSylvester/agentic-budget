@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { migrateDb } from "../src/db";
-import { listMigrations, runMigrations } from "../src/migrations";
+import { createMigration, listMigrations, runMigrations } from "../src/migrations";
 import { oldMigrateDb } from "./old-migrate";
 
 const schemaSql = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "schema.sql"), "utf8");
@@ -41,7 +42,7 @@ describe("versioned migrations", () => {
     const vs = ms.map((m) => m.version);
     expect([...vs].sort()).toEqual(vs);
     expect(new Set(vs).size).toBe(vs.length);
-    expect(vs[0]).toBe("001");
+    expect(vs[0]).toMatch(/^\d{14}$/);
   });
 
   test("fresh databases get schema.sql plus every migration, no baseline marker", () => {
@@ -96,12 +97,28 @@ describe("versioned migrations", () => {
   test("runMigrations applies pending migrations in order to a partially migrated db", () => {
     const db = new Database(":memory:");
     db.exec(schemaSql);
-    // simulate a db that recorded 001 by hand long ago (versions table exists, nothing else new)
+    // simulate a db that recorded the known versions by hand long ago (versions table exists, nothing else new)
     runMigrations(db);
-    expect(versions(db)).toEqual(["001"]);
+    expect(versions(db)).toEqual(listMigrations().map((m) => m.version));
     // a later run picks up nothing new and changes nothing
     runMigrations(db);
-    expect(versions(db)).toEqual(["001"]);
+    expect(versions(db)).toEqual(listMigrations().map((m) => m.version));
+  });
+
+  test("createMigration stamps the version from the clock; it is never hand-typed", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mig-"));
+    const p = createMigration("Add Water Bill", dir);
+    expect(p).toMatch(/\d{14}_add_water_bill\.sql$/);
+    expect(readFileSync(p, "utf8")).toMatch(/^-- \d{14}: add water bill\n/);
+    expect(() => createMigration("!!!", dir)).toThrow();
+  });
+
+  test("listMigrations reads timestamped files in chronological order", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mig-"));
+    writeFileSync(join(dir, "20260927120000_b.sql"), "SELECT 1;");
+    writeFileSync(join(dir, "20260927090000_a.sql"), "SELECT 1;");
+    writeFileSync(join(dir, "not-a-migration.sql"), "SELECT 1;");
+    expect(listMigrations(dir).map((m) => m.version)).toEqual(["20260927090000", "20260927120000"]);
   });
 });
 

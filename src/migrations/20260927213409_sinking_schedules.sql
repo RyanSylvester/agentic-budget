@@ -1,4 +1,4 @@
--- 001: sinking schedules. One row per annual-bill pot: the expected bill
+-- 20260927213409: sinking schedules. One row per annual-bill pot: the expected bill
 -- amount, the next due month, and the cadence. The monthly contribution is
 -- always derived (never stored): ceil((expected - saved so far) / months left).
 CREATE TABLE sinking_schedules (

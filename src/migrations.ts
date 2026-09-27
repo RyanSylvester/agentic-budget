@@ -1,13 +1,16 @@
-/** Versioned schema migrations. Numbered SQL files live in src/migrations/
- *  (`001_name.sql`, ...), applied in order and recorded in schema_migrations.
- *  No down migrations: single local database, forward only.
+/** Versioned schema migrations. Timestamped SQL files live in src/migrations/
+ *  (`YYYYMMDDHHMMSS_name.sql`, UTC), applied in lexicographic (= chronological)
+ *  order and recorded in schema_migrations. The version stamp is minted by
+ *  `createMigration()` from the clock, never typed by hand; `budget migration
+ *  new <name>` is the only way to create one. No down migrations: single
+ *  local database, forward only.
  *
  *  Databases created before the migration system get a '000' baseline marker
  *  (their history is NOT re-applied); fresh databases run every migration.
  *  Each migration runs in a transaction and its version is recorded only on
  *  success, so a failed migration retries cleanly on the next startup. */
 import type { Database } from "bun:sqlite";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,14 +24,33 @@ export interface Migration {
 }
 
 /** Every known migration, sorted by version. */
-export function listMigrations(): Migration[] {
-  const files = readdirSync(DIR)
-    .filter((f) => /^\d+_.*\.sql$/.test(f))
+export function listMigrations(dir: string = DIR): Migration[] {
+  const files = readdirSync(dir)
+    .filter((f) => /^\d{14}_.*\.sql$/.test(f))
     .sort();
   return files.map((f) => {
-    const m = f.match(/^(\d+)_(.+)\.sql$/)!;
-    return { version: m[1], name: m[2].replace(/_/g, " "), sql: readFileSync(join(DIR, f), "utf8") };
+    const m = f.match(/^(\d{14})_(.+)\.sql$/)!;
+    return { version: m[1], name: m[2].replace(/_/g, " "), sql: readFileSync(join(dir, f), "utf8") };
   });
+}
+
+/** Current UTC time as YYYYMMDDHHMMSS. */
+function utcStamp(d: Date = new Date()): string {
+  return d.toISOString().replace(/[-:T]/g, "").slice(0, 14);
+}
+
+/** Stamp out a new migration file and return its path. The version timestamp
+ *  always comes from the clock; callers never supply it. */
+export function createMigration(name: string, dir: string = DIR): string {
+  const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  if (!slug) throw new Error(`bad migration name "${name}"; use letters, numbers, underscores`);
+  const version = utcStamp();
+  const filename = `${version}_${slug}.sql`;
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, filename);
+  if (existsSync(path)) throw new Error(`migration ${filename} already exists; wait a second and retry`);
+  writeFileSync(path, `-- ${version}: ${slug.replace(/_/g, " ")}\n\n`);
+  return path;
 }
 
 export function tableExists(db: Database, name: string): boolean {
