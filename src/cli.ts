@@ -339,7 +339,7 @@ if (cmd === "record") {
     try {
       const s = createSchedule(db, pot!, expectedCents, due!, cadence);
       const st = sinkingStatus(db, s.potId, new Date().toISOString().slice(0, 7))!;
-      console.log(`schedule ${s.id}: "${s.potName}" expects $${fmtCents(s.expectedCents)}, due ${s.dueMonth} (every ${s.cadenceMonths}mo) — $${fmtCents(st.contributionCents)}/mo from here`);
+      console.log(`schedule ${s.id}: "${s.potName}" expects $${fmtCents(s.expectedCents)}, due ${s.dueMonth} (every ${s.cadenceMonths}mo), $${fmtCents(st.contributionCents)}/mo from here`);
     } catch (e) {
       fail((e as Error).message);
     }
@@ -351,14 +351,14 @@ if (cmd === "record") {
     for (const s of rows) {
       const st = sinkingStatus(db, s.potId, month)!;
       const state = st.state === "funded" ? "funded" : st.state === "overdue" ? "OVERDUE" : "funding";
-      console.log(`${s.id} "${s.potName}": $${fmtCents(s.expectedCents)} due ${s.dueMonth} — $${fmtCents(st.contributionCents)}/mo for ${month} (saved $${fmtCents(st.balanceCents)}, ${st.monthsLeft}mo left) [${state}]`);
+      console.log(`${s.id} "${s.potName}": $${fmtCents(s.expectedCents)} due ${s.dueMonth}, $${fmtCents(st.contributionCents)}/mo for ${month} (saved $${fmtCents(st.balanceCents)}, ${st.monthsLeft}mo left) [${state}]`);
     }
   } else if (sub === "paid") {
     const pot = flag("pot");
     if (!pot) usage();
     try {
       const s = markPaid(db, pot!);
-      console.log(`"${s.potName}" marked paid — next due ${s.dueMonth}`);
+      console.log(`"${s.potName}" marked paid, next due ${s.dueMonth}`);
     } catch (e) {
       fail((e as Error).message);
     }
