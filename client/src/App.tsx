@@ -351,7 +351,7 @@ function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: string; 
     <div>
       <div className="hidden grid-cols-[minmax(0,1fr)_130px_170px_120px] gap-3 border-b border-[var(--hairline-strong)] px-4 pb-2 sm:grid sm:px-5">
         <span className="eyebrow">Pot</span>
-        <span className="eyebrow">Assigned <span className="text-[var(--faint)]" style={{ textTransform: "none", letterSpacing: "normal", fontWeight: 400 }}>(tap to edit)</span></span>
+        <span className="eyebrow">Assigned <span className="whitespace-nowrap text-[var(--faint)]" style={{ textTransform: "none", letterSpacing: "normal", fontWeight: 400 }}>(tap to edit)</span></span>
         <span className="eyebrow">Spent</span>
         <span className="eyebrow text-right">Available</span>
       </div>
