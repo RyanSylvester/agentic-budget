@@ -101,7 +101,7 @@ function shiftMonth(ym: string, delta: number) {
 
 // "2026-09-28" -> "Today" / "Yesterday" / "Sep 26". No raw ISO dates in the UI.
 function fmtDate(iso: string): string {
-  const d = new Date(`${iso}T12:00:00`);
+  const d = new Date(`${iso.slice(0, 10)}T12:00:00`);
   if (Number.isNaN(d.getTime())) return iso;
   const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const diff = Math.round((startOf(new Date()) - startOf(d)) / 86400000);
@@ -174,11 +174,19 @@ function FetchError({ onRetry, label = "Couldn't load this." }: { onRetry: () =>
 
 /* ---------- overview pieces ---------- */
 
-function Hero({ overview, isCurrent }: { overview: Overview | null; isCurrent: boolean }) {
+function Hero({ overview, isCurrent, loading }: { overview: Overview | null; isCurrent: boolean; loading?: boolean }) {
   const today = new Date();
   const day = today.getDate();
   const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
-  const spent = overview?.confirmedSpendCents ?? 0;
+  if (loading || !overview) {
+    return (
+      <div className="pb-1 pt-2">
+        <Skeleton className="h-[56px] w-56" />
+        <Skeleton className="mt-2.5 h-5 w-44" />
+      </div>
+    );
+  }
+  const spent = overview.confirmedSpendCents;
   const daily = spent / Math.max(1, day);
   return (
     <div className="pb-1 pt-2">
@@ -186,7 +194,7 @@ function Hero({ overview, isCurrent }: { overview: Overview | null; isCurrent: b
         <div className="font-serif-d text-[17px] italic text-[var(--muted)]">final for the month</div>
       )}
       <div className="t-nums mt-1 text-[56px] font-light leading-none tracking-[-0.02em]">
-        {overview ? money(spent) : "…"}
+        {money(spent)}
       </div>
       <div className="mt-2.5 text-[15px]">
         {isCurrent ? (
@@ -195,18 +203,52 @@ function Hero({ overview, isCurrent }: { overview: Overview | null; isCurrent: b
             <span className="text-[var(--muted)]"> · day {day} of {daysInMonth}</span>
           </>
         ) : (
-          <span className="text-[var(--muted)]">{overview ? monthLabel(overview.month) : ""}</span>
+          <span className="text-[var(--muted)]">{monthLabel(overview.month)}</span>
         )}
       </div>
+      {isCurrent && overview.rtaCents != null && (
+        <div className="mt-1.5 text-[15px]">
+          <span className="t-nums font-medium text-[var(--ink-2)]">{money(overview.rtaCents)}</span>
+          <span className="text-[var(--muted)]"> ready to assign</span>
+        </div>
+      )}
     </div>
   );
 }
 
-function PotCard({ p, partnerName }: { p: Pot; partnerName: string }) {
+function PotCard({ p, partnerName, month, onAssigned }: { p: Pot; partnerName: string; month: string; onAssigned: () => void }) {
   const hasTarget = p.targetCents > 0;
   const pct = hasTarget ? (p.spentCents / p.targetCents) * 100 : 0;
   const over = hasTarget && p.spentCents > p.targetCents;
   const left = p.targetCents - p.spentCents;
+
+  const [amt, setAmt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [assignError, setAssignError] = useState(false);
+
+  const assign = async () => {
+    const cents = Math.round(parseFloat(amt) * 100);
+    if (!Number.isFinite(cents) || cents <= 0 || busy) return;
+    setBusy(true);
+    setAssignError(false);
+    try {
+      const r = await fetch("/api/assign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ month, potId: p.id, cents }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setAmt("");
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2000);
+      onAssigned();
+    } catch {
+      setAssignError(true);
+    }
+    setBusy(false);
+  };
+
   return (
     <div className="card p-4">
       <div className="truncate text-[15px] font-semibold">{p.name}</div>
@@ -241,11 +283,32 @@ function PotCard({ p, partnerName }: { p: Pot; partnerName: string }) {
           </div>
         </>
       )}
+      {p.assignedCents != null && p.assignedCents > 0 && (
+        <div className="t-nums mt-1.5 text-[13px] text-[var(--muted)]">{money(p.assignedCents)} assigned</div>
+      )}
+      <div className="mt-3 flex gap-2">
+        <input
+          type="text"
+          inputMode="decimal"
+          placeholder="Assign $"
+          aria-label={`Assign money to ${p.name}`}
+          value={amt}
+          onChange={(e) => setAmt(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") assign();
+          }}
+          className="field t-nums min-w-0 flex-1 px-3 py-2 text-[14px]"
+        />
+        <button onClick={assign} disabled={busy} className="btn-ink shrink-0 px-3.5 py-2 text-[14px]">
+          {busy ? "Saving…" : saved ? "Saved" : "Assign"}
+        </button>
+      </div>
+      {assignError && <div className="mt-1.5 text-[13px] text-[var(--danger)]">Couldn't save. Try again.</div>}
     </div>
   );
 }
 
-function PotsGrid({ pots, partnerName }: { pots: Pot[]; partnerName: string }) {
+function PotsGrid({ pots, partnerName, month, onAssigned }: { pots: Pot[]; partnerName: string; month: string; onAssigned: () => void }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   if (pots.length === 0)
     return <p className="font-serif-d text-[17px] italic text-[var(--muted)]">No pots yet. They'll appear here once the budget is set up.</p>;
@@ -277,7 +340,7 @@ function PotsGrid({ pots, partnerName }: { pots: Pot[]; partnerName: string }) {
             </button>
             {isOpen && (
               <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
-                {g.pots.map((p) => <PotCard key={p.id} p={p} partnerName={partnerName} />)}
+                {g.pots.map((p) => <PotCard key={p.id} p={p} partnerName={partnerName} month={month} onAssigned={onAssigned} />)}
               </div>
             )}
           </div>
@@ -332,22 +395,31 @@ function RecentActivity({ txns, partnerName, loading }: { txns: Txn[]; partnerNa
   );
 }
 
-function CloseCard({ preview }: { preview: ClosePreviewData | null }) {
-  if (!preview) return null;
+function CloseCard({ preview, partnerName, onGo }: { preview: ClosePreviewData; partnerName: string; onGo: (t: Tab) => void }) {
   return (
     <div className="card p-5">
       <div className="mb-3"><Eyebrow>Month-end preview</Eyebrow></div>
       <div className="space-y-1.5 text-[15px]">
         <div className="flex justify-between"><span className="text-[var(--muted)]">Inflows</span><span className="t-nums">{money(preview.inflowsCents)}</span></div>
         <div className="flex justify-between"><span className="text-[var(--muted)]">Spent</span><span className="t-nums">{money(preview.spentCents)}</span></div>
-        <div className="flex justify-between border-t border-[var(--hairline)] pt-1.5 font-semibold">
-          <span>Ready to assign</span><span className="t-nums">{money(preview.rtaBeforeCents)}</span>
-        </div>
-        <div className="flex justify-between text-[13px] text-[var(--muted)]">
-          <span>Moves to secondary savings at close</span><span className="t-nums">{money(preview.movedToSavingsCents)}</span>
-        </div>
+        {preview.assignedCents != null && (
+          <div className="flex justify-between"><span className="text-[var(--muted)]">Assigned</span><span className="t-nums">{money(preview.assignedCents)}</span></div>
+        )}
       </div>
-      <p className="mt-3 text-[13px] text-[var(--muted)]">The agent applies the close at month-end after your review.</p>
+      <div className="mt-2.5 border-t border-[var(--hairline)] pt-2.5 text-[15px]">
+        <span className="t-nums font-semibold">{money(preview.movedToSavingsCents)}</span>
+        <span className="text-[var(--muted)]"> moves to secondary savings; ready-to-assign → $0</span>
+      </div>
+      {preview.partnerOwedCents > 0 && (
+        <button
+          onClick={() => onGo("partner")}
+          className="mt-3 flex w-full items-center justify-between rounded-[var(--r-md)] bg-[var(--bg-sunken)] px-4 py-3 text-left text-[15px] transition active:scale-[0.99]"
+        >
+          <span>{partnerName} owes <span className="t-nums font-medium">{money(preview.partnerOwedCents)}</span></span>
+          <span className="text-[var(--faint)]">→</span>
+        </button>
+      )}
+      <p className="mt-3 text-[13px] text-[var(--muted)]">Closes automatically at month-end.</p>
     </div>
   );
 }
@@ -395,51 +467,76 @@ function MonthNav({ month, onChange }: { month: string; onChange: (m: string) =>
   );
 }
 
-function OverviewTab({ month, onGo }: { month: string; onGo: (t: "review" | "accounts") => void }) {
-  const [overview, setOverview] = useState<Overview | null>(null);
-  const [pots, setPots] = useState<Pot[]>([]);
-  const [partnerName, setPartnerName] = useState("Partner");
-  const [trend, setTrend] = useState<TrendPoint[]>([]);
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [close, setClose] = useState<ClosePreviewData | null>(null);
+function OverviewTab({ month, onGo }: { month: string; onGo: (t: Tab) => void }) {
+  const { data: overview, error, loading, retry } = useApi<Overview>(`/api/overview?month=${month}`);
+  const { data: attention } = useApi<Attention>("/api/attention");
+  const { data: accountsData } = useApi<{ accounts: Account[] }>("/api/accounts");
 
   const current = new Date().toISOString().slice(0, 7);
-
-  useEffect(() => {
-    setOverview(null);
-    fetch(`/api/overview?month=${month}`).then((r) => r.json()).then((d) => { setOverview(d); setPartnerName(d.partnerName ?? "Partner"); });
-    fetch(`/api/pots?month=${month}`).then((r) => r.json()).then((d) => setPots(d.pots));
-    fetch(`/api/close-preview?month=${month}`).then((r) => r.json()).then(setClose);
-  }, [month]);
-
-  useEffect(() => {
-    fetch("/api/trend").then((r) => r.json()).then((d) => setTrend(d.trend));
-    fetch("/api/accounts").then((r) => r.json()).then((d) => setAccounts(d.accounts));
-  }, []);
+  const partnerName = overview?.partnerName ?? "Partner";
 
   return (
     <div className="space-y-7">
-      <Hero overview={overview} isCurrent={month === current} />
-      <ClickableAttention overview={overview} accounts={accounts} onGo={onGo} />
-      <PartnerCard />
-      <div>
-        <div className="mb-3"><Eyebrow>Pots</Eyebrow></div>
-        <PotsGrid pots={pots} partnerName={partnerName} />
-      </div>
-      <RecentActivity txns={overview?.recent ?? []} partnerName={partnerName} />
-      <CloseCard preview={close} />
-      <Trend data={trend} />
+      {loading || !overview ? (
+        error ? (
+          <FetchError onRetry={retry} label="Couldn't load this month." />
+        ) : (
+          <Hero overview={null} isCurrent={month === current} loading />
+        )
+      ) : (
+        <Hero overview={overview} isCurrent={month === current} />
+      )}
+      <AttentionCard
+        attention={attention}
+        overview={overview}
+        accounts={accountsData?.accounts ?? []}
+        partnerName={partnerName}
+        onGo={onGo}
+      />
+      <RecentActivity txns={overview?.recent ?? []} partnerName={partnerName} loading={loading} />
     </div>
   );
 }
 
-function ClickableAttention({ overview, accounts, onGo }: { overview: Overview | null; accounts: Account[]; onGo: (t: "review" | "accounts") => void }) {
-  const items: { label: string; tab: "review" | "accounts" }[] = [];
-  if (overview && overview.pendingCount > 0)
-    items.push({ label: `${overview.pendingCount} transaction${overview.pendingCount === 1 ? "" : "s"} to review`, tab: "review" });
-  for (const a of accounts)
-    if (!a.lastReconciledAt)
-      items.push({ label: `${a.name} not reconciled yet`, tab: "accounts" });
+function AttentionCard({ attention, overview, accounts, partnerName, onGo }: {
+  attention: Attention | null;
+  overview: Overview | null;
+  accounts: Account[];
+  partnerName: string;
+  onGo: (t: Tab) => void;
+}) {
+  const items: { label: React.ReactNode; tab: Tab }[] = [];
+  if (attention) {
+    if (attention.pendingReviewCount > 0)
+      items.push({
+        label: `${attention.pendingReviewCount} transaction${attention.pendingReviewCount === 1 ? "" : "s"} to review`,
+        tab: "review",
+      });
+    for (const a of attention.unreconciledAccounts ?? []) {
+      const name = typeof a === "string" ? a : a.name;
+      items.push({ label: `${name} not reconciled yet`, tab: "accounts" });
+    }
+    if (attention.unsettledPartnerCents > 0)
+      items.push({
+        label: <>{partnerName} owes <span className="t-nums font-medium">{money(attention.unsettledPartnerCents)}</span></>,
+        tab: "partner",
+      });
+    if (attention.rtaCents > 0)
+      items.push({
+        label: <><span className="t-nums font-medium">{money(attention.rtaCents)}</span> ready to assign</>,
+        tab: "pots",
+      });
+  } else {
+    // Legacy fallback while /api/attention is unavailable.
+    if (overview && overview.pendingCount > 0)
+      items.push({
+        label: `${overview.pendingCount} transaction${overview.pendingCount === 1 ? "" : "s"} to review`,
+        tab: "review",
+      });
+    for (const a of accounts)
+      if (!a.lastReconciledAt)
+        items.push({ label: `${a.name} not reconciled yet`, tab: "accounts" });
+  }
   if (items.length === 0) return null;
   return (
     <div className="card px-5 py-4">
@@ -464,64 +561,96 @@ function ClickableAttention({ overview, accounts, onGo }: { overview: Overview |
 /* ---------- partner balance ---------- */
 
 function PartnerCard() {
-  const [info, setInfo] = useState<PartnerInfo | null>(null);
+  const { data: info, error, loading, retry } = useApi<PartnerInfo>("/api/partner");
+  const { data: accountsData } = useApi<{ accounts: Account[] }>("/api/accounts");
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
+  const [settleError, setSettleError] = useState(false);
   const [last, setLast] = useState<{ allocations: { potName: string | null; amountCents: number }[]; leftoverCents: number } | null>(null);
 
-  const load = () => fetch("/api/partner").then((r) => r.json()).then(setInfo);
-  useEffect(() => { load(); }, []);
+  if (loading) {
+    return (
+      <div className="card space-y-3 p-5">
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="h-9 w-44" />
+        <Skeleton className="h-5 w-full" />
+      </div>
+    );
+  }
+  if (error || !info) return <FetchError onRetry={retry} label="Couldn't load the partner balance." />;
 
-  if (!info || (info.totalOwedCents === 0 && info.creditCents === 0)) return null;
+  const settled = info.totalOwedCents === 0 && info.creditCents === 0;
+  const accounts = accountsData?.accounts ?? [];
+  const dest = accounts.find((a) => a.type === "chequing") ?? accounts[0] ?? null;
 
   const settle = async () => {
     const cents = Math.round(parseFloat(amount) * 100);
-    if (!cents || cents <= 0 || busy) return;
+    if (!cents || cents <= 0 || busy || !dest) return;
     setBusy(true);
-    const d = await fetch("/api/accounts").then((r) => r.json());
-    const accounts = d.accounts as Account[];
-    const acct = accounts.find((a) => a.type === "chequing") ?? accounts[0];
-    if (acct) {
+    setSettleError(false);
+    try {
       const res = await fetch("/api/settle", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: acct.id, amountCents: cents, note: "Partner settlement" }),
-      }).then((r) => r.json());
+        body: JSON.stringify({ accountId: dest.id, amountCents: cents, note: "Partner settlement" }),
+      }).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      });
       setLast(res);
       setAmount("");
-      await load();
+      retry();
+    } catch {
+      setSettleError(true);
     }
     setBusy(false);
   };
 
   return (
     <div className="card p-5">
-      <Eyebrow>{info.partnerName} owes you</Eyebrow>
-      <div className="t-nums mt-1.5 text-[32px] font-light tracking-tight">{money(info.totalOwedCents)}</div>
-      {info.oldest && <div className="mt-1 text-[13px] text-[var(--muted)]">oldest since {info.oldest}</div>}
-      <ul className="mt-3 space-y-1">
-        {info.byPot.map((b) => (
-          <li key={b.pot} className="flex items-center justify-between text-[15px]">
-            <span className="text-[var(--ink-2)]">{b.pot}</span>
-            <span className="t-nums">{money(b.cents)}</span>
-          </li>
-        ))}
-      </ul>
+      <Eyebrow>{settled ? `${info.partnerName} · settled up` : `${info.partnerName} owes you`}</Eyebrow>
+      {settled ? (
+        <div className="font-serif-d mt-1.5 text-[24px] italic">All settled.</div>
+      ) : (
+        <>
+          <div className="t-nums mt-1.5 text-[32px] font-light tracking-tight">{money(info.totalOwedCents)}</div>
+          {info.oldest && <div className="mt-1 text-[13px] text-[var(--muted)]">oldest since {fmtDate(info.oldest)}</div>}
+          <ul className="mt-3 space-y-1">
+            {info.byPot.map((b) => (
+              <li key={b.pot} className="flex items-center justify-between text-[15px]">
+                <span className="text-[var(--ink-2)]">{b.pot}</span>
+                <span className="t-nums">{money(b.cents)}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       {info.creditCents > 0 && (
         <div className="mt-2 text-[13px] font-medium text-[var(--success)]">{money(info.creditCents)} credit from overpayment</div>
       )}
-      <div className="mt-4 flex gap-2">
-        <input
-          type="text"
-          inputMode="decimal"
-          placeholder="Lump sum received"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          className="field t-nums w-44 px-3 py-2 text-[15px]"
-        />
-        <button onClick={settle} disabled={busy} className="btn-ink px-4 py-2 text-[15px]">
-          {busy ? "Settling…" : "Settle up"}
-        </button>
+      <div className="mt-4">
+        <div className="mb-2 text-[13px] font-medium text-[var(--ink-2)]">Record a payment</div>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            inputMode="decimal"
+            placeholder="Amount received"
+            aria-label="Payment amount received"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") settle();
+            }}
+            className="field t-nums w-44 px-3 py-2 text-[15px]"
+          />
+          <button onClick={settle} disabled={busy || !dest} className="btn-ink px-4 py-2 text-[15px]">
+            {busy ? "Settling…" : "Settle up"}
+          </button>
+        </div>
+        <div className="mt-1.5 text-[13px] text-[var(--muted)]">
+          {dest ? `Records into ${dest.name}` : "Loading accounts…"}
+        </div>
+        {settleError && <div className="mt-1.5 text-[13px] text-[var(--danger)]">Couldn't record that. Try again.</div>}
       </div>
       {last && (
         <div className="mt-3 rounded-[var(--r-md)] bg-[var(--bg-sunken)] p-4 text-[15px]">
@@ -539,6 +668,68 @@ function PartnerCard() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ---------- tabs: pots / close / partner ---------- */
+
+function PotsTab({ month }: { month: string }) {
+  const { data, error, loading, retry } = useApi<{ pots: Pot[] }>(`/api/pots?month=${month}`);
+  const { data: partnerData } = useApi<PartnerInfo>("/api/partner");
+  const { data: trendData } = useApi<{ trend: TrendPoint[] }>("/api/trend");
+  const partnerName = partnerData?.partnerName ?? "Partner";
+
+  return (
+    <div className="space-y-7">
+      <div>
+        <div className="mb-1 font-serif-d text-[24px] font-medium">Pots</div>
+        <p className="mb-5 text-[15px] text-[var(--muted)]">Money with a job. Adjust an assignment below anytime.</p>
+        {loading ? (
+          <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
+            {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-[132px]" />)}
+          </div>
+        ) : error ? (
+          <FetchError onRetry={retry} label="Couldn't load pots." />
+        ) : (
+          <PotsGrid pots={data?.pots ?? []} partnerName={partnerName} month={month} onAssigned={retry} />
+        )}
+      </div>
+      <Trend data={trendData?.trend ?? []} />
+    </div>
+  );
+}
+
+function CloseTab({ month, onGo }: { month: string; onGo: (t: Tab) => void }) {
+  const { data: preview, error, loading, retry } = useApi<ClosePreviewData>(`/api/close-preview?month=${month}`);
+  const { data: partnerData } = useApi<PartnerInfo>("/api/partner");
+  const partnerName = partnerData?.partnerName ?? "Partner";
+
+  return (
+    <div>
+      <div className="mb-1 font-serif-d text-[24px] font-medium">Close</div>
+      <p className="mb-5 text-[15px] text-[var(--muted)]">How the month ends, before it ends.</p>
+      {loading ? (
+        <div className="card space-y-2.5 p-5">
+          <Skeleton className="h-5 w-2/3" />
+          <Skeleton className="h-5 w-1/2" />
+          <Skeleton className="h-5 w-3/5" />
+        </div>
+      ) : error || !preview ? (
+        <FetchError onRetry={retry} label="Couldn't load the close preview." />
+      ) : (
+        <CloseCard preview={preview} partnerName={partnerName} onGo={onGo} />
+      )}
+    </div>
+  );
+}
+
+function PartnerTab() {
+  return (
+    <div>
+      <div className="mb-1 font-serif-d text-[24px] font-medium">Partner</div>
+      <p className="mb-5 text-[15px] text-[var(--muted)]">Shared costs, settled up.</p>
+      <PartnerCard />
     </div>
   );
 }
@@ -612,12 +803,11 @@ function clearedLabel(a: Account): string {
 }
 
 function AccountsView() {
-  const [accounts, setAccounts] = useState<Account[]>([]);
+  const { data, error, loading, retry } = useApi<{ accounts: Account[] }>("/api/accounts");
   const [actual, setActual] = useState<Record<number, string>>({});
   const [result, setResult] = useState<Record<number, ReconcileResponse | null>>({});
 
-  const load = () => fetch("/api/accounts").then((r) => r.json()).then((d) => setAccounts(d.accounts));
-  useEffect(() => { load(); }, []);
+  const load = () => retry();
 
   const reconcile = async (id: number) => {
     const cents = Math.round(parseFloat(actual[id] ?? "NaN") * 100);
@@ -637,6 +827,22 @@ function AccountsView() {
     load();
   };
 
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        {[0, 1].map((i) => (
+          <div key={i} className="card space-y-3 p-5">
+            <Skeleton className="h-6 w-40" />
+            <Skeleton className="h-4 w-56" />
+            <Skeleton className="h-10 w-64" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (error) return <FetchError onRetry={retry} label="Couldn't load accounts." />;
+
+  const accounts = data?.accounts ?? [];
   if (accounts.length === 0)
     return <p className="font-serif-d text-[17px] italic text-[var(--muted)]">No accounts yet.</p>;
 
@@ -695,7 +901,18 @@ function AccountsView() {
 
 /* ---------- app ---------- */
 
-type Tab = "overview" | "review" | "accounts";
+type Tab = "overview" | "pots" | "close" | "partner" | "review" | "accounts";
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "pots", label: "Pots" },
+  { id: "close", label: "Close" },
+  { id: "partner", label: "Partner" },
+  { id: "review", label: "Review" },
+  { id: "accounts", label: "Accounts" },
+];
+
+const MONTH_TABS: Tab[] = ["overview", "pots", "close"];
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("overview");
@@ -704,7 +921,10 @@ export default function App() {
   const [pendingCount, setPendingCount] = useState(0);
 
   useEffect(() => {
-    fetch("/api/review").then((r) => r.json()).then((d) => setPendingCount(d.transactions.length));
+    fetch("/api/review")
+      .then((r) => r.json())
+      .then((d) => setPendingCount(d.transactions.length))
+      .catch(() => {});
   }, [refreshKey, tab]);
 
   return (
@@ -716,14 +936,14 @@ export default function App() {
             className="no-scrollbar flex min-w-0 gap-0.5 overflow-x-auto rounded-full border border-[var(--hairline)] bg-[var(--surface)] p-1 text-[13px]"
             style={{ boxShadow: "var(--shadow-card)" }}
           >
-            {(["overview", "review", "accounts"] as const).map((t) => (
+            {TABS.map(({ id, label }) => (
               <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={`relative shrink-0 rounded-full px-2.5 py-1.5 capitalize transition active:scale-95 ${tab === t ? "pill-active font-medium" : "text-[var(--muted)]"}`}
+                key={id}
+                onClick={() => setTab(id)}
+                className={`relative shrink-0 rounded-full px-2.5 py-1.5 transition active:scale-95 ${tab === id ? "pill-active font-medium" : "text-[var(--muted)]"}`}
               >
-                {t}
-                {t === "review" && pendingCount > 0 && (
+                {label}
+                {id === "review" && pendingCount > 0 && (
                   <span className="t-nums absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#161513] px-1 text-[11px] font-bold text-[#faf9f5]">
                     {pendingCount}
                   </span>
@@ -733,18 +953,21 @@ export default function App() {
           </nav>
         </header>
 
-        {tab === "overview" && (
-          <>
-            <MonthNav month={month} onChange={setMonth} />
-            <OverviewTab key={`${refreshKey}-${month}`} month={month} onGo={setTab} />
-          </>
-        )}
+        {MONTH_TABS.includes(tab) && <MonthNav month={month} onChange={setMonth} />}
+
+        {tab === "overview" && <OverviewTab key={`o-${refreshKey}-${month}`} month={month} onGo={setTab} />}
+
+        {tab === "pots" && <PotsTab key={`p-${refreshKey}-${month}`} month={month} />}
+
+        {tab === "close" && <CloseTab key={`c-${refreshKey}-${month}`} month={month} onGo={setTab} />}
+
+        {tab === "partner" && <PartnerTab key={`pt-${refreshKey}`} />}
 
         {tab === "review" && (
           <div>
             <div className="mb-1 font-serif-d text-[24px] font-medium">Review</div>
             <p className="mb-5 text-[15px] text-[var(--muted)]">
-              Only the entries the agent wasn't sure about. One tap to confirm.
+              Only the entries that weren't clear. One tap to confirm.
             </p>
             <ReviewQueue onChange={() => setRefreshKey((k) => k + 1)} />
           </div>
