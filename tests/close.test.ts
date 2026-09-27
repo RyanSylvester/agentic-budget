@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
 import { closeMonth, wireframeTarget, closePreview, applyClose, shiftMonth } from "../src/close";
+import { assignToPot } from "../src/assign";
+import { rtaCents, assignedTotal } from "../src/queries";
 
 describe("wireframeTarget", () => {
   test("fixed copies the most recent month", () => {
@@ -64,11 +66,15 @@ describe("closePreview / applyClose (live data)", () => {
 
   test("preview reads inflows, spend, assigned, and wireframes", () => {
     const db = seedClose();
+    assignToPot(db, "2026-09", 1, 300000); // Housing
+    assignToPot(db, "2026-09", 2, 120000); // Groceries
     const p = closePreview(db, "2026-09");
     expect(p.inflowsCents).toBe(500000);
     expect(p.spentCents).toBe(440000);
-    expect(p.assignedCents).toBe(420000); // 300000 + 120000 + 0
+    expect(p.assignedCents).toBe(420000);
+    expect(assignedTotal(db, "2026-09")).toBe(420000);
     expect(p.rtaBeforeCents).toBe(80000);
+    expect(rtaCents(db, "2026-09")).toBe(80000);
     expect(p.movedToSavingsCents).toBe(80000);
     const housing = p.pots.find((l) => l.name === "Housing")!;
     expect(housing.historyCents).toEqual([300000, 300000, 300000]);
@@ -81,12 +87,37 @@ describe("closePreview / applyClose (live data)", () => {
     expect(p.nextMonth).toBe("2026-10");
   });
 
+  test("assign upserts idempotently and rejects bad input", () => {
+    const db = seedClose();
+    assignToPot(db, "2026-09", 1, 300000);
+    expect(assignedTotal(db, "2026-09")).toBe(300000);
+    assignToPot(db, "2026-09", "Housing", 250000); // by name, overwrite
+    expect(assignedTotal(db, "2026-09")).toBe(250000);
+    expect(() => assignToPot(db, "2026-9", 1, 100)).toThrow("bad month");
+    expect(() => assignToPot(db, "2026-09", 1, -100)).toThrow("bad amount");
+    expect(() => assignToPot(db, "2026-09", 999, 100)).toThrow("no pot");
+  });
+
+  test("apply refuses when RTA is not zero", () => {
+    const db = seedClose();
+    assignToPot(db, "2026-09", 1, 300000); // partial: RTA = 200000
+    const p = closePreview(db, "2026-09");
+    expect(p.rtaBeforeCents).toBe(200000);
+    expect(() => applyClose(db, p)).toThrow("RTA is $2000.00; assign every dollar before closing");
+    // nothing was written: the close is all-or-nothing
+    expect(db.query("SELECT COUNT(*) AS n FROM month_closes").get() as { n: number }).toEqual({ n: 0 });
+  });
+
   test("apply records the close, wireframes targets, and refuses doubles", () => {
     const db = seedClose();
+    assignToPot(db, "2026-09", 1, 300000); // Housing
+    assignToPot(db, "2026-09", 2, 120000); // Groceries
+    assignToPot(db, "2026-09", 3, 80000);  // TFSA: every dollar assigned, RTA = 0
     const p = closePreview(db, "2026-09");
+    expect(p.rtaBeforeCents).toBe(0);
     applyClose(db, p);
     const row = db.query(`SELECT rta_start_cents, rta_end_cents, moved_to_savings_cents FROM month_closes WHERE month = '2026-09'`).get() as any;
-    expect(row).toEqual({ rta_start_cents: 80000, rta_end_cents: 0, moved_to_savings_cents: 80000 });
+    expect(row).toEqual({ rta_start_cents: 0, rta_end_cents: 0, moved_to_savings_cents: 0 });
     const targets = db.query(`SELECT name, target_cents FROM pots ORDER BY id`).all() as { name: string; target_cents: number }[];
     expect(targets.find((t) => t.name === "Groceries")!.target_cents).toBe(100000);
     expect(() => applyClose(db, p)).toThrow("already applied");
@@ -95,5 +126,15 @@ describe("closePreview / applyClose (live data)", () => {
   test("shiftMonth handles year boundaries", () => {
     expect(shiftMonth("2026-01", -1)).toBe("2025-12");
     expect(shiftMonth("2026-12", 1)).toBe("2027-01");
+  });
+
+  test("income-group pots are not assignable and get no wireframe", () => {
+    const db = seedClose();
+    db.exec(`INSERT INTO pots (name, pot_group, target_type, is_assignable) VALUES ('Payroll','Income','fixed',0)`);
+    expect(() => assignToPot(db, "2026-09", "Payroll", 100)).toThrow("not assignable");
+    const p = closePreview(db, "2026-09");
+    const payroll = p.pots.find((l) => l.name === "Payroll")!;
+    expect(payroll.assignable).toBe(false);
+    expect(payroll.wireframeCents).toBe(0);
   });
 });
