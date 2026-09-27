@@ -361,7 +361,7 @@ function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: string; 
           <div key={g.name}>
             <button
               onClick={() => setOpen((o) => ({ ...o, [g.name]: !isOpen }))}
-              className="flex w-full items-baseline justify-between gap-3 border-b border-[var(--hairline-strong)] py-3 text-left"
+              className="flex w-full flex-col items-start gap-1 border-b border-[var(--hairline-strong)] py-3 text-left sm:flex-row sm:items-baseline sm:justify-between sm:gap-3"
             >
               <span className="flex min-w-0 items-baseline gap-2">
                 <span className="truncate font-serif-d text-[19px] font-medium">{titleCase(g.name)}</span>
