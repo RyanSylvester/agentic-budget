@@ -1,0 +1,1 @@
+{"compilerOptions":{"jsx":"react-jsx","jsxImportSource":"hono/jsx","module":"ESNext","moduleResolution":"bundler","skipLibCheck":true,"strict":true,"target":"ESNext"}}
