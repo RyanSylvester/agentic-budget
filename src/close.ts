@@ -36,8 +36,9 @@ export function closeMonth(input: CloseInput): { rtaEndCents: number; movedToSav
 /* Live-data wiring: build the close preview from the database. */
 
 import type { Database } from "bun:sqlite";
-import { monthSpend, monthInflows, potSpend, assignedTotal } from "./queries";
+import { monthSpend, monthInflows, potSpend, assignedTotal, rtaCents } from "./queries";
 import { partnerOwed } from "./settle";
+import { fmtCents } from "./money";
 
 /** Shift a YYYY-MM month by delta months. */
 export function shiftMonth(month: string, delta: number): string {
@@ -54,6 +55,7 @@ export interface PotCloseLine {
   spentCents: number;
   historyCents: number[];
   wireframeCents: number;
+  assignable: boolean;
 }
 
 export interface ClosePreview {
@@ -71,20 +73,23 @@ export interface ClosePreview {
 /** Everything the month-end close needs, read from live data. */
 export function closePreview(db: Database, month: string): ClosePreview {
   const pots = db.query(
-    `SELECT id, name, target_type, target_cents FROM pots WHERE hidden = 0 ORDER BY id`
-  ).all() as { id: number; name: string; target_type: "fixed" | "average_3mo" | "savings"; target_cents: number }[];
+    `SELECT id, name, target_type, target_cents, is_assignable FROM pots WHERE hidden = 0 ORDER BY id`
+  ).all() as { id: number; name: string; target_type: "fixed" | "average_3mo" | "savings"; target_cents: number; is_assignable: number }[];
 
   const lines: PotCloseLine[] = pots.map((p) => {
     const historyCents = [3, 2, 1].map((i) => potSpend(db, p.id, shiftMonth(month, -i)).userCents);
     const spentCents = potSpend(db, p.id, month).userCents;
-    const wireframeCents = wireframeTarget({ potId: p.id, targetType: p.target_type, historyCents });
-    return { potId: p.id, name: p.name, targetType: p.target_type, targetCents: p.target_cents, spentCents, historyCents, wireframeCents };
+    // Income-group pots receive money; they get no wireframe target.
+    const wireframeCents = p.is_assignable
+      ? wireframeTarget({ potId: p.id, targetType: p.target_type, historyCents })
+      : 0;
+    return { potId: p.id, name: p.name, targetType: p.target_type, targetCents: p.target_cents, spentCents, historyCents, wireframeCents, assignable: p.is_assignable === 1 };
   });
 
   const inflowsCents = monthInflows(db, month);
   const spentCents = monthSpend(db, month);
-  const assignedCents = assignedTotal(db);
-  const rtaBeforeCents = inflowsCents - assignedCents;
+  const assignedCents = assignedTotal(db, month);
+  const rtaBeforeCents = rtaCents(db, month);
   const { movedToSavingsCents } = closeMonth({ rtaStartCents: rtaBeforeCents });
   const partnerOwedCents = partnerOwed(db).reduce((a, o) => a + o.owedCents, 0);
 
@@ -92,15 +97,25 @@ export function closePreview(db: Database, month: string): ClosePreview {
 }
 
 /** Apply the close: record it and wireframe next month's pot targets.
- *  Throws if this month was already closed. Human review happens before
- *  the agent runs this. */
+ *  Refuses when Ready-to-Assign is not exactly $0 — the owner's ritual is
+ *  that every dollar is assigned before the month ends. Throws if this month
+ *  was already closed. All-or-nothing. Human review happens before the
+ *  agent runs this. */
 export function applyClose(db: Database, preview: ClosePreview): void {
-  const exists = db.query(`SELECT 1 FROM month_closes WHERE month = ?`).get(preview.month);
-  if (exists) throw new Error(`close for ${preview.month} already applied`);
-  db.query(
-    `INSERT INTO month_closes (month, rta_start_cents, rta_end_cents, moved_to_savings_cents)
-     VALUES (?, ?, 0, ?)`
-  ).run(preview.month, preview.rtaBeforeCents, preview.movedToSavingsCents);
-  const upd = db.query(`UPDATE pots SET target_cents = ? WHERE id = ?`);
-  for (const p of preview.pots) upd.run(p.wireframeCents, p.potId);
+  if (preview.rtaBeforeCents !== 0) {
+    throw new Error(`RTA is $${fmtCents(preview.rtaBeforeCents)}; assign every dollar before closing`);
+  }
+  db.transaction(() => {
+    const exists = db.query(`SELECT 1 FROM month_closes WHERE month = ?`).get(preview.month);
+    if (exists) throw new Error(`close for ${preview.month} already applied`);
+    db.query(
+      `INSERT INTO month_closes (month, rta_start_cents, rta_end_cents, moved_to_savings_cents)
+       VALUES (?, ?, 0, ?)`
+    ).run(preview.month, preview.rtaBeforeCents, preview.movedToSavingsCents);
+    const upd = db.query(`UPDATE pots SET target_cents = ? WHERE id = ?`);
+    for (const p of preview.pots) {
+      if (!p.assignable) continue; // income pots get no wireframe target
+      upd.run(p.wireframeCents, p.potId);
+    }
+  })();
 }
