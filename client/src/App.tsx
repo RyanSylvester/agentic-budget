@@ -197,7 +197,7 @@ function Hero({ overview, isCurrent, loading }: { overview: Overview | null; isC
   return (
     <div className="pb-1 pt-2">
       {!isCurrent && (
-        <div className="font-serif-d text-[17px] italic text-[var(--muted)]">final for the month</div>
+        <div className="font-serif-d text-[17px] text-[var(--muted)]">final for the month</div>
       )}
       <div className="t-nums mt-1 text-[56px] font-light leading-none tracking-[-0.02em]">
         {money(spent)}
@@ -261,7 +261,7 @@ function AssignCell({ pot, month, onAssigned }: { pot: Pot; month: string; onAss
           setEditing(true);
         }}
         title={`Assign to ${pot.name}`}
-        className="t-nums rounded-[var(--r-sm)] px-2 py-2 text-left text-[15px] text-[var(--ink)] underline decoration-[var(--hairline-strong)] decoration-dotted underline-offset-4 transition hover:bg-[var(--bg-sunken)] active:scale-95 sm:py-1"
+        className="t-nums rounded-[var(--r-sm)] px-2 py-2 text-left text-[15px] text-[var(--ink)] underline decoration-[var(--hairline-strong)] decoration-dotted underline-offset-4 transition hover:bg-[var(--surface)] active:scale-95 sm:py-1"
       >
         {money(pot.assignedCents ?? 0)}
       </button>
@@ -296,11 +296,13 @@ function AssignCell({ pot, month, onAssigned }: { pot: Pot; month: string; onAss
   );
 }
 
-function SplitSuffix({ p }: { p: Pot }) {
+// Split tag: a small pill after the spent amount. Even splits read "50%";
+// partial splits read "partner $X.XX". Same component, same size.
+function SplitTag({ p }: { p: Pot }) {
   if (p.partnerCents <= 0) return null;
   return (
-    <span className="text-[13px] text-[var(--muted)]">
-      {" "}· {p.partnerCents === p.spentCents ? "split 50/50" : `partner ${money(p.partnerCents)}`}
+    <span className="t-nums ml-2 inline-flex items-center rounded-[var(--r-pill)] border border-[var(--hairline-strong)] bg-[var(--accent-soft)] px-2 py-0.5 align-middle text-[11px] font-medium text-[var(--ink-2)]">
+      {p.partnerCents === p.spentCents ? "50%" : `partner ${money(p.partnerCents)}`}
     </span>
   );
 }
@@ -321,9 +323,9 @@ function PotNameCell({ p }: { p: Pot }) {
   return (
     <div className="min-w-0">
       <div className="truncate text-[15px] font-semibold">{p.name}</div>
-      <div className="mt-0.5 text-[12px] text-[var(--muted)]">
-        {p.targetCents > 0 ? `target ${money(p.targetCents)}` : "no target"}
-      </div>
+      {p.targetCents > 0 && (
+        <div className="mt-0.5 text-[12px] text-[var(--muted)]">target {money(p.targetCents)}</div>
+      )}
     </div>
   );
 }
@@ -347,34 +349,36 @@ function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: string; 
 
   return (
     <div>
-      <div className="hidden grid-cols-[minmax(0,1fr)_130px_170px_120px] gap-3 border-b border-[var(--hairline-strong)] pb-2 sm:grid">
+      <div className="hidden grid-cols-[minmax(0,1fr)_130px_170px_120px] gap-3 border-b border-[var(--hairline-strong)] px-4 pb-2 sm:grid sm:px-5">
         <span className="eyebrow">Pot</span>
-        <span className="eyebrow">Assigned</span>
+        <span className="eyebrow">Assigned <span className="text-[var(--faint)]" style={{ textTransform: "none", letterSpacing: "normal", fontWeight: 400 }}>(tap to edit)</span></span>
         <span className="eyebrow">Spent</span>
         <span className="eyebrow text-right">Available</span>
       </div>
+      <div className="mt-3 space-y-4">
       {groups.map((g) => {
         const assigned = sum(g.pots, (p) => p.assignedCents ?? 0);
         const spent = sum(g.pots, (p) => p.spentCents);
         const isOpen = open[g.name] ?? true;
         return (
-          <div key={g.name}>
+          <section key={g.name} className="overflow-hidden rounded-[var(--r-lg)] bg-[var(--bg-sunken)]">
             <button
               onClick={() => setOpen((o) => ({ ...o, [g.name]: !isOpen }))}
-              className="flex w-full flex-col items-start gap-1 border-b border-[var(--hairline-strong)] py-3 text-left sm:flex-row sm:items-baseline sm:justify-between sm:gap-3"
+              className="flex w-full flex-col items-start gap-1 px-4 py-3.5 text-left sm:flex-row sm:items-baseline sm:justify-between sm:gap-3 sm:px-5"
             >
               <span className="flex min-w-0 items-baseline gap-2">
-                <span className="truncate font-serif-d text-[19px] font-medium">{titleCase(g.name)}</span>
+                <span className="truncate font-serif-d text-[20px] font-medium">{titleCase(g.name)}</span>
                 <span className="shrink-0 text-[13px] text-[var(--faint)]">{isOpen ? "▾" : "▸"}</span>
               </span>
-              <span className="t-nums shrink-0 whitespace-nowrap text-[13px] text-[var(--muted)]">
+              <span className="t-nums shrink-0 whitespace-nowrap text-[14px] text-[var(--ink-2)]">
                 {money(assigned)} assigned · {money(spent)} spent ·{" "}
-                <Available assignedCents={assigned} spentCents={spent} className="text-[13px]" />
+                <Available assignedCents={assigned} spentCents={spent} className="text-[14px]" />
               </span>
             </button>
-            {isOpen &&
-              g.pots.map((p) => (
-                <div key={p.id} className="border-b border-[var(--hairline)] py-3">
+            {isOpen && (
+              <div className="px-4 pb-1 sm:px-5">
+              {g.pots.map((p) => (
+                <div key={p.id} className="border-t border-[var(--hairline)] py-3">
                   {/* narrow screens: name + available up top, assigned/spent below */}
                   <div className="sm:hidden">
                     <div className="flex items-start justify-between gap-3">
@@ -385,7 +389,7 @@ function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: string; 
                       <AssignCell pot={p} month={month} onAssigned={onAssigned} />
                       <span className="t-nums text-[13px] text-[var(--ink-2)]">
                         {money(p.spentCents)}
-                        <SplitSuffix p={p} />
+                        <SplitTag p={p} />
                       </span>
                     </div>
                   </div>
@@ -395,7 +399,7 @@ function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: string; 
                     <AssignCell pot={p} month={month} onAssigned={onAssigned} />
                     <span className="t-nums whitespace-nowrap text-[15px]">
                       {money(p.spentCents)}
-                      <SplitSuffix p={p} />
+                      <SplitTag p={p} />
                     </span>
                     <span className="text-right">
                       <Available assignedCents={p.assignedCents ?? 0} spentCents={p.spentCents} />
@@ -403,17 +407,20 @@ function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: string; 
                   </div>
                 </div>
               ))}
-          </div>
+              </div>
+            )}
+          </section>
         );
       })}
+      </div>
       {income.length > 0 && (
         <div className="mt-8">
-          <div className="mb-1"><Eyebrow>Income</Eyebrow></div>
+          <div className="mb-1 font-serif-d text-[19px] font-medium">Income</div>
           <p className="mb-2 text-[13px] text-[var(--muted)]">Money in. These pots receive; they are never assigned to.</p>
           {income.map((p) => (
             <div key={p.id} className="flex items-baseline justify-between gap-3 border-b border-[var(--hairline)] py-3">
               <PotNameCell p={p} />
-              <span className="t-nums shrink-0 text-[13px] italic text-[var(--faint)]">income</span>
+              <span className="t-nums shrink-0 text-[13px] text-[var(--faint)]">income</span>
             </div>
           ))}
         </div>
@@ -470,7 +477,7 @@ function RecentActivity({ txns, loading }: { txns: Txn[]; loading?: boolean }) {
 function CloseCard({ preview, onGo }: { preview: ClosePreviewData; onGo: (t: Tab) => void }) {
   return (
     <div className="card p-5">
-      <div className="mb-3"><Eyebrow>Month-end preview</Eyebrow></div>
+      <div className="mb-3 font-serif-d text-[20px] font-medium">How the month closes</div>
       <div className="space-y-1.5 text-[15px]">
         <div className="flex justify-between"><span className="text-[var(--muted)]">Inflows</span><span className="t-nums">{money(preview.inflowsCents)}</span></div>
         <div className="flex justify-between"><span className="text-[var(--muted)]">Spent</span><span className="t-nums">{money(preview.spentCents)}</span></div>
@@ -506,7 +513,7 @@ function MonthNav({ month, onChange }: { month: string; onChange: (m: string) =>
       <button aria-label="Previous month" onClick={() => onChange(shiftMonth(month, -1))} className={btn}>
         ‹
       </button>
-      <span className="font-serif-d text-[17px] italic">{monthLabel(month)}</span>
+      <span className="font-serif-d text-[17px]">{monthLabel(month)}</span>
       <button aria-label="Next month" onClick={() => onChange(shiftMonth(month, 1))} disabled={atCurrent} className={btn}>
         ›
       </button>
@@ -588,12 +595,11 @@ function AttentionCard({ attention, overview, accounts, onGo }: {
       <ul>
         {items.map((it, i) => (
           <li key={i} className="border-b border-[var(--hairline)] last:border-0">
-            <button onClick={() => onGo(it.tab)} className="flex w-full items-center justify-between py-2.5 text-left text-[15px] transition active:scale-[0.99]">
+            <button onClick={() => onGo(it.tab)} className="-mx-2 flex w-[calc(100%+1rem)] items-center rounded-[var(--r-md)] px-2 py-2.5 text-left text-[15px] transition hover:bg-[var(--accent-soft)] active:scale-[0.99] active:bg-[var(--accent-soft)]">
               <span className="flex items-center gap-2.5">
                 <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--warning)]" />
                 {it.label}
               </span>
-              <span className="text-[var(--faint)]">→</span>
             </button>
           </li>
         ))}
@@ -652,7 +658,7 @@ function PartnerCard() {
 
   return (
     <div className="card p-5">
-      <Eyebrow>{settled ? "Partner · settled up" : "Partner owes you"}</Eyebrow>
+      <div className="font-serif-d text-[20px] font-medium">{settled ? "Settled up" : "Partner owes you"}</div>
       {settled ? (
         <div className="font-serif-d mt-1.5 text-[24px] italic">All settled.</div>
       ) : (
@@ -723,8 +729,7 @@ function PotsTab({ month }: { month: string }) {
 
   return (
     <div>
-      <div className="mb-1 font-serif-d text-[24px] font-medium">Pots</div>
-      <p className="mb-5 text-[15px] text-[var(--muted)]">Every dollar with a job. Tap an Assigned amount to adjust it.</p>
+      <div className="mb-5 font-serif-d text-[24px] font-medium">Pots</div>
       {loading ? (
         <div className="space-y-3">
           {[0, 1, 2].map((i) => <Skeleton key={i} className="h-[64px]" />)}
@@ -799,8 +804,8 @@ function Donut({ segments }: { segments: { label: string; cents: number }[] }) {
   );
 }
 
-// Six months of one pot's spend, with the 3-month average as a dashed
-// reference line: the same number next month's target is wireframed from.
+// Six months of one pot's spend, with the 3-month average as a solid
+// reference line in ink: the same number next month's target is wireframed from.
 function PotBars({ history }: { history: PotHistoryPoint[] }) {
   if (history.length === 0) return null;
   const max = Math.max(...history.map((h) => h.spentCents), 1);
@@ -825,18 +830,10 @@ function PotBars({ history }: { history: PotHistoryPoint[] }) {
           ))}
         </div>
         {avg > 0 && (
-          <>
-            <div
-              className="pointer-events-none absolute left-0 right-0 border-t border-dashed"
-              style={{ bottom: `${avgPct}%`, borderColor: "var(--warning)" }}
-            />
-            <span
-              className="t-nums pointer-events-none absolute right-0 text-[11px] font-medium"
-              style={{ bottom: `calc(${avgPct}% + 4px)`, color: "var(--warning)" }}
-            >
-              3-mo avg {money(avg)}
-            </span>
-          </>
+          <div
+            className="pointer-events-none absolute left-0 right-0"
+            style={{ bottom: `${avgPct}%`, height: 2, background: "var(--ink)", opacity: 0.7 }}
+          />
         )}
       </div>
       <div className="mt-1.5 flex gap-2.5 sm:gap-3">
@@ -846,9 +843,12 @@ function PotBars({ history }: { history: PotHistoryPoint[] }) {
           </span>
         ))}
       </div>
-      <p className="mt-3 text-[13px] text-[var(--muted)]">
-        The dashed line is the 3-month average, the same number next month's target is wireframed from at close.
-      </p>
+      {avg > 0 && (
+        <div className="mt-2.5 flex items-center gap-2 text-[12px] text-[var(--muted)]">
+          <span className="inline-block h-[2px] w-6" style={{ background: "var(--ink)", opacity: 0.7 }} />
+          <span className="t-nums">3-month avg {money(avg)}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -888,10 +888,10 @@ function InsightsTab({ month }: { month: string }) {
   return (
     <div className="space-y-10">
       <div>
-        <div className="mb-1 font-serif-d text-[24px] font-medium">Insights</div>
-        <p className="mb-5 text-[15px] text-[var(--muted)]">Where the money went, and where it's trending.</p>
+        <div className="mb-5 font-serif-d text-[24px] font-medium">Insights</div>
         <div className="card p-5">
-          <div className="mb-4"><Eyebrow>Where the money went · {monthLabel(month)}</Eyebrow></div>
+          <div className="mb-1 font-serif-d text-[20px] font-medium">Where the money went</div>
+          <div className="mb-4 text-[13px] text-[var(--muted)]">{monthLabel(month)}</div>
           {loading ? (
             <div className="flex justify-center py-6"><Skeleton className="h-52 w-52 rounded-full" /></div>
           ) : error ? (
@@ -903,7 +903,7 @@ function InsightsTab({ month }: { month: string }) {
       </div>
       <div>
         <div className="card p-5">
-          <div className="mb-4"><Eyebrow>Spending over time</Eyebrow></div>
+          <div className="mb-4 font-serif-d text-[20px] font-medium">Spending over time</div>
           <div className="relative mb-5">
             <input
               type="text"
@@ -953,8 +953,7 @@ function CloseTab({ month, onGo }: { month: string; onGo: (t: Tab) => void }) {
 
   return (
     <div>
-      <div className="mb-1 font-serif-d text-[24px] font-medium">Close</div>
-      <p className="mb-5 text-[15px] text-[var(--muted)]">How the month ends, before it ends.</p>
+      <div className="mb-5 font-serif-d text-[24px] font-medium">Close</div>
       {loading ? (
         <div className="card space-y-2.5 p-5">
           <Skeleton className="h-5 w-2/3" />
@@ -973,8 +972,7 @@ function CloseTab({ month, onGo }: { month: string; onGo: (t: Tab) => void }) {
 function PartnerTab() {
   return (
     <div>
-      <div className="mb-1 font-serif-d text-[24px] font-medium">Partner</div>
-      <p className="mb-5 text-[15px] text-[var(--muted)]">Shared costs, settled up.</p>
+      <div className="mb-5 font-serif-d text-[24px] font-medium">Partner</div>
       <PartnerCard />
     </div>
   );
@@ -1120,7 +1118,7 @@ function AccountsView() {
           {result[a.id] && (
             <div className="mt-3 rounded-[var(--r-md)] bg-[var(--bg-sunken)] p-4 text-[15px]">
               {result[a.id]!.balanced ? (
-                <span className="font-serif-d text-[17px] italic">Balanced. Nice.</span>
+                <span className="font-serif-d text-[17px]">Balanced. Nice.</span>
               ) : (
                 <>
                   <div>Difference: <strong className="t-nums">{money(result[a.id]!.differenceCents)}</strong></div>
