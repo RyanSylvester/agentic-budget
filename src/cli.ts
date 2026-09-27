@@ -7,7 +7,6 @@
  *    bun src/cli.ts review            # list pending_review transactions
  *    bun src/cli.ts reconcile --account 1 --balance 1234.56
  *    bun src/cli.ts close --month 2026-09 [--apply]   # preview (or apply) the month-end close
- *    bun src/cli.ts ynab-sync                       # sync pot taxonomy from YNAB (needs YNAB_TOKEN)
  *    bun src/cli.ts serve             # start the dashboard
  */
 import { openDb } from "./db";
@@ -16,7 +15,7 @@ import { applySettlement, lillyOwed } from "./settle";
 import { closePreview, applyClose } from "./close";
 
 function usage(): never {
-  console.error("usage: budget <record|settle|review|reconcile|close|ynab-sync|serve> [options]");
+  console.error("usage: budget <record|settle|review|reconcile|close|serve> [options]");
   process.exit(2);
 }
 
@@ -118,25 +117,6 @@ if (cmd === "record") {
   }
 } else if (cmd === "serve") {
   await import("./server");
-} else if (cmd === "ynab-sync") {
-  // Sync the pot taxonomy from YNAB (source of truth). Needs YNAB_TOKEN env.
-  const token = process.env.YNAB_TOKEN;
-  if (!token) {
-    console.error("YNAB_TOKEN is not set — create a personal access token in YNAB (Account Settings > Developer Settings) and export it.");
-    process.exit(1);
-  }
-  const { resolveBudgetId, syncCategories } = await import("./ynab");
-  const db = openDb();
-  const { id, name } = await resolveBudgetId(token);
-  console.log(`syncing categories from YNAB budget "${name}"...`);
-  const r = await syncCategories(db, token, id, name);
-  for (const n of r.linked) console.log(`  linked: ${n}`);
-  for (const n of r.created) console.log(`  created: ${n}`);
-  for (const n of r.renamed) console.log(`  renamed: ${n}`);
-  for (const n of r.hidden) console.log(`  hidden: ${n}`);
-  for (const n of r.unhidden) console.log(`  unhidden: ${n}`);
-  for (const n of r.skippedGroups) console.log(`  skipped group: ${n} (mechanics, not spending)`);
-  console.log(`done — ${r.created.length} created, ${r.linked.length} linked, ${r.renamed.length} renamed.`);
 } else {
   usage();
 }

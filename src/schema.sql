@@ -8,10 +8,9 @@ CREATE TABLE IF NOT EXISTS accounts (
   last4     TEXT
 );
 
--- Pots mirror the YNAB category taxonomy 1:1. YNAB is the source of truth:
--- categories are synced by stable id (see src/ynab.ts), never hardcoded.
--- ynab_id / ynab_group_id are the YNAB UUIDs; name and pot_group are labels
--- that follow YNAB renames. hidden mirrors YNAB's hidden/deleted flags.
+-- Pots are managed directly in this app (standalone — no YNAB sync).
+-- ynab_id / ynab_group_id are legacy columns from the one-time YNAB import;
+-- they are inert metadata now. hidden is unused.
 CREATE TABLE IF NOT EXISTS pots (
   id           INTEGER PRIMARY KEY,
   name         TEXT NOT NULL,

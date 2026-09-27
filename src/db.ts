@@ -26,7 +26,8 @@ export function openDb(path: string = DB_PATH): Database {
   if (!cols.some((c) => c.name === "is_transfer")) {
     fresh.exec("ALTER TABLE transactions ADD COLUMN is_transfer INTEGER NOT NULL DEFAULT 0");
   }
-  // YNAB-architecture taxonomy: pots sync from YNAB by stable id (src/ynab.ts).
+  // Legacy YNAB-import columns (no longer synced — the app is standalone).
+  // Kept for history; ynab_id values are inert metadata.
   const potCols = fresh.query("PRAGMA table_info(pots)").all() as { name: string }[];
   if (!potCols.some((c) => c.name === "ynab_id")) {
     // SQLite cannot ADD COLUMN with a UNIQUE constraint — add plain, then index.

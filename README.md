@@ -32,12 +32,8 @@ bun src/cli.ts serve         # dashboard at http://localhost:3000
 
 ## How it works
 
-- **Pots** mirror the YNAB category taxonomy 1:1. YNAB is the source of truth:
-  categories are synced by stable id (`bun src/cli.ts ynab-sync`, needs
-  `YNAB_TOKEN`), never hardcoded. Each pot carries `ynab_id`/`ynab_group_id`;
-  renames in YNAB flow through, hidden categories drop from views but keep
-  their history. New categories arrive as `average_3mo` with a $0 target until
-  the agent or Ryan assigns one.
+- **Pots** are managed directly in this app (standalone, no YNAB sync).
+  The agent creates, renames, and retires pots as the budget evolves.
   Each pot has a target type: `fixed` (bills copied from history), `average_3mo`
   (variables), or `savings` (sinks that get leftovers, never assignments).
 - **Splits**: every transaction is split by owner. Ryan's share counts in his
@@ -55,4 +51,4 @@ bun src/cli.ts serve         # dashboard at http://localhost:3000
 ## Status
 
 Working app with live data (imported from YNAB Aug 27 – Sep 26 2026).
-Blocked on Ryan: YNAB API token (full history import + category sync run).
+Standalone: no sync with YNAB; the agent manages the budget directly.
