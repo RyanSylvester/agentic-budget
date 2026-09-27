@@ -39,6 +39,7 @@ import type { Database } from "bun:sqlite";
 import { monthSpend, monthInflows, potSpend, assignedTotal, rtaCents } from "./queries";
 import { contactOwed } from "./settle";
 import { fmtCents } from "./money";
+import { sinkingStatus } from "./sinking";
 
 /** Shift a YYYY-MM month by delta months. */
 export function shiftMonth(month: string, delta: number): string {
@@ -56,6 +57,10 @@ export interface PotCloseLine {
   historyCents: number[];
   wireframeCents: number;
   assignable: boolean;
+  /** True for pots with a sinking schedule: the schedule is the source of
+   *  truth, so the wireframe leaves target_cents alone. wireframeCents then
+   *  carries the schedule's contribution for next month, for information. */
+  wireframeSkipped: boolean;
 }
 
 export interface ClosePreview {
@@ -91,14 +96,20 @@ export function closePreview(db: Database, month: string): ClosePreview {
     `SELECT id, name, target_type, target_cents, is_assignable FROM pots WHERE hidden = 0 ORDER BY id`
   ).all() as { id: number; name: string; target_type: "fixed" | "average_3mo" | "savings"; target_cents: number; is_assignable: number }[];
 
+  const nextMonth = shiftMonth(month, 1);
   const lines: PotCloseLine[] = pots.map((p) => {
     const historyCents = [3, 2, 1].map((i) => potSpend(db, p.id, shiftMonth(month, -i)).userCents);
     const spentCents = potSpend(db, p.id, month).userCents;
     // Income-group pots receive money; they get no wireframe target.
-    const wireframeCents = p.is_assignable
-      ? wireframeTarget({ potId: p.id, targetType: p.target_type, historyCents })
-      : 0;
-    return { potId: p.id, name: p.name, targetType: p.target_type, targetCents: p.target_cents, spentCents, historyCents, wireframeCents, assignable: p.is_assignable === 1 };
+    // Scheduled pots keep the schedule as source of truth: no target write,
+    // and the preview shows the schedule's next-month contribution instead.
+    const sched = p.is_assignable ? sinkingStatus(db, p.id, nextMonth) : null;
+    const wireframeCents = sched
+      ? sched.contributionCents
+      : p.is_assignable
+        ? wireframeTarget({ potId: p.id, targetType: p.target_type, historyCents })
+        : 0;
+    return { potId: p.id, name: p.name, targetType: p.target_type, targetCents: p.target_cents, spentCents, historyCents, wireframeCents, assignable: p.is_assignable === 1, wireframeSkipped: sched !== null };
   });
 
   const inflowsCents = monthInflows(db, month);
@@ -116,7 +127,7 @@ export function closePreview(db: Database, month: string): ClosePreview {
 
   const closed = !!db.query(`SELECT 1 FROM month_closes WHERE month = ?`).get(month);
 
-  return { month, nextMonth: shiftMonth(month, 1), inflowsCents, spentCents, assignedCents, rtaBeforeCents, movedToSavingsCents, sharedOwedCents, sharedOwedBy, pots: lines, closed };
+  return { month, nextMonth, inflowsCents, spentCents, assignedCents, rtaBeforeCents, movedToSavingsCents, sharedOwedCents, sharedOwedBy, pots: lines, closed };
 }
 
 /** Apply the month-end close: record it and wireframe next month's pot targets.
@@ -138,7 +149,7 @@ export function applyClose(db: Database, preview: ClosePreview): void {
     ).run(preview.month, preview.rtaBeforeCents, preview.movedToSavingsCents);
     const upd = db.query(`UPDATE pots SET target_cents = ? WHERE id = ?`);
     for (const p of preview.pots) {
-      if (!p.assignable) continue; // income pots get no wireframe target
+      if (!p.assignable || p.wireframeSkipped) continue; // income pots get no wireframe target; scheduled pots keep the schedule
       upd.run(p.wireframeCents, p.potId);
     }
   })();

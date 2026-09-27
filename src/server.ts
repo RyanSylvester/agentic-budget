@@ -13,6 +13,7 @@ import { closePreview, applyClose } from "./close";
 import { assignToPot, assignedToPot } from "./assign";
 import { scaffoldMonth, type ScaffoldStrategy } from "./scaffold";
 import { createTransaction, updateTransaction } from "./transactions";
+import { createSchedule, getScheduleById, listSchedules, markPaid, removeSchedule, sinkingStatus } from "./sinking";
 import { validMonth } from "./money";
 
 const app = new Hono();
@@ -133,6 +134,64 @@ app.post("/api/assign/scaffold", async (c) => {
   try {
     const lines = scaffoldMonth(db, month, strategy as ScaffoldStrategy, dryRun === true);
     return c.json({ ok: true, month, strategy, lines });
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 400);
+  }
+});
+
+/** Sinking schedules (agent-managed; the UI only reads). Query param month
+ *  selects the month the contributions are derived for. */
+app.get("/api/sinking", (c) => {
+  const db = openDb();
+  const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
+  if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
+  const schedules = listSchedules(db).map((s) => sinkingStatus(db, s.potId, month)!);
+  return c.json({ month, schedules });
+});
+
+/** Create a schedule. Body: { potId | pot, expectedCents, dueMonth: "YYYY-MM", cadenceMonths? }. */
+app.post("/api/sinking", async (c) => {
+  const db = openDb();
+  const { ok, body } = await readJson(c);
+  if (!ok) return c.json({ error: "malformed JSON" }, 400);
+  const potRef = body?.potId ?? body?.pot;
+  const expectedCents = Math.round(Number(body?.expectedCents));
+  const dueMonth = body?.dueMonth;
+  const cadenceMonths = body?.cadenceMonths === undefined ? 12 : Number(body.cadenceMonths);
+  if (potRef === undefined || potRef === null) return c.json({ error: "potId (or pot name) required" }, 400);
+  try {
+    const s = createSchedule(db, potRef, expectedCents, dueMonth, cadenceMonths);
+    return c.json({ ok: true, id: s.id });
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 400);
+  }
+});
+
+/** Mark the bill paid: roll the due month forward one cadence period. */
+app.post("/api/sinking/:id/paid", (c) => {
+  const db = openDb();
+  const id = badId(c, "id");
+  if (id === null) return c.json({ error: "bad schedule id" }, 400);
+  const s = getScheduleById(db, id);
+  if (!s) return c.json({ error: `no sinking schedule ${id}` }, 404);
+  try {
+    const next = markPaid(db, s.potId);
+    return c.json({ ok: true, dueMonth: next.dueMonth });
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 400);
+  }
+});
+
+/** Delete a schedule. The pot and its history are untouched. */
+app.delete("/api/sinking/:id", (c) => {
+  const db = openDb();
+  const id = badId(c, "id");
+  if (id === null) return c.json({ error: "bad schedule id" }, 400);
+  const s = getScheduleById(db, id);
+  if (!s) return c.json({ error: `no sinking schedule ${id}` }, 404);
+  try {
+    removeSchedule(db, s.potId);
+    return c.json({ ok: true });
   } catch (e) {
     return c.json({ error: (e as Error).message }, 400);
   }
@@ -307,12 +366,17 @@ app.get("/api/pots", (c) => {
     rtaCents: rtaCents(db, month),
     pots: pots.map((p) => {
       const { userCents, sharedCents } = potSpend(db, p.id, month);
+      const sched = sinkingStatus(db, p.id, month);
       return {
         id: p.id, name: p.name, group: p.pot_group, targetType: p.target_type, targetCents: p.target_cents,
         spentCents: userCents, sharedCents,
         contactId: p.contact_id, contactName: p.contact_name, sharePct: p.share_pct,
         assignable: p.is_assignable === 1, assignedCents: assignedToPot(db, month, p.id),
         receivedCents: potInflow(db, p.id, month),
+        sinking: sched ? {
+          expectedCents: sched.expectedCents, dueMonth: sched.dueMonth, cadenceMonths: sched.cadenceMonths,
+          contributionCents: sched.contributionCents, balanceCents: sched.balanceCents, state: sched.state,
+        } : null,
       };
     }),
   });

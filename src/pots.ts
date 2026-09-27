@@ -3,6 +3,7 @@
  *  month assignments move to an "Uncategorized" pot (created on demand).
  *  Pure DB functions that throw on bad input; routes translate to 400s/404s. */
 import type { Database } from "bun:sqlite";
+import { tableExists } from "./migrations";
 
 export type TargetType = "fixed" | "average_3mo" | "savings";
 
@@ -63,6 +64,12 @@ export function potExists(db: Database, id: number): boolean {
   return !!db.query("SELECT 1 FROM pots WHERE id = ?").get(id);
 }
 
+/** Income-group pots receive money; assignments to them mean planned income
+ *  and are excluded from assignedTotal and RTA. Only spending pots draw. */
+function assignableForGroup(group: string): number {
+  return group === "Income" ? 0 : 1;
+}
+
 /** Create a pot. Returns the new id. */
 export function createPot(db: Database, input: PotInput): number {
   const name = needName(input.name);
@@ -71,8 +78,8 @@ export function createPot(db: Database, input: PotInput): number {
   const targetCents = needTargetCents(input.targetCents);
   const share = needShare(db, input.contactId, input.sharePct);
   const row = db.query(
-    "INSERT INTO pots (name, pot_group, target_type, target_cents, contact_id, share_pct) VALUES (?, ?, ?, ?, ?, ?) RETURNING id"
-  ).get(name, group, targetType, targetCents, share.contactId, share.sharePct) as { id: number };
+    "INSERT INTO pots (name, pot_group, target_type, target_cents, is_assignable, contact_id, share_pct) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id"
+  ).get(name, group, targetType, targetCents, assignableForGroup(group), share.contactId, share.sharePct) as { id: number };
   return row.id;
 }
 
@@ -86,8 +93,12 @@ export function updatePot(db: Database, id: number, input: PotInput): void {
     params.push(needName(input.name));
   }
   if (input.group !== undefined) {
+    const g = needGroup(input.group);
     sets.push("pot_group = ?");
-    params.push(needGroup(input.group));
+    params.push(g);
+    // The assignable flag follows the group: Income pots hold planned income.
+    sets.push("is_assignable = ?");
+    params.push(assignableForGroup(g));
   }
   if (input.targetType !== undefined) {
     sets.push("target_type = ?");
@@ -154,6 +165,11 @@ export function deletePot(db: Database, id: number): PotDeleteSummary {
     );
     for (const r of rows) upsert.run(r.month, uncat, r.cents);
     db.query("DELETE FROM assignments WHERE pot_id = ?").run(id);
+    // A sinking schedule is configuration, not history: it goes with the pot.
+    // (Guarded for hand-built databases that never ran migrations.)
+    if (tableExists(db, "sinking_schedules")) {
+      db.query("DELETE FROM sinking_schedules WHERE pot_id = ?").run(id);
+    }
     db.query("DELETE FROM pots WHERE id = ?").run(id);
     return { uncategorizedPotId: uncat, movedTransactions: Number(txns.changes), movedAssignments: rows.length };
   })();

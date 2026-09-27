@@ -20,6 +20,10 @@
  *    bun src/cli.ts review            # list pending_review transactions
  *    bun src/cli.ts reconcile --account 1 --balance 1234.56
  *    bun src/cli.ts close --month 2026-09 [--apply]   # preview (or apply) the month-end close
+ *    bun src/cli.ts sinking add --pot "Property tax" --expected 3483.59 --due 2027-07 [--cadence 12]
+ *    bun src/cli.ts sinking list [--month 2026-10]    # schedules with the derived monthly contribution
+ *    bun src/cli.ts sinking paid --pot "Property tax" # roll the due date forward one cadence
+ *    bun src/cli.ts sinking remove --pot "Property tax"
  *    bun src/cli.ts serve             # start the dashboard
  */
 import { openDb } from "./db";
@@ -29,10 +33,11 @@ import { closePreview, applyClose } from "./close";
 import { assignToPot } from "./assign";
 import { contactBalances, createContact, deleteContact, listContacts, renameContact } from "./contacts";
 import { createPot, deletePot, updatePot } from "./pots";
+import { createSchedule, listSchedules, markPaid, removeSchedule, sinkingStatus } from "./sinking";
 import { assertSplitsSum, resolvePotId, validDate, validMonth, fmtCents } from "./money";
 
 function usage(): never {
-  console.error("usage: budget <record|assign|recategorize|void|pot|contact|settle|review|reconcile|close|serve> [options]");
+  console.error("usage: budget <record|assign|recategorize|void|pot|contact|settle|review|reconcile|close|sinking|serve> [options]");
   process.exit(2);
 }
 
@@ -308,7 +313,8 @@ if (cmd === "record") {
   console.log(`  shared owed total  ${$(p.sharedOwedCents)}`);
   console.log(`  per-pot wireframe:`);
   for (const l of p.pots) {
-    console.log(`    ${l.name} (${l.targetType}${l.assignable ? "" : ", income, no wireframe"}): spent ${$(l.spentCents)} / target ${$(l.targetCents)} -> next ${$(l.wireframeCents)}`);
+    const next = l.wireframeSkipped ? `schedule $${fmtCents(l.wireframeCents)} (target not written)` : `next $${fmtCents(l.wireframeCents)}`;
+    console.log(`    ${l.name} (${l.targetType}${l.assignable ? "" : ", income, no wireframe"}): spent $${fmtCents(l.spentCents)} / target $${fmtCents(l.targetCents)} -> ${next}`);
   }
   if (rest.includes("--apply")) {
     try {
@@ -320,6 +326,53 @@ if (cmd === "record") {
     }
   } else {
     console.log(`preview only; add --apply to record the close and wireframe ${p.nextMonth}.`);
+  }
+} else if (cmd === "sinking") {
+  const db = openDb();
+  const [sub, ..._sRest] = rest;
+  if (sub === "add") {
+    const pot = flag("pot");
+    const expectedCents = Math.round(parseFloat(flag("expected") ?? "NaN") * 100);
+    const due = flag("due");
+    const cadence = flag("cadence") ? parseInt(flag("cadence")!, 10) : 12;
+    if (!pot || !Number.isFinite(expectedCents) || !due) usage();
+    try {
+      const s = createSchedule(db, pot!, expectedCents, due!, cadence);
+      const st = sinkingStatus(db, s.potId, new Date().toISOString().slice(0, 7))!;
+      console.log(`schedule ${s.id}: "${s.potName}" expects $${fmtCents(s.expectedCents)}, due ${s.dueMonth} (every ${s.cadenceMonths}mo) — $${fmtCents(st.contributionCents)}/mo from here`);
+    } catch (e) {
+      fail((e as Error).message);
+    }
+  } else if (sub === "list") {
+    const month = flag("month") ?? new Date().toISOString().slice(0, 7);
+    if (!validMonth(month)) fail(`bad --month "${month}"; expected YYYY-MM`);
+    const rows = listSchedules(db);
+    if (rows.length === 0) console.log("no sinking schedules");
+    for (const s of rows) {
+      const st = sinkingStatus(db, s.potId, month)!;
+      const state = st.state === "funded" ? "funded" : st.state === "overdue" ? "OVERDUE" : "funding";
+      console.log(`${s.id} "${s.potName}": $${fmtCents(s.expectedCents)} due ${s.dueMonth} — $${fmtCents(st.contributionCents)}/mo for ${month} (saved $${fmtCents(st.balanceCents)}, ${st.monthsLeft}mo left) [${state}]`);
+    }
+  } else if (sub === "paid") {
+    const pot = flag("pot");
+    if (!pot) usage();
+    try {
+      const s = markPaid(db, pot!);
+      console.log(`"${s.potName}" marked paid — next due ${s.dueMonth}`);
+    } catch (e) {
+      fail((e as Error).message);
+    }
+  } else if (sub === "remove") {
+    const pot = flag("pot");
+    if (!pot) usage();
+    try {
+      removeSchedule(db, pot!);
+      console.log(`schedule removed for "${pot}"`);
+    } catch (e) {
+      fail((e as Error).message);
+    }
+  } else {
+    usage();
   }
 } else if (cmd === "serve") {
   const { startServer } = await import("./server");

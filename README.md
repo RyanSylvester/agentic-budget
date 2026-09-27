@@ -60,6 +60,14 @@ bun src/cli.ts serve         # dashboard at http://localhost:3111
   moves to secondary savings and next month's pot targets are wireframed from
   history. The agent applies the close after the user's review
   (`bun src/cli.ts close --month YYYY-MM` to preview).
+- **Sinking schedules** spread annual bills to a monthly contribution
+  (`budget sinking add --pot <id|name> --expected 3483.59 --due 2027-07`,
+  `list`, `paid`, `remove`). One row per pot: the monthly number is derived
+  as ceil((expected − saved so far) / months left), so missed months and
+  amount changes rescale automatically. Marking a bill paid rolls the due
+  date forward a year. Scheduled pots use the schedule instead of the
+  history strategies when scaffolding a month, and the close wireframe
+  leaves their targets alone.
 - **Agent surface**: `GET /api/attention` returns the machine-readable ritual
   summary (pending reviews, unreconciled accounts, RTA, unsettled contact
   balances) for the agent's weekly run.

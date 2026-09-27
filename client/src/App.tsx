@@ -63,6 +63,15 @@ export interface Pot {
   contactId: number | null;
   contactName: string | null;
   sharePct: number | null;
+  /** Sinking schedule state for the viewed month, null when unscheduled. */
+  sinking?: {
+    expectedCents: number;
+    dueMonth: string;
+    cadenceMonths: number;
+    contributionCents: number;
+    balanceCents: number;
+    state: "funding" | "funded" | "overdue";
+  } | null;
 }
 
 /** A contact's outstanding shared balance. Matches GET /api/contacts. */
@@ -125,6 +134,11 @@ const MONTHS = ["January","February","March","April","May","June","July","August
 const monthLabel = (ym: string) => {
   const [y, m] = ym.split("-").map(Number);
   return `${MONTHS[m - 1]} ${y}`;
+};
+const MONTHS_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const shortMonth = (ym: string) => {
+  const [y, m] = ym.split("-").map(Number);
+  return `${MONTHS_SHORT[m - 1]} ${y}`;
 };
 
 // "JOINT LIVING" -> "Joint Living" for serif section headers.
@@ -371,9 +385,30 @@ export function PotNameCell({ p, onEdit }: { p: Pot; onEdit?: () => void }) {
           </button>
         )}
       </div>
-      {p.targetCents > 0 && (
-        <div className="mt-0.5 text-[12px] text-[var(--muted)]">target {money(p.targetCents)}</div>
+      {p.sinking ? (
+        <SinkingLine sinking={p.sinking} />
+      ) : (
+        p.targetCents > 0 && (
+          <div className="mt-0.5 text-[12px] text-[var(--muted)]">target {money(p.targetCents)}</div>
+        )
       )}
+    </div>
+  );
+}
+
+/** The sinking-schedule readout on a pot row. Replaces the target line for
+ *  scheduled pots: the derived monthly contribution and due month while
+ *  funding, green "funded" once the balance covers the bill, red when the
+ *  due month has arrived (or passed) and the bill is still unpaid. */
+export function SinkingLine({ sinking }: { sinking: NonNullable<Pot["sinking"]> }) {
+  if (sinking.state === "funded") {
+    return <div className="mt-0.5 text-[12px] font-medium text-[var(--success)]">funded</div>;
+  }
+  const color = sinking.state === "overdue" ? "var(--danger)" : "var(--muted)";
+  const label = `${money(sinking.contributionCents)}/mo · due ${shortMonth(sinking.dueMonth)}${sinking.state === "overdue" ? " · overdue" : ""}`;
+  return (
+    <div className="mt-0.5 text-[12px]" style={{ color }}>
+      {label}
     </div>
   );
 }
@@ -1212,6 +1247,7 @@ interface ScaffoldLine {
   name: string;
   cents: number;
   income: boolean;
+  scheduled?: boolean;
 }
 
 export function ScaffoldSheet({ month, onClose, onScaffolded }: {
@@ -1295,6 +1331,7 @@ export function ScaffoldSheet({ month, onClose, onScaffolded }: {
                   <span className="truncate text-[var(--ink-2)]">
                     {l.name}
                     {l.income && <span className="text-[var(--faint)]"> · planned</span>}
+                    {l.scheduled && <span className="text-[var(--faint)]"> · schedule</span>}
                   </span>
                   <span className="t-nums shrink-0 font-medium">{money(l.cents)}</span>
                 </li>
