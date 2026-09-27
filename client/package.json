@@ -1,1 +1,27 @@
-{"dependencies":{"react":"^19.0.0","react-dom":"^19.0.0"},"devDependencies":{"@tailwindcss/vite":"^4.0.0","@vitejs/plugin-react":"^4.3.0","tailwindcss":"^4.0.0","typescript":"^5.7.0","vite":"^7.0.0"},"name":"agentic-budget-client","private":true,"scripts":{"build":"vite build","dev":"vite","preview":"vite preview"},"type":"module","version":"0.1.0"}
+{
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@storybook/addon-docs": "^10.6.0",
+    "@storybook/react-vite": "^10.6.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "storybook": "^10.6.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^7.0.0"
+  },
+  "name": "agentic-budget-client",
+  "private": true,
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "preview": "vite preview",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build"
+  },
+  "type": "module",
+  "version": "0.1.0"
+}

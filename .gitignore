@@ -5,3 +5,4 @@ budget.db
 budget.db-*
 *.local
 .DS_Store
+client/storybook-static/

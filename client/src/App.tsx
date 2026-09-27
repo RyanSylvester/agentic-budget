@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 /* ---------- types ---------- */
 
-interface Txn {
+export interface Txn {
   id: number;
   date: string;
   description: string;
@@ -16,7 +16,7 @@ interface Txn {
   review_reason: string | null;
 }
 
-interface Overview {
+export interface Overview {
   month: string;
   confirmedSpendCents: number;
   pendingCount: number;
@@ -26,7 +26,7 @@ interface Overview {
   assignedCents?: number;
 }
 
-interface ClosePreviewData {
+export interface ClosePreviewData {
   month: string;
   nextMonth: string;
   inflowsCents: number;
@@ -37,7 +37,7 @@ interface ClosePreviewData {
   partnerOwedCents: number;
 }
 
-interface Account {
+export interface Account {
   id: number;
   name: string;
   type: string;
@@ -47,7 +47,7 @@ interface Account {
   lastReconciledAt: string | null;
 }
 
-interface Pot {
+export interface Pot {
   id: number;
   name: string;
   group: string;
@@ -58,7 +58,7 @@ interface Pot {
   assignedCents?: number;
 }
 
-interface PartnerInfo {
+export interface PartnerInfo {
   partnerName: string;
   totalOwedCents: number;
   creditCents: number;
@@ -66,12 +66,12 @@ interface PartnerInfo {
   oldest: string | null;
 }
 
-interface TrendPoint {
+export interface TrendPoint {
   month: string;
   spent: number;
 }
 
-interface Attention {
+export interface Attention {
   month: string;
   pendingReviewCount: number;
   unreconciledAccounts: Array<string | { name: string }>;
@@ -79,7 +79,7 @@ interface Attention {
   unsettledPartnerCents: number;
 }
 
-interface PotHistoryPoint {
+export interface PotHistoryPoint {
   month: string;
   spentCents: number;
 }
@@ -159,15 +159,15 @@ function useApi<T>(url: string | null): { data: T | null; error: boolean; loadin
 
 /* ---------- primitives ---------- */
 
-function Eyebrow({ children }: { children: React.ReactNode }) {
+export function Eyebrow({ children }: { children: React.ReactNode }) {
   return <div className="eyebrow">{children}</div>;
 }
 
-function Skeleton({ className = "" }: { className?: string }) {
+export function Skeleton({ className = "" }: { className?: string }) {
   return <div aria-hidden className={`skeleton ${className}`} />;
 }
 
-function FetchError({ onRetry, label = "Couldn't load this." }: { onRetry: () => void; label?: string }) {
+export function FetchError({ onRetry, label = "Couldn't load this." }: { onRetry: () => void; label?: string }) {
   return (
     <div className="card p-5 text-center">
       <p className="text-[15px] text-[var(--muted)]">{label}</p>
@@ -180,7 +180,7 @@ function FetchError({ onRetry, label = "Couldn't load this." }: { onRetry: () =>
 
 /* ---------- overview pieces ---------- */
 
-function Hero({ overview, isCurrent, loading }: { overview: Overview | null; isCurrent: boolean; loading?: boolean }) {
+export function Hero({ overview, isCurrent, loading }: { overview: Overview | null; isCurrent: boolean; loading?: boolean }) {
   const today = new Date();
   const day = today.getDate();
   const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
@@ -226,7 +226,7 @@ function Hero({ overview, isCurrent, loading }: { overview: Overview | null; isC
 
 // Inline assign control: the Assigned cell is the button. Click to edit,
 // Enter commits, Escape or click-away cancels. The control is never hidden.
-function AssignCell({ pot, month, onAssigned }: { pot: Pot; month: string; onAssigned: () => void }) {
+export function AssignCell({ pot, month, onAssigned }: { pot: Pot; month: string; onAssigned: () => void }) {
   const [editing, setEditing] = useState(false);
   const [amt, setAmt] = useState("");
   const [busy, setBusy] = useState(false);
@@ -298,7 +298,7 @@ function AssignCell({ pot, month, onAssigned }: { pot: Pot; month: string; onAss
 
 // Split tag: a small pill after the spent amount. Even splits read "50%";
 // partial splits read "partner $X.XX". Same component, same size.
-function SplitTag({ p }: { p: Pot }) {
+export function SplitTag({ p }: { p: Pot }) {
   if (p.partnerCents <= 0) return null;
   return (
     <span className="t-nums ml-2 inline-flex items-center rounded-[var(--r-pill)] border border-[var(--hairline)] bg-[var(--bg-sunken)] px-2 py-0.5 align-middle text-[11px] font-medium text-[var(--ink)]">
@@ -309,7 +309,7 @@ function SplitTag({ p }: { p: Pot }) {
 
 // Available = assigned minus spent. Green when positive, warm red only
 // when overspent, muted at exactly zero.
-function Available({ assignedCents, spentCents, className = "" }: { assignedCents: number; spentCents: number; className?: string }) {
+export function Available({ assignedCents, spentCents, className = "" }: { assignedCents: number; spentCents: number; className?: string }) {
   const avail = assignedCents - spentCents;
   const color = avail > 0 ? "var(--success)" : avail < 0 ? "var(--danger)" : "var(--muted)";
   return (
@@ -319,7 +319,7 @@ function Available({ assignedCents, spentCents, className = "" }: { assignedCent
   );
 }
 
-function PotNameCell({ p }: { p: Pot }) {
+export function PotNameCell({ p }: { p: Pot }) {
   return (
     <div className="min-w-0">
       <div className="truncate text-[15px] font-semibold">{p.name}</div>
@@ -330,7 +330,7 @@ function PotNameCell({ p }: { p: Pot }) {
   );
 }
 
-function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: string; onAssigned: () => void }) {
+export function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: string; onAssigned: () => void }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   if (pots.length === 0)
     return <p className="text-[17px] italic text-[var(--muted)]">No pots yet. They'll appear here once the budget is set up.</p>;
@@ -436,7 +436,7 @@ function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: string; 
   );
 }
 
-function RecentActivity({ txns, loading }: { txns: Txn[]; loading?: boolean }) {
+export function RecentActivity({ txns, loading }: { txns: Txn[]; loading?: boolean }) {
   // Transfer pairs (e.g. +$891.82 / -$891.82 between own accounts) are net-zero
   // noise, not spending: keep them out of the activity feed.
   const visible = txns.filter((t) => !t.is_transfer);
@@ -481,7 +481,7 @@ function RecentActivity({ txns, loading }: { txns: Txn[]; loading?: boolean }) {
   );
 }
 
-function CloseCard({ preview, onGo }: { preview: ClosePreviewData; onGo: (t: Tab) => void }) {
+export function CloseCard({ preview, onGo }: { preview: ClosePreviewData; onGo: (t: Tab) => void }) {
   return (
     <div className="card p-5">
       <div className="mb-3 text-[17px] font-semibold">How the month closes</div>
@@ -510,7 +510,7 @@ function CloseCard({ preview, onGo }: { preview: ClosePreviewData; onGo: (t: Tab
   );
 }
 
-function MonthNav({ month, onChange }: { month: string; onChange: (m: string) => void }) {
+export function MonthNav({ month, onChange }: { month: string; onChange: (m: string) => void }) {
   const current = new Date().toISOString().slice(0, 7);
   const atCurrent = month >= current;
   const btn =
@@ -528,7 +528,7 @@ function MonthNav({ month, onChange }: { month: string; onChange: (m: string) =>
   );
 }
 
-function OverviewTab({ month, onGo }: { month: string; onGo: (t: Tab) => void }) {
+export function OverviewTab({ month, onGo }: { month: string; onGo: (t: Tab) => void }) {
   const { data: overview, error, loading, retry } = useApi<Overview>(`/api/overview?month=${month}`);
   const { data: attention } = useApi<Attention>("/api/attention");
   const { data: accountsData } = useApi<{ accounts: Account[] }>("/api/accounts");
@@ -557,7 +557,7 @@ function OverviewTab({ month, onGo }: { month: string; onGo: (t: Tab) => void })
   );
 }
 
-function AttentionCard({ attention, overview, accounts, onGo }: {
+export function AttentionCard({ attention, overview, accounts, onGo }: {
   attention: Attention | null;
   overview: Overview | null;
   accounts: Account[];
@@ -617,7 +617,7 @@ function AttentionCard({ attention, overview, accounts, onGo }: {
 
 /* ---------- partner balance ---------- */
 
-function PartnerCard() {
+export function PartnerCard() {
   const { data: info, error, loading, retry } = useApi<PartnerInfo>("/api/partner");
   const { data: accountsData } = useApi<{ accounts: Account[] }>("/api/accounts");
   const [amount, setAmount] = useState("");
@@ -731,7 +731,7 @@ function PartnerCard() {
 
 /* ---------- tabs: pots / close / partner ---------- */
 
-function PotsTab({ month }: { month: string }) {
+export function PotsTab({ month }: { month: string }) {
   const { data, error, loading, retry } = useApi<{ pots: Pot[] }>(`/api/pots?month=${month}`);
 
   return (
@@ -757,7 +757,7 @@ const chartColor = (i: number) => `var(${CHART_VARS[i % CHART_VARS.length]})`;
 
 // Donut of this month's user spend by pot group. Hand-rolled SVG; segment
 // colors come from CSS variables so dark mode keeps working.
-function Donut({ segments }: { segments: { label: string; cents: number }[] }) {
+export function Donut({ segments }: { segments: { label: string; cents: number }[] }) {
   const total = segments.reduce((a, s) => a + s.cents, 0);
   if (total <= 0)
     return <p className="py-6 text-center text-[19px] italic text-[var(--muted)]">No spending this month yet.</p>;
@@ -813,7 +813,7 @@ function Donut({ segments }: { segments: { label: string; cents: number }[] }) {
 
 // Six months of one pot's spend, with the 3-month average as a solid
 // reference line in ink: the same number next month's target is wireframed from.
-function PotBars({ history }: { history: PotHistoryPoint[] }) {
+export function PotBars({ history }: { history: PotHistoryPoint[] }) {
   if (history.length === 0) return null;
   const max = Math.max(...history.map((h) => h.spentCents), 1);
   const last3 = history.slice(-3);
@@ -859,7 +859,7 @@ function PotBars({ history }: { history: PotHistoryPoint[] }) {
   );
 }
 
-function InsightsTab({ month }: { month: string }) {
+export function InsightsTab({ month }: { month: string }) {
   const { data, error, loading, retry } = useApi<{ pots: Pot[] }>(`/api/pots?month=${month}`);
   const [potId, setPotId] = useState<number | null>(null);
   const [query, setQuery] = useState("");
@@ -954,7 +954,7 @@ function InsightsTab({ month }: { month: string }) {
   );
 }
 
-function CloseTab({ month, onGo }: { month: string; onGo: (t: Tab) => void }) {
+export function CloseTab({ month, onGo }: { month: string; onGo: (t: Tab) => void }) {
   const { data: preview, error, loading, retry } = useApi<ClosePreviewData>(`/api/close-preview?month=${month}`);
 
   return (
@@ -975,7 +975,7 @@ function CloseTab({ month, onGo }: { month: string; onGo: (t: Tab) => void }) {
   );
 }
 
-function PartnerTab() {
+export function PartnerTab() {
   return (
     <div>
       <div className="mb-5 font-serif-d text-[24px] font-medium">Partner</div>
@@ -986,7 +986,7 @@ function PartnerTab() {
 
 /* ---------- review ---------- */
 
-function ReviewQueue({ onChange }: { onChange: () => void }) {
+export function ReviewQueue({ onChange }: { onChange: () => void }) {
   const { data, error, loading, retry } = useApi<{ transactions: Txn[] }>("/api/review");
   const [doneIds, setDoneIds] = useState<Set<number>>(new Set());
 
@@ -1052,7 +1052,7 @@ function clearedLabel(a: Account): string {
   return `Cleared ${money(a.clearedBalanceCents)}`;
 }
 
-function AccountsView() {
+export function AccountsView() {
   const { data, error, loading, retry } = useApi<{ accounts: Account[] }>("/api/accounts");
   const [actual, setActual] = useState<Record<number, string>>({});
   const [result, setResult] = useState<Record<number, ReconcileResponse | null>>({});
@@ -1151,7 +1151,7 @@ function AccountsView() {
 
 /* ---------- app ---------- */
 
-type Tab = "overview" | "pots" | "insights" | "close" | "partner" | "review" | "accounts";
+export type Tab = "overview" | "pots" | "insights" | "close" | "partner" | "review" | "accounts";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -1171,7 +1171,7 @@ const MONTH_TABS: Tab[] = ["overview", "pots", "insights", "close"];
 const MOBILE_TABS: Tab[] = ["overview", "pots", "insights", "close"];
 const SHEET_TABS: Tab[] = ["partner", "review", "accounts"];
 
-function CountBadge({ n, className = "" }: { n: number; className?: string }) {
+export function CountBadge({ n, className = "" }: { n: number; className?: string }) {
   return (
     <span className={`t-nums flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--ink)] px-1.5 text-[11px] font-bold text-[var(--bg)] ${className}`}>
       {n}
