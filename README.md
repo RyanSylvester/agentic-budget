@@ -25,29 +25,42 @@ architecture notes and ADRs.
 bun install
 bun test            # close math, settlement allocation, reconcile logic
 bun src/cli.ts record --account 1 --amount -12.50 --description "Voila" --source mention
+bun src/cli.ts assign --month 2026-09 --pot "Eating Out" --cents 60000
 bun src/cli.ts review
 bun run --cwd client build   # build the dashboard
-bun src/cli.ts serve         # dashboard at http://localhost:3000
+bun src/cli.ts serve         # dashboard at http://localhost:3111
 ```
 
 ## How it works
 
-- **Pots** are managed directly in this app.
+- **Pots** are managed directly in this app (`budget pot create|rename|retire|unhide`).
   The agent creates, renames, and retires pots as the budget evolves.
   Each pot has a target type: `fixed` (bills copied from history), `average_3mo`
   (variables), or `savings` (sinks that get leftovers, never assignments).
+  Income-group pots (paychecks, interest, windfalls) receive money and are
+  never assigned to.
+- **Assignments**: income arrives, then every dollar is assigned to a pot
+  (`budget assign --month YYYY-MM --pot <id|name> --cents N`, idempotent).
+  Ready-to-Assign = inflows − assignments; the month ends with RTA at exactly
+  $0, and the close refuses to apply otherwise.
 - **Splits**: every transaction is split by owner (`user` / `partner`).
   The user's share counts in their views; the partner's share is recorded
   as what they owe and never counted as the user's spending. Settlements
-  allocate the partner's lump sums oldest-first.
+  allocate the partner's lump sums oldest-first, consuming prior credit first.
 - **Transfers** (`is_transfer`) move between the user's own accounts: counted in
   reconciliation, never in spending.
 - **Review queue**: only entries the agent wasn't sure about land here. One tap
-  to confirm.
+  to confirm, optionally recategorizing at the same time.
+- **Idempotency**: `budget record --external-id KEY` never records the same
+  statement twice; `budget void --id N` soft-voids a transaction (excluded
+  from spend and RTA, kept for audit).
 - **Month-end close**: Ready-to-Assign must end at exactly $0; the leftover
   moves to secondary savings and next month's pot targets are wireframed from
   history. The agent applies the close after the user's review
   (`bun src/cli.ts close --month YYYY-MM` to preview).
+- **Agent surface**: `GET /api/attention` returns the machine-readable ritual
+  summary (pending reviews, unreconciled accounts, RTA, unsettled partner
+  balance) for the agent's weekly run.
 
 ## Status
 
