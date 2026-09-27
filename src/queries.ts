@@ -6,13 +6,14 @@
 import type { Database } from "bun:sqlite";
 
 /** The user's confirmed outflow for a month, in positive cents.
- *  Transfers between the user's own accounts are never spending. */
+ *  Transfers between the user's own accounts are never spending.
+ *  Voided transactions are excluded everywhere. */
 export function monthSpend(db: Database, month: string): number {
   const r = db.query(
     `SELECT COALESCE(SUM(-s.amount_cents), 0) AS spent
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
      WHERE substr(t.date, 1, 7) = ? AND t.status = 'confirmed'
-       AND t.is_transfer = 0
+       AND t.is_transfer = 0 AND t.voided = 0
        AND s.owner = 'user' AND s.amount_cents < 0`
   ).get(month) as { spent: number };
   return r.spent;
@@ -26,7 +27,7 @@ export function potSpend(db: Database, potId: number, month: string): { userCent
        COALESCE(SUM(CASE WHEN s.owner = 'partner' THEN -s.amount_cents ELSE 0 END), 0) AS partner
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
      WHERE s.pot_id = ? AND substr(t.date, 1, 7) = ?
-       AND t.status = 'confirmed' AND t.is_transfer = 0 AND s.amount_cents < 0`
+       AND t.status = 'confirmed' AND t.is_transfer = 0 AND t.voided = 0 AND s.amount_cents < 0`
   ).get(potId, month) as { user: number; partner: number };
   return { userCents: r.user, partnerCents: r.partner };
 }
@@ -37,16 +38,17 @@ export function spendTrend(db: Database, limit = 6): { month: string; spent: num
     `SELECT substr(t.date, 1, 7) AS month,
             COALESCE(SUM(CASE WHEN s.owner = 'user' AND s.amount_cents < 0 THEN -s.amount_cents ELSE 0 END), 0) AS spent
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
-     WHERE t.status = 'confirmed' AND t.is_transfer = 0
+     WHERE t.status = 'confirmed' AND t.is_transfer = 0 AND t.voided = 0
      GROUP BY month ORDER BY month DESC LIMIT ?`
   ).all(limit) as { month: string; spent: number }[];
   return rows.reverse();
 }
 
-/** Recent confirmed transactions with the user's share of each. Optional month filter (YYYY-MM). */
+/** Recent confirmed transactions with the user's share of each. Optional month filter (YYYY-MM).
+ *  Voided transactions never appear. */
 export function recentTransactions(db: Database, limit = 10, month?: string) {
   const params: (string | number)[] = [];
-  let where = `WHERE t.status = 'confirmed'`;
+  let where = `WHERE t.status = 'confirmed' AND t.voided = 0`;
   if (month) {
     where += ` AND substr(t.date, 1, 7) = ?`;
     params.push(month);
@@ -69,14 +71,26 @@ export function monthInflows(db: Database, month: string): number {
     `SELECT COALESCE(SUM(s.amount_cents), 0) AS inflow
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
      WHERE substr(t.date, 1, 7) = ? AND t.status = 'confirmed'
-       AND t.is_transfer = 0
+       AND t.is_transfer = 0 AND t.voided = 0
        AND s.owner = 'user' AND s.amount_cents > 0`
   ).get(month) as { inflow: number };
   return r.inflow;
 }
 
-/** Sum of current pot targets: what is assigned for the month, in cents. */
-export function assignedTotal(db: Database): number {
-  const r = db.query(`SELECT COALESCE(SUM(target_cents), 0) AS a FROM pots WHERE hidden = 0`).get() as { a: number };
-  return r.a;
+/** What the agent assigned to pots for a month, in cents.
+ *  The assignments ledger is the source of truth; pot target_cents is only
+ *  the wireframe template. */
+export function assignedTotal(db: Database, month: string): number {
+  const r = db.query(
+    `SELECT COALESCE(SUM(a.cents), 0) AS total
+     FROM assignments a JOIN pots p ON p.id = a.pot_id
+     WHERE a.month = ? AND p.hidden = 0 AND p.is_assignable = 1`
+  ).get(month) as { total: number };
+  return r.total;
+}
+
+/** Ready-to-assign for a month: inflows minus assignments. The month ends
+ *  when this is exactly 0. */
+export function rtaCents(db: Database, month: string): number {
+  return monthInflows(db, month) - assignedTotal(db, month);
 }
