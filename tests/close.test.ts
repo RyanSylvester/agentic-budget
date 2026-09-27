@@ -128,10 +128,11 @@ describe("closePreview / applyClose (live data)", () => {
     expect(shiftMonth("2026-12", 1)).toBe("2027-01");
   });
 
-  test("income-group pots are not assignable and get no wireframe", () => {
+  test("income-group pots accept planned income but get no wireframe", () => {
     const db = seedClose();
     db.exec(`INSERT INTO pots (name, pot_group, target_type, is_assignable) VALUES ('Payroll','Income','fixed',0)`);
-    expect(() => assignToPot(db, "2026-09", "Payroll", 100)).toThrow("not assignable");
+    const r = assignToPot(db, "2026-09", "Payroll", 500000);
+    expect(r.cents).toBe(500000);
     const p = closePreview(db, "2026-09");
     const payroll = p.pots.find((l) => l.name === "Payroll")!;
     expect(payroll.assignable).toBe(false);

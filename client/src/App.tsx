@@ -58,6 +58,7 @@ export interface Pot {
   sharedCents: number;
   assignable: boolean;
   assignedCents?: number;
+  receivedCents?: number;
   contactId: number | null;
   contactName: string | null;
   sharePct: number | null;
@@ -258,7 +259,9 @@ export function Hero({ overview, isCurrent, loading }: { overview: Overview | nu
 // Enter commits, Escape or click-away cancels. The control is never hidden.
 // Idle and editing states share an identical box (w-24, same padding and
 // border width) so toggling never shifts the surrounding layout.
-export function AssignCell({ pot, month, onAssigned }: { pot: Pot; month: string; onAssigned: () => void }) {
+// purpose="planned" relabels the control for income pots, where the value
+// means planned income rather than a budget allocation.
+export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot: Pot; month: string; onAssigned: () => void; purpose?: "assign" | "planned" }) {
   const [editing, setEditing] = useState(false);
   const [amt, setAmt] = useState("");
   const [busy, setBusy] = useState(false);
@@ -292,7 +295,7 @@ export function AssignCell({ pot, month, onAssigned }: { pot: Pot; month: string
           setAmt(((pot.assignedCents ?? 0) / 100).toFixed(2));
           setEditing(true);
         }}
-        title={`Assign to ${pot.name}`}
+        title={purpose === "planned" ? `Set planned income for ${pot.name}` : `Assign to ${pot.name}`}
         className="t-nums w-24 rounded-[var(--r-sm)] border border-transparent px-2 py-1.5 text-left text-[15px] text-[var(--ink)] underline decoration-[var(--hairline-strong)] decoration-dotted underline-offset-4 transition hover:bg-[var(--surface)] active:scale-95"
       >
         {money(pot.assignedCents ?? 0)}
@@ -305,7 +308,7 @@ export function AssignCell({ pot, month, onAssigned }: { pot: Pot; month: string
         autoFocus
         type="text"
         inputMode="decimal"
-        aria-label={`Assign money to ${pot.name}`}
+        aria-label={purpose === "planned" ? `Planned income for ${pot.name}` : `Assign money to ${pot.name}`}
         value={amt}
         onChange={(e) => setAmt(e.target.value)}
         onKeyDown={(e) => {
@@ -467,11 +470,20 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
       {income.length > 0 && (
         <div className="mt-8">
           <div className="mb-1 text-[15px] font-semibold">Income</div>
-          <p className="mb-2 text-[13px] text-[var(--muted)]">Money in. These pots receive; they are never assigned to.</p>
+          <p className="mb-2 text-[13px] text-[var(--muted)]">Money in. Set planned income when you fill out the month; received shows what has actually landed. Planned income is just your expectation; only actual inflows become ready to assign.</p>
           {income.map((p) => (
-            <div key={p.id} className="flex items-baseline justify-between gap-3 border-b border-[var(--hairline)] py-3">
+            <div key={p.id} className="flex items-center justify-between gap-3 border-b border-[var(--hairline)] py-3">
               <PotNameCell p={p} onEdit={onEditPot ? () => onEditPot(p) : undefined} />
-              <span className="t-nums shrink-0 text-[13px] text-[var(--faint)]">income</span>
+              <div className="flex shrink-0 items-center gap-4">
+                <span className="flex items-baseline gap-1.5">
+                  <span className="text-[12px] text-[var(--faint)]">planned</span>
+                  <AssignCell pot={p} month={month} onAssigned={onAssigned} purpose="planned" />
+                </span>
+                <span className="t-nums whitespace-nowrap text-[13px] text-[var(--muted)]">
+                  <span className="text-[12px] text-[var(--faint)]">received </span>
+                  {money(p.receivedCents ?? 0)}
+                </span>
+              </div>
             </div>
           ))}
         </div>

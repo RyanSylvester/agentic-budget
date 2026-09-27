@@ -69,7 +69,25 @@ export const IncomeOnly: Story = {
     ],
   },
   parameters: {
-    docs: { description: { story: "Income pots are listed separately at the bottom and cannot be assigned to." } },
+    docs: { description: { story: "Income pots are listed separately at the bottom. They are assignable: the planned cell records expected income for the month." } },
+  },
+};
+
+export const IncomePlannedVsReceived: Story = {
+  args: {
+    pots: [
+      makePot({ name: "Paycheck", group: "Income", assignable: false, assignedCents: 520000, receivedCents: 500000 }),
+      makePot({ name: "Interest", group: "Income", assignable: false, assignedCents: 1200, receivedCents: 1200 }),
+      makePot({ name: "Side gig", group: "Income", assignable: false, assignedCents: 0, receivedCents: 80000 }),
+    ],
+  },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "Each income pot shows planned income (editable, via the planned cell) next to received (what has actually landed). Paycheck is short of plan, Interest matches its plan, and Side gig arrived with no plan set. Planned income never counts toward ready to assign.",
+      },
+    },
   },
 };
 

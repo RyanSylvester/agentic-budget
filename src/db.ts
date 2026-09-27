@@ -30,7 +30,8 @@ export function migrateDb(fresh: Database): void {
   if (!potCols.some((c) => c.name === "hidden")) {
     fresh.exec("ALTER TABLE pots ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0");
   }
-  // Income-group pots receive money; dollars are never assigned to them.
+  // Income-group pots receive money; assignments to them mean planned
+  // income and are excluded from assignedTotal and RTA.
   if (!potCols.some((c) => c.name === "is_assignable")) {
     fresh.exec("ALTER TABLE pots ADD COLUMN is_assignable INTEGER NOT NULL DEFAULT 1");
   }

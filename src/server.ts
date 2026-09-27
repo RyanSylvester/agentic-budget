@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { existsSync } from "node:fs";
 import { openDb } from "./db";
-import { monthSpend, potSpend, recentTransactions, listTransactions, spendTrend, assignedTotal, rtaCents, potHistory } from "./queries";
+import { monthSpend, potSpend, potInflow, recentTransactions, listTransactions, spendTrend, assignedTotal, rtaCents, potHistory } from "./queries";
 import { applySettlement, contactCredit, contactOwed } from "./settle";
 import { contactBalances, createContact, renameContact, deleteContact } from "./contacts";
 import { createPot, updatePot, deletePot, potExists } from "./pots";
@@ -294,6 +294,7 @@ app.get("/api/pots", (c) => {
         spentCents: userCents, sharedCents,
         contactId: p.contact_id, contactName: p.contact_name, sharePct: p.share_pct,
         assignable: p.is_assignable === 1, assignedCents: assignedToPot(db, month, p.id),
+        receivedCents: potInflow(db, p.id, month),
       };
     }),
   });

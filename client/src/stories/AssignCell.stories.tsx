@@ -31,6 +31,21 @@ export const Default: Story = {
   },
 };
 
+export const PlannedIncome: Story = {
+  args: {
+    pot: makePot({ name: "Paycheck", assignable: false, assignedCents: 520000 }),
+    purpose: "planned",
+  },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "On income pots the same control sets planned income rather than a budget allocation; the tooltip and screen-reader label say so.",
+      },
+    },
+  },
+};
+
 export const CommitSucceeds: Story = {
   parameters: {
     mockApi: {

@@ -308,7 +308,7 @@ if (cmd === "record") {
   console.log(`  shared owed total  ${$(p.sharedOwedCents)}`);
   console.log(`  per-pot wireframe:`);
   for (const l of p.pots) {
-    console.log(`    ${l.name} (${l.targetType}${l.assignable ? "" : ", not assignable"}): spent ${$(l.spentCents)} / target ${$(l.targetCents)} -> next ${$(l.wireframeCents)}`);
+    console.log(`    ${l.name} (${l.targetType}${l.assignable ? "" : ", income, no wireframe"}): spent ${$(l.spentCents)} / target ${$(l.targetCents)} -> next ${$(l.wireframeCents)}`);
   }
   if (rest.includes("--apply")) {
     try {

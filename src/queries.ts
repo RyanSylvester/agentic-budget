@@ -98,9 +98,23 @@ export function monthInflows(db: Database, month: string): number {
   return r.inflow;
 }
 
+/** One pot's confirmed inflows for a month, in positive cents.
+ *  This is what has actually landed in an income pot; compare against
+ *  the pot's assignment (planned income) when filling out the month. */
+export function potInflow(db: Database, potId: number, month: string): number {
+  const r = db.query(
+    `SELECT COALESCE(SUM(CASE WHEN s.owner = 'user' THEN s.amount_cents ELSE 0 END), 0) AS inflow
+     FROM splits s JOIN transactions t ON t.id = s.transaction_id
+     WHERE s.pot_id = ? AND substr(t.date, 1, 7) = ?
+       AND t.status = 'confirmed' AND t.is_transfer = 0 AND t.voided = 0 AND s.amount_cents > 0`
+  ).get(potId, month) as { inflow: number };
+  return r.inflow;
+}
+
 /** What the agent assigned to pots for a month, in cents.
  *  The assignments ledger is the source of truth; pot target_cents is only
- *  the wireframe template. */
+ *  the wireframe template. Only spending pots count: assignments to income
+ *  pots are planned income and never reduce ready-to-assign. */
 export function assignedTotal(db: Database, month: string): number {
   const r = db.query(
     `SELECT COALESCE(SUM(a.cents), 0) AS total

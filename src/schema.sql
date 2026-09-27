@@ -17,8 +17,9 @@ CREATE TABLE IF NOT EXISTS pots (
   target_type  TEXT NOT NULL CHECK (target_type IN ('fixed','average_3mo','savings')),
   target_cents INTEGER NOT NULL DEFAULT 0,
   hidden        INTEGER NOT NULL DEFAULT 0,
-  -- Income-group pots (paychecks, interest, windfalls) receive money;
-  -- dollars are never assigned *to* them, so assign flows reject them.
+  -- Income-group pots (paychecks, interest, windfalls) receive money.
+  -- Assignments to them mean planned/expected income and are excluded
+  -- from assignedTotal and RTA; only spending pots draw from RTA.
   is_assignable INTEGER NOT NULL DEFAULT 1,
   -- Optional sharing: which contact this pot is shared with and their
   -- percentage share (0-100). NULL contact_id = not shared. This is the
@@ -65,8 +66,10 @@ CREATE TABLE IF NOT EXISTS transactions (
   created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
--- Month assignments: the agent assigns every dollar of income to a pot.
--- Upserted per (month, pot); RTA = inflows - SUM(assignments) for the month.
+-- Month assignments: spending pots get budget allocations; income pots get
+-- planned/expected income. Upserted per (month, pot).
+-- RTA = actual inflows - SUM(assignments to spending pots) for the month;
+-- planned income on income pots is informational and never reduces RTA.
 CREATE TABLE IF NOT EXISTS assignments (
   month    TEXT NOT NULL,                    -- YYYY-MM
   pot_id   INTEGER NOT NULL REFERENCES pots(id),
