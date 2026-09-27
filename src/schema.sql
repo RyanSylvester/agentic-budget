@@ -33,6 +33,12 @@ CREATE TABLE IF NOT EXISTS transactions (
   -- against the real account balance; 'reconciled' locks the match.
   cleared      TEXT NOT NULL DEFAULT 'uncleared'
                CHECK (cleared IN ('uncleared','cleared','reconciled')),
+  -- Only uncertain agent entries wait for review (Ryan 2026-09-26);
+  -- the reason is shown in the review queue.
+  review_reason TEXT,
+  -- Movements between Ryan's own accounts (holding-account loop, TFSA
+  -- contributions). Real money for reconciliation, never spending.
+  is_transfer  INTEGER NOT NULL DEFAULT 0,
   created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 

@@ -20,6 +20,12 @@ export function openDb(path: string = DB_PATH): Database {
   if (!cols.some((c) => c.name === "cleared")) {
     fresh.exec("ALTER TABLE transactions ADD COLUMN cleared TEXT NOT NULL DEFAULT 'uncleared'");
   }
+  if (!cols.some((c) => c.name === "review_reason")) {
+    fresh.exec("ALTER TABLE transactions ADD COLUMN review_reason TEXT");
+  }
+  if (!cols.some((c) => c.name === "is_transfer")) {
+    fresh.exec("ALTER TABLE transactions ADD COLUMN is_transfer INTEGER NOT NULL DEFAULT 0");
+  }
   // Backfill splits: pre-split transactions were 100% Ryan's.
   const unsplit = fresh.query(
     "SELECT id, pot_id, amount_cents FROM transactions WHERE id NOT IN (SELECT transaction_id FROM splits)"

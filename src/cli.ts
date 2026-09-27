@@ -2,7 +2,7 @@
  *  runs instead of clicking through a UI.
  *
  *  Usage:
- *    bun src/cli.ts record --account 1 --amount -12.50 --description "Voila groceries" --source mention [--cleared] [--pot 5] [--lilly-cents 625]
+ *    bun src/cli.ts record --account 1 --amount -12.50 --description "Voila groceries" --source mention [--cleared] [--pot 5] [--lilly-cents 625] [--uncertain "unsure which pot"] [--transfer]
  *    bun src/cli.ts settle --account 1 --amount 2000 --note "Lilly e-transfer"   # her lump sum fills her buckets, oldest first
  *    bun src/cli.ts review            # list pending_review transactions
  *    bun src/cli.ts reconcile --account 1 --balance 1234.56
@@ -34,19 +34,23 @@ if (cmd === "record") {
   const source = (flag("source") ?? "manual") as "gmail" | "mention" | "manual";
   const cleared = rest.includes("--cleared") ? "cleared" : "uncleared";
   const potId = flag("pot") ? parseInt(flag("pot")!, 10) : null;
+  const uncertain = flag("uncertain") ?? null; // reason the agent wasn't sure
+  const isTransfer = rest.includes("--transfer") ? 1 : 0;
   if (!Number.isFinite(amount) || !description || !Number.isFinite(accountId)) usage();
-  const row = db.query("INSERT INTO transactions (date, account_id, amount_cents, description, source, entered_by, cleared) VALUES (date('now'), ?, ?, ?, ?, 'agent', ?) RETURNING id").get(accountId, amount, description, source, cleared) as { id: number };
+  const status = uncertain ? "pending_review" : "confirmed";
+  const row = db.query("INSERT INTO transactions (date, account_id, amount_cents, description, source, entered_by, status, cleared, review_reason, is_transfer) VALUES (date('now'), ?, ?, ?, ?, 'agent', ?, ?, ?, ?) RETURNING id").get(accountId, amount, description, source, status, cleared, uncertain, isTransfer) as { id: number };
   // Splits: Ryan's share counts in his views; Lilly's share is expected (owed).
   const lilly = flag("lilly-cents") ? Math.round(parseFloat(flag("lilly-cents")!) * 100) : 0;
   const ins = db.query("INSERT INTO splits (transaction_id, pot_id, owner, amount_cents) VALUES (?, ?, ?, ?)");
+  const tag = `${status}${isTransfer ? ", transfer" : ""}, ${cleared}`;
   if (lilly !== 0) {
     const ryanCents = amount + lilly; // amount negative outflow; Lilly's share positive dollars
     ins.run(row.id, potId, "ryan", ryanCents);
     ins.run(row.id, potId, "lilly", -lilly);
-    console.log(`recorded transaction ${row.id} (pending_review, ${cleared}) — split: Ryan ${(ryanCents / 100).toFixed(2)}, Lilly owes ${(lilly / 100).toFixed(2)}`);
+    console.log(`recorded transaction ${row.id} (${tag}) — split: Ryan ${(ryanCents / 100).toFixed(2)}, Lilly owes ${(lilly / 100).toFixed(2)}`);
   } else {
     ins.run(row.id, potId, "ryan", amount);
-    console.log(`recorded transaction ${row.id} (pending_review, ${cleared})`);
+    console.log(`recorded transaction ${row.id} (${tag})${uncertain ? ` — needs review: ${uncertain}` : ""}`);
   }
 } else if (cmd === "settle") {
   const db = openDb();

@@ -10,6 +10,7 @@ interface Txn {
   source: string;
   status: string;
   lilly_cents: number;
+  review_reason: string | null;
 }
 
 interface Overview {
@@ -320,6 +321,9 @@ function ReviewQueue({ onChange }: { onChange: () => void }) {
           <div className="min-w-0">
             <div className="truncate text-sm font-medium">{t.description}</div>
             <div className="text-xs text-zinc-500">{t.date} · via {t.source}</div>
+            {t.review_reason && (
+              <div className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">Agent wasn't sure: {t.review_reason}</div>
+            )}
           </div>
           <div className="flex shrink-0 items-center gap-3">
             <span className="text-sm tabular-nums">{money(t.amount_cents)}</span>
@@ -469,7 +473,7 @@ export default function App() {
           <Card>
             <SectionLabel>Pending review</SectionLabel>
             <p className="mb-4 text-sm text-zinc-500">
-              The agent entered these. One tap to confirm.
+              Only the entries the agent wasn't sure about. One tap to confirm.
             </p>
             <ReviewQueue onChange={() => setRefreshKey((k) => k + 1)} />
           </Card>

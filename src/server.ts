@@ -20,7 +20,7 @@ app.get("/api/overview", (c) => {
 app.get("/api/review", (c) => {
   const db = openDb();
   const transactions = db.query(
-    `SELECT t.id, t.date, t.description, t.amount_cents, t.source, t.status,
+    `SELECT t.id, t.date, t.description, t.amount_cents, t.source, t.status, t.review_reason,
             COALESCE((SELECT SUM(-s.amount_cents) FROM splits s
                       WHERE s.transaction_id = t.id AND s.owner = 'lilly' AND s.amount_cents < 0), 0) AS lilly_cents
      FROM transactions t WHERE t.status = 'pending_review' ORDER BY t.id`

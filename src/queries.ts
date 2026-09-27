@@ -5,12 +5,14 @@
  */
 import type { Database } from "bun:sqlite";
 
-/** Ryan's confirmed outflow for a month, in positive cents. */
+/** Ryan's confirmed outflow for a month, in positive cents.
+ *  Transfers between his own accounts are never spending. */
 export function monthSpend(db: Database, month: string): number {
   const r = db.query(
     `SELECT COALESCE(SUM(-s.amount_cents), 0) AS spent
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
      WHERE substr(t.date, 1, 7) = ? AND t.status = 'confirmed'
+       AND t.is_transfer = 0
        AND s.owner = 'ryan' AND s.amount_cents < 0`
   ).get(month) as { spent: number };
   return r.spent;
@@ -24,7 +26,7 @@ export function potSpend(db: Database, potId: number, month: string): { ryanCent
        COALESCE(SUM(CASE WHEN s.owner = 'lilly' THEN -s.amount_cents ELSE 0 END), 0) AS lilly
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
      WHERE s.pot_id = ? AND substr(t.date, 1, 7) = ?
-       AND t.status = 'confirmed' AND s.amount_cents < 0`
+       AND t.status = 'confirmed' AND t.is_transfer = 0 AND s.amount_cents < 0`
   ).get(potId, month) as { ryan: number; lilly: number };
   return { ryanCents: r.ryan, lillyCents: r.lilly };
 }
@@ -35,7 +37,7 @@ export function spendTrend(db: Database, limit = 6): { month: string; spent: num
     `SELECT substr(t.date, 1, 7) AS month,
             COALESCE(SUM(CASE WHEN s.owner = 'ryan' AND s.amount_cents < 0 THEN -s.amount_cents ELSE 0 END), 0) AS spent
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
-     WHERE t.status = 'confirmed'
+     WHERE t.status = 'confirmed' AND t.is_transfer = 0
      GROUP BY month ORDER BY month DESC LIMIT ?`
   ).all(limit) as { month: string; spent: number }[];
   return rows.reverse();

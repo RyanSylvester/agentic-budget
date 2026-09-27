@@ -84,3 +84,28 @@ describe("settlements", () => {
     expect(acct.t).toBe(-334000 - 9000 + 200000);
   });
 });
+
+describe("uncertain review + transfers", () => {
+  test("transfers are excluded from spend but count for reconciliation", () => {
+    const db = seed();
+    db.exec(`INSERT INTO transactions (date, account_id, amount_cents, description, source, entered_by, status, cleared, is_transfer) VALUES ('2026-09-01', 1, -190000, 'Payday holding loop', 'manual', 'agent', 'confirmed', 'cleared', 1)`);
+    const t = db.query("SELECT id FROM transactions").get() as { id: number };
+    db.query("INSERT INTO splits (transaction_id, owner, amount_cents) VALUES (?, 'ryan', -190000)").run(t.id);
+    addTxn(db, "2026-09-02", -8000, -8000, 0, 2);
+    expect(monthSpend(db, "2026-09")).toBe(8000);
+    // ...but the money really moved, so the account balance includes it
+    const acct = db.query("SELECT COALESCE(SUM(amount_cents),0) AS t FROM transactions WHERE account_id = 1").get() as { t: number };
+    expect(acct.t).toBe(-198000);
+  });
+
+  test("uncertain entries queue with a reason; confident ones confirm directly", () => {
+    const db = seed();
+    db.exec(`INSERT INTO transactions (date, account_id, amount_cents, description, source, entered_by, status, cleared, review_reason) VALUES ('2026-09-03', 1, -2500, 'Mystery charge', 'gmail', 'agent', 'pending_review', 'uncleared', 'unsure which pot')`);
+    const t = db.query("SELECT id FROM transactions").get() as { id: number };
+    db.query("INSERT INTO splits (transaction_id, owner, amount_cents) VALUES (?, 'ryan', -2500)").run(t.id);
+    // pending_review never counts toward spend
+    expect(monthSpend(db, "2026-09")).toBe(0);
+    const row = db.query("SELECT review_reason FROM transactions WHERE id = ?").get(t.id) as { review_reason: string };
+    expect(row.review_reason).toBe("unsure which pot");
+  });
+});
