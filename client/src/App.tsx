@@ -197,9 +197,9 @@ function Hero({ overview, isCurrent, loading }: { overview: Overview | null; isC
   return (
     <div className="pb-1 pt-2">
       {!isCurrent && (
-        <div className="font-serif-d text-[17px] text-[var(--muted)]">final for the month</div>
+        <div className="text-[17px] text-[var(--muted)]">final for the month</div>
       )}
-      <div className="t-nums mt-1 text-[56px] font-light leading-none tracking-[-0.02em]">
+      <div className="t-nums font-serif-d mt-1 text-[56px] font-light leading-none tracking-[-0.02em]">
         {money(spent)}
       </div>
       <div className="mt-2.5 text-[15px]">
@@ -301,7 +301,7 @@ function AssignCell({ pot, month, onAssigned }: { pot: Pot; month: string; onAss
 function SplitTag({ p }: { p: Pot }) {
   if (p.partnerCents <= 0) return null;
   return (
-    <span className="t-nums ml-2 inline-flex items-center rounded-[var(--r-pill)] border border-[var(--hairline-strong)] bg-[var(--accent-soft)] px-2 py-0.5 align-middle text-[11px] font-medium text-[var(--ink-2)]">
+    <span className="t-nums ml-2 inline-flex items-center rounded-[var(--r-pill)] border border-[var(--hairline)] bg-[var(--bg-sunken)] px-2 py-0.5 align-middle text-[11px] font-medium text-[var(--ink)]">
       {p.partnerCents === p.spentCents ? "50%" : `partner ${money(p.partnerCents)}`}
     </span>
   );
@@ -333,7 +333,7 @@ function PotNameCell({ p }: { p: Pot }) {
 function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: string; onAssigned: () => void }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   if (pots.length === 0)
-    return <p className="font-serif-d text-[17px] italic text-[var(--muted)]">No pots yet. They'll appear here once the budget is set up.</p>;
+    return <p className="text-[17px] italic text-[var(--muted)]">No pots yet. They'll appear here once the budget is set up.</p>;
 
   const earners = pots.filter((p) => p.assignable);
   const income = pots.filter((p) => !p.assignable);
@@ -361,7 +361,7 @@ function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: string; 
         const spent = sum(g.pots, (p) => p.spentCents);
         const isOpen = open[g.name] ?? true;
         return (
-          <section key={g.name} className="overflow-hidden rounded-[var(--r-lg)] bg-[var(--bg-sunken)]">
+          <section key={g.name} className="overflow-hidden rounded-[12px] bg-[var(--bg-sunken)]">
             <button
               onClick={() => setOpen((o) => ({ ...o, [g.name]: !isOpen }))}
               className="flex w-full flex-col items-start gap-1 px-4 py-3.5 text-left sm:flex-row sm:items-baseline sm:justify-between sm:gap-3 sm:px-5"
@@ -370,8 +370,15 @@ function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: string; 
                 <span className="truncate font-serif-d text-[20px] font-medium">{titleCase(g.name)}</span>
                 <span className="shrink-0 text-[13px] text-[var(--faint)]">{isOpen ? "▾" : "▸"}</span>
               </span>
-              <span className="t-nums shrink-0 whitespace-nowrap text-[14px] text-[var(--ink-2)]">
-                {money(assigned)} assigned · {money(spent)} spent ·{" "}
+              <span className="flex shrink-0 items-baseline gap-5 whitespace-nowrap">
+                <span className="t-nums text-[14px] text-[var(--ink-2)]">
+                  <span className="mr-1.5 text-[12px] text-[var(--muted)]">assigned</span>
+                  {money(assigned)}
+                </span>
+                <span className="t-nums text-[14px] text-[var(--ink-2)]">
+                  <span className="mr-1.5 text-[12px] text-[var(--muted)]">spent</span>
+                  {money(spent)}
+                </span>
                 <Available assignedCents={assigned} spentCents={spent} className="text-[14px]" />
               </span>
             </button>
@@ -415,7 +422,7 @@ function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: string; 
       </div>
       {income.length > 0 && (
         <div className="mt-8">
-          <div className="mb-1 font-serif-d text-[19px] font-medium">Income</div>
+          <div className="mb-1 text-[15px] font-semibold">Income</div>
           <p className="mb-2 text-[13px] text-[var(--muted)]">Money in. These pots receive; they are never assigned to.</p>
           {income.map((p) => (
             <div key={p.id} className="flex items-baseline justify-between gap-3 border-b border-[var(--hairline)] py-3">
@@ -447,7 +454,7 @@ function RecentActivity({ txns, loading }: { txns: Txn[]; loading?: boolean }) {
     return (
       <div>
         <div className="mb-2"><Eyebrow>Recent activity</Eyebrow></div>
-        <p className="font-serif-d text-[17px] italic text-[var(--muted)]">Nothing here yet.</p>
+        <p className="text-[17px] italic text-[var(--muted)]">Nothing here yet.</p>
       </div>
     );
   }
@@ -477,7 +484,7 @@ function RecentActivity({ txns, loading }: { txns: Txn[]; loading?: boolean }) {
 function CloseCard({ preview, onGo }: { preview: ClosePreviewData; onGo: (t: Tab) => void }) {
   return (
     <div className="card p-5">
-      <div className="mb-3 font-serif-d text-[20px] font-medium">How the month closes</div>
+      <div className="mb-3 text-[17px] font-semibold">How the month closes</div>
       <div className="space-y-1.5 text-[15px]">
         <div className="flex justify-between"><span className="text-[var(--muted)]">Inflows</span><span className="t-nums">{money(preview.inflowsCents)}</span></div>
         <div className="flex justify-between"><span className="text-[var(--muted)]">Spent</span><span className="t-nums">{money(preview.spentCents)}</span></div>
@@ -507,13 +514,13 @@ function MonthNav({ month, onChange }: { month: string; onChange: (m: string) =>
   const current = new Date().toISOString().slice(0, 7);
   const atCurrent = month >= current;
   const btn =
-    "flex h-11 w-11 items-center justify-center rounded-full border border-[var(--hairline-strong)] text-[17px] text-[var(--ink-2)] transition active:scale-95 disabled:opacity-40";
+    "flex h-11 w-11 items-center justify-center text-[20px] text-[var(--ink-2)] transition active:scale-95 disabled:opacity-40";
   return (
     <div className="mb-5 flex items-center justify-between">
       <button aria-label="Previous month" onClick={() => onChange(shiftMonth(month, -1))} className={btn}>
         ‹
       </button>
-      <span className="font-serif-d text-[17px]">{monthLabel(month)}</span>
+      <span className="text-[17px] font-medium">{monthLabel(month)}</span>
       <button aria-label="Next month" onClick={() => onChange(shiftMonth(month, 1))} disabled={atCurrent} className={btn}>
         ›
       </button>
@@ -595,7 +602,7 @@ function AttentionCard({ attention, overview, accounts, onGo }: {
       <ul>
         {items.map((it, i) => (
           <li key={i} className="border-b border-[var(--hairline)] last:border-0">
-            <button onClick={() => onGo(it.tab)} className="-mx-2 flex w-[calc(100%+1rem)] items-center rounded-[var(--r-md)] px-2 py-2.5 text-left text-[15px] transition hover:bg-[var(--accent-soft)] active:scale-[0.99] active:bg-[var(--accent-soft)]">
+            <button onClick={() => onGo(it.tab)} className="-mx-2 flex w-[calc(100%+1rem)] items-center rounded-[var(--r-md)] px-2 py-2.5 text-left text-[15px] transition hover:bg-[var(--bg-sunken)] active:scale-[0.99] active:bg-[var(--bg-sunken)]">
               <span className="flex items-center gap-2.5">
                 <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--warning)]" />
                 {it.label}
@@ -658,9 +665,9 @@ function PartnerCard() {
 
   return (
     <div className="card p-5">
-      <div className="font-serif-d text-[20px] font-medium">{settled ? "Settled up" : "Partner owes you"}</div>
+      <div className="text-[17px] font-semibold">{settled ? "Settled up" : "Partner owes you"}</div>
       {settled ? (
-        <div className="font-serif-d mt-1.5 text-[24px] italic">All settled.</div>
+        <div className="mt-1.5 text-[24px] italic">All settled.</div>
       ) : (
         <>
           <div className="t-nums mt-1.5 text-[32px] font-light tracking-tight">{money(info.totalOwedCents)}</div>
@@ -753,7 +760,7 @@ const chartColor = (i: number) => `var(${CHART_VARS[i % CHART_VARS.length]})`;
 function Donut({ segments }: { segments: { label: string; cents: number }[] }) {
   const total = segments.reduce((a, s) => a + s.cents, 0);
   if (total <= 0)
-    return <p className="font-serif-d py-6 text-center text-[19px] italic text-[var(--muted)]">No spending this month yet.</p>;
+    return <p className="py-6 text-center text-[19px] italic text-[var(--muted)]">No spending this month yet.</p>;
   const R = 80;
   const C = 2 * Math.PI * R;
   let acc = 0;
@@ -816,14 +823,13 @@ function PotBars({ history }: { history: PotHistoryPoint[] }) {
     <div>
       <div className="relative h-44">
         <div className="absolute inset-0 flex items-end gap-2.5 sm:gap-3">
-          {history.map((h, i) => (
+          {history.map((h) => (
             <div key={h.month} className="flex h-full flex-1 items-end" title={`${monthLabel(h.month)}: ${money(h.spentCents)}`}>
               <div
                 className="w-full rounded-t-[6px]"
                 style={{
                   height: `${Math.max(3, (h.spentCents / max) * 100)}%`,
-                  background: i === history.length - 1 ? "var(--accent)" : "var(--hairline-strong)",
-                  opacity: i === history.length - 1 ? 1 : 0.92,
+                  background: "var(--bar)",
                 }}
               />
             </div>
@@ -832,7 +838,7 @@ function PotBars({ history }: { history: PotHistoryPoint[] }) {
         {avg > 0 && (
           <div
             className="pointer-events-none absolute left-0 right-0"
-            style={{ bottom: `${avgPct}%`, height: 2, background: "var(--ink)", opacity: 0.7 }}
+            style={{ bottom: `${avgPct}%`, height: 2, background: "var(--ink)", opacity: 0.4 }}
           />
         )}
       </div>
@@ -845,7 +851,7 @@ function PotBars({ history }: { history: PotHistoryPoint[] }) {
       </div>
       {avg > 0 && (
         <div className="mt-2.5 flex items-center gap-2 text-[12px] text-[var(--muted)]">
-          <span className="inline-block h-[2px] w-6" style={{ background: "var(--ink)", opacity: 0.7 }} />
+          <span className="inline-block h-[2px] w-6" style={{ background: "var(--ink)", opacity: 0.4 }} />
           <span className="t-nums">3-month avg {money(avg)}</span>
         </div>
       )}
@@ -890,7 +896,7 @@ function InsightsTab({ month }: { month: string }) {
       <div>
         <div className="mb-5 font-serif-d text-[24px] font-medium">Insights</div>
         <div className="card p-5">
-          <div className="mb-1 font-serif-d text-[20px] font-medium">Where the money went</div>
+          <div className="mb-1 text-[17px] font-semibold">Where the money went</div>
           <div className="mb-4 text-[13px] text-[var(--muted)]">{monthLabel(month)}</div>
           {loading ? (
             <div className="flex justify-center py-6"><Skeleton className="h-52 w-52 rounded-full" /></div>
@@ -903,7 +909,7 @@ function InsightsTab({ month }: { month: string }) {
       </div>
       <div>
         <div className="card p-5">
-          <div className="mb-4 font-serif-d text-[20px] font-medium">Spending over time</div>
+          <div className="mb-4 text-[17px] font-semibold">Spending over time</div>
           <div className="relative mb-5">
             <input
               type="text"
@@ -1001,7 +1007,7 @@ function ReviewQueue({ onChange }: { onChange: () => void }) {
 
   const txns = (data?.transactions ?? []).filter((t) => !doneIds.has(t.id));
   if (txns.length === 0)
-    return <p className="font-serif-d py-6 text-center text-[19px] italic text-[var(--muted)]">All clear.</p>;
+    return <p className="py-6 text-center text-[19px] italic text-[var(--muted)]">All clear.</p>;
 
   return (
     <ul className="space-y-3">
@@ -1088,7 +1094,7 @@ function AccountsView() {
 
   const accounts = data?.accounts ?? [];
   if (accounts.length === 0)
-    return <p className="font-serif-d text-[17px] italic text-[var(--muted)]">No accounts yet.</p>;
+    return <p className="text-[17px] italic text-[var(--muted)]">No accounts yet.</p>;
 
   return (
     <div className="space-y-4">
@@ -1118,7 +1124,7 @@ function AccountsView() {
           {result[a.id] && (
             <div className="mt-3 rounded-[var(--r-md)] bg-[var(--bg-sunken)] p-4 text-[15px]">
               {result[a.id]!.balanced ? (
-                <span className="font-serif-d text-[17px]">Balanced. Nice.</span>
+                <span className="text-[17px]">Balanced. Nice.</span>
               ) : (
                 <>
                   <div>Difference: <strong className="t-nums">{money(result[a.id]!.differenceCents)}</strong></div>
@@ -1209,7 +1215,7 @@ export default function App() {
     <div className="min-h-screen md:flex">
       {/* desktop sidebar rail */}
       <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r border-[var(--hairline)] px-4 py-6 md:flex">
-        <div className="px-3 font-serif-d text-[22px] font-medium tracking-tight">Daybook</div>
+        <div className="px-3 font-serif-d text-[20px] font-medium tracking-tight">Daybook</div>
         <div className="mx-3 my-5 border-t border-[var(--hairline)]" />
         <nav className="flex flex-col gap-0.5" aria-label="Primary">
           {TABS.map(({ id }) => {
@@ -1219,12 +1225,11 @@ export default function App() {
                 key={id}
                 onClick={() => go(id)}
                 aria-current={active ? "page" : undefined}
-                className={`flex h-11 items-center rounded-[var(--r-md)] px-3 text-left text-[15px] transition active:scale-[0.99] ${
+                className={`flex items-center rounded-[var(--r-sm)] px-3 py-2.5 text-left text-[15px] transition active:scale-[0.99] ${
                   active
-                    ? "bg-[var(--accent-soft)] font-medium text-[var(--ink)]"
-                    : "text-[var(--muted)] hover:bg-[var(--bg-sunken)] hover:text-[var(--ink-2)]"
+                    ? "bg-[var(--bg-sunken)] font-semibold text-[var(--ink)]"
+                    : "font-medium text-[var(--muted)] hover:bg-[var(--bg-sunken)] hover:text-[var(--ink-2)]"
                 }`}
-                style={active ? { boxShadow: "inset 2px 0 0 var(--accent)" } : undefined}
               >
                 {tabLabel(id)}
                 {navBadge(id)}
@@ -1284,7 +1289,7 @@ export default function App() {
                   active ? "font-semibold text-[var(--ink)]" : "text-[var(--muted)]"
                 }`}
               >
-                <span className={`h-1.5 w-1.5 rounded-full ${active ? "bg-[var(--accent)]" : "bg-transparent"}`} />
+                <span className={`h-1.5 w-1.5 rounded-full ${active ? "bg-[var(--ink)]" : "bg-transparent"}`} />
                 {tabLabel(id)}
                 {id === "close" && closeAlert && (
                   <span className="absolute right-4 top-3 h-2 w-2 rounded-full bg-[var(--warning)]" />
@@ -1298,7 +1303,7 @@ export default function App() {
               SHEET_TABS.includes(tab) ? "font-semibold text-[var(--ink)]" : "text-[var(--muted)]"
             }`}
           >
-            <span className={`h-1.5 w-1.5 rounded-full ${SHEET_TABS.includes(tab) ? "bg-[var(--accent)]" : "bg-transparent"}`} />
+            <span className={`h-1.5 w-1.5 rounded-full ${SHEET_TABS.includes(tab) ? "bg-[var(--ink)]" : "bg-transparent"}`} />
             More
             {pendingCount > 0 && (
               <span className="t-nums absolute right-3 top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--ink)] px-1 text-[10px] font-bold text-[var(--bg)]">
