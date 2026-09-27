@@ -12,6 +12,7 @@ function seed(): Database {
     ('Groceries','Food','average_3mo',60000),
     ('Paycheck','Income','fixed',0),
     ('Old Pot','Food','fixed',0)`);
+  db.exec(`INSERT INTO contacts (name) VALUES ('Alex')`);
   db.query("UPDATE pots SET hidden = 1 WHERE name = 'Old Pot'").run();
   return db;
 }
@@ -45,13 +46,13 @@ describe("createTransaction", () => {
     expect(splits).toEqual([{ owner: "user", amount_cents: 250000 }]);
   });
 
-  test("splits with the partner sum to the amount", () => {
+  test("splits with a contact sum to the amount", () => {
     const db = seed();
-    const id = createTransaction(db, { ...base, amountCents: -10000, partnerCents: -5000 });
-    const splits = db.query("SELECT owner, amount_cents FROM splits WHERE transaction_id = ? ORDER BY owner").all(id) as any[];
+    const id = createTransaction(db, { ...base, amountCents: -10000, contactId: 1, shareCents: -5000 });
+    const splits = db.query("SELECT owner, contact_id, amount_cents FROM splits WHERE transaction_id = ? ORDER BY owner").all(id) as any[];
     expect(splits).toEqual([
-      { owner: "partner", amount_cents: -5000 },
-      { owner: "user", amount_cents: -5000 },
+      { owner: "contact", contact_id: 1, amount_cents: -5000 },
+      { owner: "user", contact_id: null, amount_cents: -5000 },
     ]);
   });
 
@@ -73,9 +74,11 @@ describe("createTransaction", () => {
     expect(() => createTransaction(db, { ...base, accountId: 99 })).toThrow("no account 99");
     expect(() => createTransaction(db, { ...base, potId: 99 })).toThrow("no pot 99");
     expect(() => createTransaction(db, { ...base, potId: 3 })).toThrow("no pot 3"); // hidden
-    expect(() => createTransaction(db, { ...base, partnerCents: -2599 })).toThrow("smaller than");
-    expect(() => createTransaction(db, { ...base, partnerCents: 5000 })).toThrow("same sign");
-    expect(() => createTransaction(db, { ...base, isTransfer: true, partnerCents: -100 })).toThrow("cannot be split");
+    expect(() => createTransaction(db, { ...base, contactId: 1, shareCents: -2599 })).toThrow("smaller than");
+    expect(() => createTransaction(db, { ...base, contactId: 1, shareCents: 5000 })).toThrow("same sign");
+    expect(() => createTransaction(db, { ...base, contactId: 99, shareCents: -100 })).toThrow("no contact 99");
+    expect(() => createTransaction(db, { ...base, shareCents: -100 })).toThrow("contactId required");
+    expect(() => createTransaction(db, { ...base, isTransfer: true, contactId: 1, shareCents: -100 })).toThrow("cannot be split");
   });
 });
 
@@ -105,10 +108,10 @@ describe("updateTransaction", () => {
     expect(splits).toEqual([{ pot_id: 2 }]);
   });
 
-  test("adds a partner split on edit", () => {
+  test("adds a contact split on edit", () => {
     const db = seed();
     const id = createTransaction(db, base);
-    updateTransaction(db, id, { ...base, amountCents: -10000, partnerCents: -5000 });
+    updateTransaction(db, id, { ...base, amountCents: -10000, contactId: 1, shareCents: -5000 });
     const total = db.query("SELECT SUM(amount_cents) AS s FROM splits WHERE transaction_id = ?").get(id) as any;
     expect(total.s).toBe(-10000);
   });
@@ -125,13 +128,13 @@ describe("updateTransaction", () => {
 
   test("rejects amount changes on settlement-linked transactions", () => {
     const db = seed();
-    const id = createTransaction(db, { ...base, amountCents: -10000, partnerCents: -5000 });
-    const splitId = (db.query("SELECT id FROM splits WHERE transaction_id = ? AND owner = 'partner'").get(id) as any).id;
+    const id = createTransaction(db, { ...base, amountCents: -10000, contactId: 1, shareCents: -5000 });
+    const splitId = (db.query("SELECT id FROM splits WHERE transaction_id = ? AND owner = 'contact'").get(id) as any).id;
     db.query("INSERT INTO settlements (transaction_id, date, amount_cents) VALUES (?, '2026-09-27', 5000)").run(id);
     const stId = (db.query("SELECT id FROM settlements WHERE transaction_id = ?").get(id) as any).id;
     db.query("INSERT INTO settlement_allocations (settlement_id, split_id, amount_cents) VALUES (?, ?, 100)").run(stId, splitId);
     expect(moneyLockReason(db, id)).toMatch("settlement");
-    expect(() => updateTransaction(db, id, { ...base, amountCents: -9000, partnerCents: -4500 })).toThrow("settlement");
+    expect(() => updateTransaction(db, id, { ...base, amountCents: -9000, contactId: 1, shareCents: -4500 })).toThrow("settlement");
   });
 
   test("throws on unknown id", () => {
@@ -141,10 +144,10 @@ describe("updateTransaction", () => {
 });
 
 describe("listTransactions", () => {
-  test("lists a month newest-first with pot and partner detail, skips voided", () => {
+  test("lists a month newest-first with pot and contact detail, skips voided", () => {
     const db = seed();
     const a = createTransaction(db, { ...base, date: "2026-09-20" });
-    createTransaction(db, { ...base, date: "2026-09-26", amountCents: -10000, partnerCents: -5000, description: "Split shop" });
+    createTransaction(db, { ...base, date: "2026-09-26", amountCents: -10000, contactId: 1, shareCents: -5000, description: "Split shop" });
     createTransaction(db, { ...base, date: "2026-08-15", description: "Old month" });
     db.query("UPDATE transactions SET voided = 1 WHERE id = ?").run(a);
 
@@ -153,8 +156,9 @@ describe("listTransactions", () => {
     const r = rows[0];
     expect(r.potName).toBe("Groceries");
     expect(r.potGroup).toBe("Food");
-    expect(r.splitWithPartner).toBe(1);
-    expect(r.partnerCents).toBe(5000);
+    expect(r.splitWithContact).toBe(1);
+    expect(r.sharedCents).toBe(5000);
+    expect(r.splitContactName).toBe("Alex");
     expect(r.accountName).toBe("Chequing");
   });
 });

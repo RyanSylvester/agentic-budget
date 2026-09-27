@@ -29,7 +29,7 @@ export const Full: Story = {
     docs: {
       description: {
         story:
-          "Group containers with summed totals, 50% and partner-share tags, an overspent pot (red Available), income section at the bottom.",
+          "Group containers with summed totals, 50% and contact-share tags, an overspent pot (red Available), income section at the bottom.",
       },
     },
   },

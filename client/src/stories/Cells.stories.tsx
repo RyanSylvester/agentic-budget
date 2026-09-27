@@ -8,7 +8,7 @@ const meta: Meta = {
     docs: {
       description: {
         component:
-          "The small cells inside the budget table. Available is assigned minus spent: green when positive, red when overspent. SplitTag marks pots shared with a partner.",
+          "The small cells inside the budget table. Available is assigned minus spent: green when positive, red when overspent. SplitTag marks pots shared with a contact.",
       },
     },
   },
@@ -48,27 +48,34 @@ export const AvailableUnassigned: StoryObj<typeof Available> = {
 };
 
 export const SplitTagEven: StoryObj = {
-  render: () => <SplitTag p={makePot({ spentCents: 171953, partnerCents: 171953 })} />,
+  render: () => <SplitTag p={makePot({ spentCents: 171953, sharedCents: 171953, contactId: 1, contactName: "Alex", sharePct: 50 })} />,
   parameters: {
-    docs: { description: { story: "An evenly split pot shows the 50% tag." } },
+    docs: { description: { story: "An evenly split pot reads \"split 50/50\"." } },
   },
 };
 
 export const SplitTagPartial: StoryObj = {
-  render: () => <SplitTag p={makePot({ spentCents: 55263, partnerCents: 27631 })} />,
+  render: () => <SplitTag p={makePot({ spentCents: 55263, sharedCents: 27631, contactId: 1, contactName: "Alex", sharePct: 30 })} />,
   parameters: {
-    docs: { description: { story: "A partially shared pot shows the partner's share as an amount." } },
+    docs: { description: { story: "A pot with a custom share config reads \"{name} {pct}%\", here \"Alex 30%\"." } },
+  },
+};
+
+export const SplitTagUnconfigured: StoryObj = {
+  render: () => <SplitTag p={makePot({ spentCents: 9000, sharedCents: 4500 })} />,
+  parameters: {
+    docs: { description: { story: "A pot with shared spending but no share config reads \"Shared\"." } },
   },
 };
 
 export const SplitTagNone: StoryObj = {
   render: () => (
     <span className="text-[13px] text-[var(--muted)]">
-      renders nothing when the pot has no partner share:
-      <SplitTag p={makePot({ spentCents: 9000, partnerCents: 0 })} />
+      renders nothing when the pot has no shared spend:
+      <SplitTag p={makePot({ spentCents: 9000, sharedCents: 0 })} />
     </span>
   ),
   parameters: {
-    docs: { description: { story: "Pots with no partner share render no tag at all." } },
+    docs: { description: { story: "Pots with no shared spend render no tag at all." } },
   },
 };

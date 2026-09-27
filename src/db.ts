@@ -8,11 +8,10 @@ export const DB_PATH = process.env.BUDGET_DB ?? join(here, "..", "budget.db");
 
 let db: Database | null = null;
 
-/** Open (and migrate) the budget database. Single-writer: one user, one agent. */
-export function openDb(path: string = DB_PATH): Database {
-  if (db) return db;
-  const fresh = new Database(path, { create: true });
-  fresh.exec("PRAGMA journal_mode = WAL;");
+/** Bring an existing database up to the current schema. Idempotent: every
+ *  step checks before it writes, so running it twice is a no-op. Exported
+ *  so tests can run it against a scratch database. */
+export function migrateDb(fresh: Database): void {
   const schema = readFileSync(join(here, "schema.sql"), "utf8");
   fresh.exec(schema);
   // Lightweight migrations for databases created before a column existed.
@@ -53,14 +52,77 @@ export function openDb(path: string = DB_PATH): Database {
   if (!cols.some((c) => c.name === "voided")) {
     fresh.exec("ALTER TABLE transactions ADD COLUMN voided INTEGER NOT NULL DEFAULT 0");
   }
+  // Contacts: people the user shares expenses with (replaces the single
+  // hardcoded partner concept).
+  fresh.exec(`CREATE TABLE IF NOT EXISTS contacts (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  )`);
+  // Per-pot share config: which contact a pot is shared with and their
+  // percentage. NULL contact_id = not shared.
+  if (!potCols.some((c) => c.name === "contact_id")) {
+    fresh.exec("ALTER TABLE pots ADD COLUMN contact_id INTEGER NULL REFERENCES contacts(id)");
+  }
+  if (!potCols.some((c) => c.name === "share_pct")) {
+    fresh.exec("ALTER TABLE pots ADD COLUMN share_pct INTEGER NULL");
+  }
+  // Migrate the old single-partner model to contacts. The old splits table
+  // constrained owner to ('user','partner'); the new one uses
+  // ('user','contact') plus a contact_id, which needs a table rebuild.
+  const splitsSql = (
+    fresh.query("SELECT sql FROM sqlite_master WHERE name = 'splits'").get() as { sql: string } | null
+  )?.sql;
+  if (splitsSql && splitsSql.includes("'partner'")) {
+    let contact = fresh.query("SELECT id FROM contacts ORDER BY id LIMIT 1").get() as { id: number } | null;
+    if (!contact) {
+      const name = getSetting(fresh, "partner_name") ?? "Contact";
+      contact = fresh.query("INSERT INTO contacts (name) VALUES (?) RETURNING id").get(name) as { id: number };
+    }
+    fresh.exec(`CREATE TABLE splits_new (
+      id             INTEGER PRIMARY KEY,
+      transaction_id INTEGER NOT NULL REFERENCES transactions(id),
+      pot_id         INTEGER REFERENCES pots(id),
+      owner          TEXT NOT NULL CHECK (owner IN ('user','contact')),
+      contact_id     INTEGER NULL REFERENCES contacts(id),
+      amount_cents   INTEGER NOT NULL
+    )`);
+    fresh.query(
+      `INSERT INTO splits_new (id, transaction_id, pot_id, owner, contact_id, amount_cents)
+       SELECT id, transaction_id, pot_id,
+              CASE WHEN owner = 'partner' THEN 'contact' ELSE 'user' END,
+              CASE WHEN owner = 'partner' THEN ? ELSE NULL END,
+              amount_cents
+       FROM splits`
+    ).run(contact.id);
+    fresh.exec("DROP TABLE splits");
+    fresh.exec("ALTER TABLE splits_new RENAME TO splits");
+    // Pots that historically split with the contact keep a 50% share config
+    // (the old default when splitting a transaction). Editable in the UI.
+    fresh.query(
+      `UPDATE pots SET contact_id = ?, share_pct = 50
+       WHERE contact_id IS NULL AND id IN (
+         SELECT DISTINCT s.pot_id FROM splits s
+         WHERE s.owner = 'contact' AND s.contact_id = ? AND s.pot_id IS NOT NULL
+       )`
+    ).run(contact.id, contact.id);
+    // The old partner_name setting is superseded by the contacts table.
+    fresh.exec("DELETE FROM settings WHERE key = 'partner_name'");
+  }
   // Backfill splits: pre-split transactions were 100% the user's.
   const unsplit = fresh.query(
     "SELECT id, pot_id, amount_cents FROM transactions WHERE id NOT IN (SELECT transaction_id FROM splits)"
   ).all() as { id: number; pot_id: number | null; amount_cents: number }[];
   const ins = fresh.query("INSERT INTO splits (transaction_id, pot_id, owner, amount_cents) VALUES (?, ?, 'user', ?)");
   for (const t of unsplit) ins.run(t.id, t.pot_id, t.amount_cents);
-  // Seed default settings (INSERT OR IGNORE: never overwrite user data).
-  fresh.exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('partner_name', 'Partner')");
+}
+
+/** Open (and migrate) the budget database. Single-writer: one user, one agent. */
+export function openDb(path: string = DB_PATH): Database {
+  if (db) return db;
+  const fresh = new Database(path, { create: true });
+  fresh.exec("PRAGMA journal_mode = WAL;");
+  migrateDb(fresh);
   db = fresh;
   return db;
 }

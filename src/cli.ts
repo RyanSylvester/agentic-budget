@@ -2,15 +2,21 @@
  *  runs instead of clicking through a UI.
  *
  *  Usage:
- *    bun src/cli.ts record --account 1 --amount -12.50 --description "Voila groceries" --source mention [--date 2026-09-26] [--cleared] [--pot 5] [--partner-cents 625] [--uncertain "unsure which pot"] [--transfer] [--external-id stmt-abc123]
+ *    bun src/cli.ts record --account 1 --amount -12.50 --description "Voila groceries" --source mention [--date 2026-09-26] [--cleared] [--pot 5] [--contact-id 1] [--share-cents 625] [--uncertain "unsure which pot"] [--transfer] [--external-id stmt-abc123]
  *    bun src/cli.ts assign --month 2026-09 --pot Groceries --cents 60000
  *    bun src/cli.ts recategorize --id 42 --pot Groceries
  *    bun src/cli.ts void --id 42
- *    bun src/cli.ts pot create --name "Nova" --group Life [--target-type savings]
+ *    bun src/cli.ts pot create --name "Nova" --group Life [--target-type savings] [--contact-id 1 --share-pct 50]
  *    bun src/cli.ts pot rename --pot 12 --name "Nova Fund"
+ *    bun src/cli.ts pot share --pot 12 --contact-id 1 [--share-pct 50]   # default 50%
+ *    bun src/cli.ts pot unshare --pot 12
  *    bun src/cli.ts pot retire --pot 12
  *    bun src/cli.ts pot unhide --pot 12
- *    bun src/cli.ts settle --account 1 --amount 2000 --note "Partner e-transfer"   # their lump sum fills the buckets they owe, oldest first
+ *    bun src/cli.ts contact list
+ *    bun src/cli.ts contact add --name "Alex"
+ *    bun src/cli.ts contact rename --contact 1 --name "Alex R."
+ *    bun src/cli.ts contact delete --contact 1   # blocked while pots or splits reference them
+ *    bun src/cli.ts settle --contact 1 --account 1 --amount 2000 --note "E-transfer"   # their lump sum fills the buckets they owe, oldest first
  *    bun src/cli.ts review            # list pending_review transactions
  *    bun src/cli.ts reconcile --account 1 --balance 1234.56
  *    bun src/cli.ts close --month 2026-09 [--apply]   # preview (or apply) the month-end close
@@ -18,13 +24,15 @@
  */
 import { openDb } from "./db";
 import { reconcile, suggestClear } from "./reconcile";
-import { applySettlement, partnerOwed } from "./settle";
+import { applySettlement, contactOwed } from "./settle";
 import { closePreview, applyClose } from "./close";
 import { assignToPot } from "./assign";
+import { contactBalances, createContact, deleteContact, listContacts, renameContact } from "./contacts";
+import { createPot, deletePot, updatePot } from "./pots";
 import { assertSplitsSum, resolvePotId, validDate, validMonth, fmtCents } from "./money";
 
 function usage(): never {
-  console.error("usage: budget <record|assign|recategorize|void|pot|settle|review|reconcile|close|serve> [options]");
+  console.error("usage: budget <record|assign|recategorize|void|pot|contact|settle|review|reconcile|close|serve> [options]");
   process.exit(2);
 }
 
@@ -72,27 +80,43 @@ if (cmd === "record") {
   }
   const status = uncertain ? "pending_review" : "confirmed";
   const enteredBy = "agent"; // CLI is the agent's write path
+  // Splits: the user's share counts in their views; the contact's share is
+  // expected (owed). Defaults come from the pot's share config; flags override.
+  let contactId = flag("contact-id") ? parseInt(flag("contact-id")!, 10) : null;
+  let share = flag("share-cents") ? Math.round(parseFloat(flag("share-cents")!) * 100) : 0;
+  if (potId && !isTransfer && (contactId === null || share === 0)) {
+    const cfg = db.query("SELECT contact_id, share_pct FROM pots WHERE id = ?").get(potId) as {
+      contact_id: number | null;
+      share_pct: number | null;
+    };
+    if (contactId === null && cfg?.contact_id) contactId = cfg.contact_id;
+    if (share === 0 && cfg?.share_pct != null && contactId !== null) {
+      share = Math.round((Math.abs(amount) * cfg.share_pct) / 100);
+    }
+  }
+  if (share !== 0) {
+    if (contactId === null) fail("splitting needs --contact-id (or a pot with a share config)");
+    if (!db.query("SELECT 1 FROM contacts WHERE id = ?").get(contactId)) fail(`no contact ${contactId}`);
+    if (isTransfer) fail("transfers cannot be split with a contact");
+  }
   const txnId = db.transaction(() => {
     const row = db.query(
       "INSERT INTO transactions (date, account_id, amount_cents, description, source, entered_by, status, cleared, review_reason, is_transfer, external_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id"
     ).get(date, accountId, amount, description, source, enteredBy, status, cleared, uncertain, isTransfer, externalId) as { id: number };
-    // Splits: the user's share counts in their views; the partner's share is expected (owed).
-    const partner = flag("partner-cents") ? Math.round(parseFloat(flag("partner-cents")!) * 100) : 0;
-    const ins = db.query("INSERT INTO splits (transaction_id, pot_id, owner, amount_cents) VALUES (?, ?, ?, ?)");
-    if (partner !== 0) {
-      const userCents = amount + partner; // amount negative outflow; partner's share positive dollars
-      ins.run(row.id, potId, "user", userCents);
-      ins.run(row.id, potId, "partner", -partner);
+    const ins = db.query("INSERT INTO splits (transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (?, ?, ?, ?, ?)");
+    if (share !== 0 && contactId !== null) {
+      const userCents = amount + share; // amount negative outflow; contact's share positive dollars
+      ins.run(row.id, potId, "user", null, userCents);
+      ins.run(row.id, potId, "contact", contactId, -share);
     } else {
-      ins.run(row.id, potId, "user", amount);
+      ins.run(row.id, potId, "user", null, amount);
     }
     assertSplitsSum(db, row.id);
     return row.id;
   })();
   const tag = `${status}${isTransfer ? ", transfer" : ""}, ${cleared}`;
-  const partner = flag("partner-cents") ? Math.round(parseFloat(flag("partner-cents")!) * 100) : 0;
-  if (partner !== 0) {
-    console.log(`recorded transaction ${txnId} (${tag}) — split: user ${fmtCents(amount + partner)}, partner owes ${fmtCents(partner)}`);
+  if (share !== 0) {
+    console.log(`recorded transaction ${txnId} (${tag}) — split: user ${fmtCents(amount + share)}, contact owes ${fmtCents(share)}`);
   } else {
     console.log(`recorded transaction ${txnId} (${tag})${uncertain ? ` — needs review: ${uncertain}` : ""}`);
   }
@@ -134,11 +158,47 @@ if (cmd === "record") {
     const group = flag("group") ?? "Life";
     const targetType = (flag("target-type") ?? "average_3mo") as "fixed" | "average_3mo" | "savings";
     const targetCents = Math.round(parseFloat(flag("target-cents") ?? "0"));
-    if (!name || !["fixed", "average_3mo", "savings"].includes(targetType)) usage();
-    const row = db.query(
-      "INSERT INTO pots (name, pot_group, target_type, target_cents) VALUES (?, ?, ?, ?) RETURNING id"
-    ).get(name, group, targetType, targetCents) as { id: number };
-    console.log(`created pot ${row.id} "${name}" (${group}, ${targetType})`);
+    if (!name) usage();
+    try {
+      const id = createPot(db, {
+        name, group, targetType, targetCents,
+        contactId: flag("contact-id") ? parseInt(flag("contact-id")!, 10) : undefined,
+        sharePct: flag("share-pct") ? parseInt(flag("share-pct")!, 10) : undefined,
+      });
+      console.log(`created pot ${id} "${name}" (${group}, ${targetType})`);
+    } catch (e) {
+      fail((e as Error).message);
+    }
+  } else if (sub === "share" || sub === "unshare") {
+    const potRef = flag("pot");
+    if (!potRef) usage();
+    const potId = mustResolvePot(db, potRef);
+    try {
+      if (sub === "share") {
+        const contactId = parseInt(flag("contact-id") ?? "NaN", 10);
+        if (!Number.isFinite(contactId)) usage();
+        updatePot(db, potId, {
+          contactId,
+          sharePct: flag("share-pct") ? parseInt(flag("share-pct")!, 10) : undefined,
+        });
+        console.log(`pot ${potId} now shared`);
+      } else {
+        updatePot(db, potId, { contactId: null });
+        console.log(`pot ${potId} no longer shared`);
+      }
+    } catch (e) {
+      fail((e as Error).message);
+    }
+  } else if (sub === "delete") {
+    const potRef = flag("pot");
+    if (!potRef) usage();
+    const potId = mustResolvePot(db, potRef);
+    try {
+      const s = deletePot(db, potId);
+      console.log(`deleted pot ${potId}; ${s.movedTransactions} transactions and ${s.movedAssignments} assignments moved to Uncategorized (pot ${s.uncategorizedPotId})`);
+    } catch (e) {
+      fail((e as Error).message);
+    }
   } else if (sub === "rename" || sub === "retire" || sub === "unhide") {
     const potRef = flag("pot");
     if (!potRef) usage();
@@ -155,20 +215,61 @@ if (cmd === "record") {
   } else {
     usage();
   }
+} else if (cmd === "contact") {
+  const db = openDb();
+  const [sub, ..._cRest] = rest;
+  if (sub === "list") {
+    const bals = contactBalances(db);
+    if (bals.length === 0) console.log("no contacts");
+    for (const b of bals) {
+      console.log(`${b.id} "${b.name}" — owes $${fmtCents(b.totalOwedCents)}, credit $${fmtCents(b.creditCents)}`);
+    }
+  } else if (sub === "add") {
+    const name = flag("name");
+    if (!name) usage();
+    try {
+      const id = createContact(db, name);
+      console.log(`created contact ${id} "${name}"`);
+    } catch (e) {
+      fail((e as Error).message);
+    }
+  } else if (sub === "rename" || sub === "delete") {
+    const contactId = parseInt(flag("contact") ?? "NaN", 10);
+    if (!Number.isFinite(contactId)) usage();
+    try {
+      if (sub === "rename") {
+        const name = flag("name");
+        if (!name) usage();
+        renameContact(db, contactId, name);
+        console.log(`renamed contact ${contactId} to "${name}"`);
+      } else {
+        deleteContact(db, contactId);
+        console.log(`deleted contact ${contactId}`);
+      }
+    } catch (e) {
+      fail((e as Error).message);
+    }
+  } else {
+    usage();
+  }
 } else if (cmd === "settle") {
   const db = openDb();
   const accountId = parseInt(flag("account") ?? "NaN", 10);
   const amountCents = Math.round(parseFloat(flag("amount") ?? "NaN") * 100);
-  const note = flag("note") ?? "Partner settlement";
+  const note = flag("note") ?? undefined;
   if (!Number.isFinite(accountId) || !Number.isFinite(amountCents) || amountCents <= 0) usage();
-  const before = partnerOwed(db).reduce((a, o) => a + o.owedCents, 0);
-  const { allocations, creditAllocations, creditConsumedCents, leftoverCents } = applySettlement(db, { accountId, amountCents, note });
+  const contactId = parseInt(flag("contact") ?? "NaN", 10);
+  if (!Number.isFinite(contactId)) usage();
+  const contact = db.query("SELECT name FROM contacts WHERE id = ?").get(contactId) as { name: string } | null;
+  if (!contact) fail(`no contact ${contactId}`);
+  const before = contactOwed(db, contactId).reduce((a, o) => a + o.owedCents, 0);
+  const { allocations, creditAllocations, creditConsumedCents, leftoverCents } = applySettlement(db, { contactId, accountId, amountCents, note });
   console.log(`settlement of $${fmtCents(amountCents)} recorded (cleared, confirmed).`);
   for (const a of creditAllocations) console.log(`  credit ${(a.amountCents / 100).toFixed(2)} -> ${a.potName ?? "Uncategorized"}`);
   for (const a of allocations) console.log(`  filled ${(a.amountCents / 100).toFixed(2)} -> ${a.potName ?? "Uncategorized"}`);
   if (leftoverCents > 0) console.log(`  $${fmtCents(leftoverCents)} left over — credit for next time`);
   if (creditConsumedCents > 0) console.log(`  $${fmtCents(creditConsumedCents)} of prior credit consumed`);
-  console.log(`partner owed before: $${fmtCents(before)}`);
+  console.log(`${contact.name} owed before: $${fmtCents(before)}`);
 } else if (cmd === "reconcile") {
   const db = openDb();
   const accountId = parseInt(flag("account") ?? "NaN", 10);
@@ -204,7 +305,7 @@ if (cmd === "record") {
   console.log(`  spent (user)       ${$(p.spentCents)}`);
   console.log(`  RTA before close   ${$(p.rtaBeforeCents)}`);
   console.log(`  -> moves to savings ${$(p.movedToSavingsCents)}, RTA ends $0.00`);
-  console.log(`  partner owes total  ${$(p.partnerOwedCents)}`);
+  console.log(`  shared owed total  ${$(p.sharedOwedCents)}`);
   console.log(`  per-pot wireframe:`);
   for (const l of p.pots) {
     console.log(`    ${l.name} (${l.targetType}${l.assignable ? "" : ", not assignable"}): spent ${$(l.spentCents)} / target ${$(l.targetCents)} -> next ${$(l.wireframeCents)}`);

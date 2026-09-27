@@ -1,5 +1,5 @@
 /** Spend queries. Every one of the user's views sums only owner='user' splits —
- *  the partner's share of a split transaction is recorded but never counted in
+ *  a contact's share of a split transaction is recorded but never counted in
  *  the user's numbers. (Reconciliation is the exception: it uses full
  *  transaction amounts because the bank balance is the bank balance.)
  */
@@ -19,17 +19,17 @@ export function monthSpend(db: Database, month: string): number {
   return r.spent;
 }
 
-/** The user's confirmed outflow for one pot in a month: user share + partner share. */
-export function potSpend(db: Database, potId: number, month: string): { userCents: number; partnerCents: number } {
+/** The user's confirmed outflow for one pot in a month: user share + contact share. */
+export function potSpend(db: Database, potId: number, month: string): { userCents: number; sharedCents: number } {
   const r = db.query(
     `SELECT
        COALESCE(SUM(CASE WHEN s.owner = 'user' THEN -s.amount_cents ELSE 0 END), 0) AS user,
-       COALESCE(SUM(CASE WHEN s.owner = 'partner' THEN -s.amount_cents ELSE 0 END), 0) AS partner
+       COALESCE(SUM(CASE WHEN s.owner = 'contact' THEN -s.amount_cents ELSE 0 END), 0) AS shared
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
      WHERE s.pot_id = ? AND substr(t.date, 1, 7) = ?
        AND t.status = 'confirmed' AND t.is_transfer = 0 AND t.voided = 0 AND s.amount_cents < 0`
-  ).get(potId, month) as { user: number; partner: number };
-  return { userCents: r.user, partnerCents: r.partner };
+  ).get(potId, month) as { user: number; shared: number };
+  return { userCents: r.user, sharedCents: r.shared };
 }
 
 /** Shift a YYYY-MM month back by n months. */
@@ -76,7 +76,9 @@ export function recentTransactions(db: Database, limit = 10, month?: string) {
   return db.query(
     `SELECT t.id, t.date, t.description, t.is_transfer,
             COALESCE(SUM(CASE WHEN s.owner = 'user' THEN s.amount_cents ELSE 0 END), 0) AS user_cents,
-            CASE WHEN SUM(CASE WHEN s.owner = 'partner' THEN 1 ELSE 0 END) > 0 THEN 1 ELSE 0 END AS split_with_partner
+            CASE WHEN SUM(CASE WHEN s.owner = 'contact' THEN 1 ELSE 0 END) > 0 THEN 1 ELSE 0 END AS split_with_contact,
+            (SELECT c.name FROM splits s2 JOIN contacts c ON c.id = s2.contact_id
+             WHERE s2.transaction_id = t.id AND s2.owner = 'contact' LIMIT 1) AS split_contact_name
      FROM transactions t LEFT JOIN splits s ON s.transaction_id = t.id
      ${where}
      GROUP BY t.id ORDER BY t.date DESC, t.id DESC LIMIT ?`
@@ -115,7 +117,7 @@ export function rtaCents(db: Database, month: string): number {
 }
 
 /** One row of the Transactions page: the transaction plus its user-side pot
- *  and the partner's share. Newest first. Voided transactions never appear. */
+ *  and the contact's share. Newest first. Voided transactions never appear. */
 export interface ListedTransaction {
   id: number;
   date: string;
@@ -130,8 +132,10 @@ export interface ListedTransaction {
   potId: number | null;
   potName: string | null;
   potGroup: string | null;
-  splitWithPartner: number;
-  partnerCents: number;
+  splitWithContact: number;
+  sharedCents: number;
+  splitContactId: number | null;
+  splitContactName: string | null;
 }
 
 export function listTransactions(db: Database, month: string): ListedTransaction[] {
@@ -149,8 +153,12 @@ export function listTransactions(db: Database, month: string): ListedTransaction
             (SELECT p.pot_group FROM splits s2 JOIN pots p ON p.id = s2.pot_id
              WHERE s2.transaction_id = t.id AND s2.owner = 'user'
              ORDER BY ABS(s2.amount_cents) DESC LIMIT 1) AS potGroup,
-            CASE WHEN SUM(CASE WHEN s.owner = 'partner' THEN 1 ELSE 0 END) > 0 THEN 1 ELSE 0 END AS splitWithPartner,
-            COALESCE(-SUM(CASE WHEN s.owner = 'partner' THEN s.amount_cents ELSE 0 END), 0) AS partnerCents
+            CASE WHEN SUM(CASE WHEN s.owner = 'contact' THEN 1 ELSE 0 END) > 0 THEN 1 ELSE 0 END AS splitWithContact,
+            COALESCE(-SUM(CASE WHEN s.owner = 'contact' THEN s.amount_cents ELSE 0 END), 0) AS sharedCents,
+            (SELECT s2.contact_id FROM splits s2
+             WHERE s2.transaction_id = t.id AND s2.owner = 'contact' LIMIT 1) AS splitContactId,
+            (SELECT c.name FROM splits s2 JOIN contacts c ON c.id = s2.contact_id
+             WHERE s2.transaction_id = t.id AND s2.owner = 'contact' LIMIT 1) AS splitContactName
      FROM transactions t
      JOIN accounts a ON a.id = t.account_id
      LEFT JOIN splits s ON s.transaction_id = t.id

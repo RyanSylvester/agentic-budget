@@ -25,7 +25,7 @@ const overviewUrl = `/api/overview?month=${MONTH}`;
 const fullApi = {
   get: {
     [overviewUrl]: makeOverview(),
-    "/api/attention": makeAttention({ unsettledPartnerCents: 42180 }),
+    "/api/attention": makeAttention({ unsettledSharedCents: 42180, sharedOwedBy: [{ contactId: 1, name: "Alex", cents: 42180 }] }),
     "/api/accounts": { accounts: fixtureAccounts },
   },
 } satisfies MockApiConfig;
@@ -46,7 +46,7 @@ export const Quiet: Story = {
           pendingReviewCount: 0,
           unreconciledAccounts: [],
           rtaCents: 0,
-          unsettledPartnerCents: 0,
+          unsettledSharedCents: 0,
         }),
         "/api/accounts": { accounts: fixtureAccounts },
       },

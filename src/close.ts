@@ -37,7 +37,7 @@ export function closeMonth(input: CloseInput): { rtaEndCents: number; movedToSav
 
 import type { Database } from "bun:sqlite";
 import { monthSpend, monthInflows, potSpend, assignedTotal, rtaCents } from "./queries";
-import { partnerOwed } from "./settle";
+import { contactOwed } from "./settle";
 import { fmtCents } from "./money";
 
 /** Shift a YYYY-MM month by delta months. */
@@ -66,7 +66,8 @@ export interface ClosePreview {
   assignedCents: number;
   rtaBeforeCents: number;
   movedToSavingsCents: number;
-  partnerOwedCents: number;
+  sharedOwedCents: number;
+  sharedOwedBy: { name: string; cents: number }[];
   pots: PotCloseLine[];
 }
 
@@ -91,9 +92,15 @@ export function closePreview(db: Database, month: string): ClosePreview {
   const assignedCents = assignedTotal(db, month);
   const rtaBeforeCents = rtaCents(db, month);
   const { movedToSavingsCents } = closeMonth({ rtaStartCents: rtaBeforeCents });
-  const partnerOwedCents = partnerOwed(db).reduce((a, o) => a + o.owedCents, 0);
+  const owed = contactOwed(db);
+  const sharedOwedCents = owed.reduce((a, o) => a + o.owedCents, 0);
+  const byName = new Map<string, number>();
+  for (const o of owed) byName.set(o.contactName, (byName.get(o.contactName) ?? 0) + o.owedCents);
+  const sharedOwedBy = [...byName.entries()]
+    .map(([name, cents]) => ({ name, cents }))
+    .sort((a, b) => b.cents - a.cents);
 
-  return { month, nextMonth: shiftMonth(month, 1), inflowsCents, spentCents, assignedCents, rtaBeforeCents, movedToSavingsCents, partnerOwedCents, pots: lines };
+  return { month, nextMonth: shiftMonth(month, 1), inflowsCents, spentCents, assignedCents, rtaBeforeCents, movedToSavingsCents, sharedOwedCents, sharedOwedBy, pots: lines };
 }
 
 /** Apply the month-end close: record it and wireframe next month's pot targets.

@@ -1,11 +1,16 @@
-# Budget app
+# agentic-budget
 
-Agentic-first personal budgeting. Agents are the intended write path.
+Agentic-first personal budgeting. The agent is the write path; the human gets
+the understanding. Built around one person's actual rules instead of fighting
+them.
 
 ## The idea
 
 No bank sync. Data enters because the agent puts it there: it reads statements,
-takes spending mentions from chat, or uses whatever connections your agents already have. In this system, data entry is the agent's job.
+takes spending mentions from chat, and records everything through the `budget`
+CLI. The human gets a read-mostly dashboard: the month at a glance, pot
+balances, trends, and a review screen. The weekly review is the product
+surface; data entry is the agent's job.
 
 ## Stack
 
@@ -38,10 +43,12 @@ bun src/cli.ts serve         # dashboard at http://localhost:3111
   (`budget assign --month YYYY-MM --pot <id|name> --cents N`, idempotent).
   Ready-to-Assign = inflows − assignments; the month ends with RTA at exactly
   $0, and the close refuses to apply otherwise.
-- **Splits**: every transaction is split by owner (`user` / `partner`).
-  The user's share counts in their views; the partner's share is recorded
+- **Splits**: every transaction is split by owner (`user` / `contact`).
+  The user's share counts in their views; a contact's share is recorded
   as what they owe and never counted as the user's spending. Settlements
-  allocate the partner's lump sums oldest-first, consuming prior credit first.
+  allocate a contact's lump sums oldest-first, consuming prior credit first.
+  Each contact is managed in the Sharing tab; each pot can carry a default
+  share config (contact + percent) for new splits.
 - **Transfers** (`is_transfer`) move between the user's own accounts: counted in
   reconciliation, never in spending.
 - **Review queue**: only entries the agent wasn't sure about land here. One tap
@@ -54,8 +61,8 @@ bun src/cli.ts serve         # dashboard at http://localhost:3111
   history. The agent applies the close after the user's review
   (`bun src/cli.ts close --month YYYY-MM` to preview).
 - **Agent surface**: `GET /api/attention` returns the machine-readable ritual
-  summary (pending reviews, unreconciled accounts, RTA, unsettled partner
-  balance) for the agent's weekly run.
+  summary (pending reviews, unreconciled accounts, RTA, unsettled contact
+  balances) for the agent's weekly run.
 
 ## Status
 

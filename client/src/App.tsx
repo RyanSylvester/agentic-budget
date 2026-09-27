@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /* ---------- types ---------- */
 
@@ -9,10 +9,11 @@ export interface Txn {
   user_cents: number;
   amount_cents?: number; // present on /api/review items only
   is_transfer: number;
-  split_with_partner: number;
+  split_with_contact: number;
+  split_contact_name: string | null;
   source: string;
   status: string;
-  partner_cents: number;
+  shared_cents: number;
   review_reason: string | null;
 }
 
@@ -21,7 +22,6 @@ export interface Overview {
   confirmedSpendCents: number;
   pendingCount: number;
   recent: Txn[];
-  partnerName: string;
   rtaCents?: number;
   assignedCents?: number;
 }
@@ -34,7 +34,8 @@ export interface ClosePreviewData {
   assignedCents?: number;
   rtaBeforeCents: number;
   movedToSavingsCents: number;
-  partnerOwedCents: number;
+  sharedOwedCents: number;
+  sharedOwedBy: { name: string; cents: number }[];
 }
 
 export interface Account {
@@ -51,15 +52,21 @@ export interface Pot {
   id: number;
   name: string;
   group: string;
+  targetType: string;
   targetCents: number;
   spentCents: number;
-  partnerCents: number;
+  sharedCents: number;
   assignable: boolean;
   assignedCents?: number;
+  contactId: number | null;
+  contactName: string | null;
+  sharePct: number | null;
 }
 
-export interface PartnerInfo {
-  partnerName: string;
+/** A contact's outstanding shared balance. Matches GET /api/contacts. */
+export interface ContactBalance {
+  id: number;
+  name: string;
   totalOwedCents: number;
   creditCents: number;
   byPot: { pot: string; cents: number }[];
@@ -76,7 +83,8 @@ export interface Attention {
   pendingReviewCount: number;
   unreconciledAccounts: Array<string | { name: string }>;
   rtaCents: number;
-  unsettledPartnerCents: number;
+  unsettledSharedCents: number;
+  sharedOwedBy: { contactId: number; name: string; cents: number }[];
 }
 
 export interface PotHistoryPoint {
@@ -85,7 +93,7 @@ export interface PotHistoryPoint {
 }
 
 /** One row of the Transactions page: the transaction plus its user-side pot
- *  and the partner's share. Matches GET /api/transactions. */
+ *  and the contact's share. Matches GET /api/transactions. */
 export interface ListedTxn {
   id: number;
   date: string;
@@ -100,8 +108,10 @@ export interface ListedTxn {
   potId: number | null;
   potName: string | null;
   potGroup: string | null;
-  splitWithPartner: number;
-  partnerCents: number;
+  splitWithContact: number;
+  sharedCents: number;
+  splitContactId: number | null;
+  splitContactName: string | null;
 }
 
 /* ---------- helpers ---------- */
@@ -318,13 +328,18 @@ export function AssignCell({ pot, month, onAssigned }: { pot: Pot; month: string
   );
 }
 
-// Split tag: a small pill after the spent amount. Even splits read "50%";
-// partial splits read "partner $X.XX". Same component, same size.
+// Split tag: a small pill after the spent amount. Reads "split 50/50" for
+// even splits, "{name} {pct}%" for other configured shares, or "Shared" when
+// no share config exists. Same component, same size.
 export function SplitTag({ p }: { p: Pot }) {
-  if (p.partnerCents <= 0) return null;
+  if (p.sharedCents <= 0) return null;
+  const label =
+    p.sharePct == null ? "Shared"
+    : p.sharePct === 50 ? "split 50/50"
+    : `${p.contactName ?? "Shared"} ${p.sharePct}%`;
   return (
     <span className="t-nums ml-2 inline-flex items-center rounded-[var(--r-pill)] border border-[var(--hairline)] bg-[var(--bg-sunken)] px-2 py-0.5 align-middle text-[11px] font-medium text-[var(--ink)]">
-      {p.partnerCents === p.spentCents ? "50%" : `partner ${money(p.partnerCents)}`}
+      {label}
     </span>
   );
 }
@@ -341,10 +356,17 @@ export function Available({ assignedCents, spentCents, className = "" }: { assig
   );
 }
 
-export function PotNameCell({ p }: { p: Pot }) {
+export function PotNameCell({ p, onEdit }: { p: Pot; onEdit?: () => void }) {
   return (
     <div className="min-w-0">
-      <div className="truncate text-[15px] font-semibold">{p.name}</div>
+      <div className="flex items-baseline gap-2">
+        <div className="truncate text-[15px] font-semibold">{p.name}</div>
+        {onEdit && (
+          <button onClick={onEdit} className="shrink-0 cursor-pointer text-[12px] text-[var(--faint)] hover:text-[var(--ink)] hover:underline">
+            Edit
+          </button>
+        )}
+      </div>
       {p.targetCents > 0 && (
         <div className="mt-0.5 text-[12px] text-[var(--muted)]">target {money(p.targetCents)}</div>
       )}
@@ -352,7 +374,7 @@ export function PotNameCell({ p }: { p: Pot }) {
   );
 }
 
-export function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: string; onAssigned: () => void }) {
+export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[]; month: string; onAssigned: () => void; onEditPot?: (pot: Pot) => void }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   if (pots.length === 0)
     return <p className="text-[17px] italic text-[var(--muted)]">No pots yet. They'll appear here once the budget is set up.</p>;
@@ -411,7 +433,7 @@ export function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: s
                   {/* narrow screens: name + available up top, assigned/spent below */}
                   <div className="sm:hidden">
                     <div className="flex items-start justify-between gap-3">
-                      <PotNameCell p={p} />
+                      <PotNameCell p={p} onEdit={onEditPot ? () => onEditPot(p) : undefined} />
                       <Available assignedCents={p.assignedCents ?? 0} spentCents={p.spentCents} className="shrink-0 pt-0.5" />
                     </div>
                     <div className="mt-2 flex items-center gap-4">
@@ -424,7 +446,7 @@ export function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: s
                   </div>
                   {/* wide screens: one table row */}
                   <div className="hidden grid-cols-[minmax(0,1fr)_130px_170px_120px] items-center gap-3 sm:grid">
-                    <PotNameCell p={p} />
+                    <PotNameCell p={p} onEdit={onEditPot ? () => onEditPot(p) : undefined} />
                     <AssignCell pot={p} month={month} onAssigned={onAssigned} />
                     <span className="t-nums whitespace-nowrap text-[15px]">
                       {money(p.spentCents)}
@@ -448,7 +470,7 @@ export function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: s
           <p className="mb-2 text-[13px] text-[var(--muted)]">Money in. These pots receive; they are never assigned to.</p>
           {income.map((p) => (
             <div key={p.id} className="flex items-baseline justify-between gap-3 border-b border-[var(--hairline)] py-3">
-              <PotNameCell p={p} />
+              <PotNameCell p={p} onEdit={onEditPot ? () => onEditPot(p) : undefined} />
               <span className="t-nums shrink-0 text-[13px] text-[var(--faint)]">income</span>
             </div>
           ))}
@@ -490,7 +512,7 @@ export function RecentActivity({ txns, loading }: { txns: Txn[]; loading?: boole
               <div className="truncate text-[15px]">{t.description}</div>
               <div className="mt-0.5 text-[13px] text-[var(--muted)]">
                 {fmtDate(t.date)}
-                {t.split_with_partner ? " · split" : ""}
+                {t.split_with_contact ? ` · split${t.split_contact_name ? ` with ${t.split_contact_name}` : ""}` : ""}
               </div>
             </div>
             <span className={`t-nums shrink-0 text-[15px] ${t.user_cents < 0 ? "" : "font-medium text-[var(--success)]"}`}>
@@ -518,12 +540,18 @@ export function CloseCard({ preview, onGo }: { preview: ClosePreviewData; onGo: 
         <span className="t-nums font-semibold">{money(preview.movedToSavingsCents)}</span>
         <span className="text-[var(--muted)]"> moves to secondary savings; ready-to-assign → $0</span>
       </div>
-      {preview.partnerOwedCents > 0 && (
+      {preview.sharedOwedCents > 0 && (
         <button
-          onClick={() => onGo("partner")}
+          onClick={() => onGo("sharing")}
           className="mt-3 flex w-full items-center justify-between rounded-[var(--r-md)] bg-[var(--bg-sunken)] px-4 py-3 text-left text-[15px] transition active:scale-[0.99]"
         >
-          <span>Partner owes <span className="t-nums font-medium">{money(preview.partnerOwedCents)}</span></span>
+          <span>
+            {preview.sharedOwedBy.length === 1 ? (
+              <>{preview.sharedOwedBy[0].name} owes <span className="t-nums font-medium">{money(preview.sharedOwedBy[0].cents)}</span></>
+            ) : (
+              <><span className="t-nums font-medium">{money(preview.sharedOwedCents)}</span> in shared balances owed</>
+            )}
+          </span>
           <span className="text-[var(--faint)]">→</span>
         </button>
       )}
@@ -596,11 +624,18 @@ export function AttentionCard({ attention, overview, accounts, onGo }: {
       const name = typeof a === "string" ? a : a.name;
       items.push({ label: `${name} not reconciled yet`, tab: "accounts" });
     }
-    if (attention.unsettledPartnerCents > 0)
+    if (attention.unsettledSharedCents > 0) {
+      const names = attention.sharedOwedBy ?? [];
       items.push({
-        label: <>Partner owes <span className="t-nums font-medium">{money(attention.unsettledPartnerCents)}</span></>,
-        tab: "partner",
+        label:
+          names.length === 1 ? (
+            <>{names[0].name} owes <span className="t-nums font-medium">{money(names[0].cents)}</span></>
+          ) : (
+            <><span className="t-nums font-medium">{money(attention.unsettledSharedCents)}</span> in shared balances owed</>
+          ),
+        tab: "sharing",
       });
+    }
     if (attention.rtaCents > 0)
       items.push({
         label: <><span className="t-nums font-medium">{money(attention.rtaCents)}</span> ready to assign</>,
@@ -637,29 +672,24 @@ export function AttentionCard({ attention, overview, accounts, onGo }: {
   );
 }
 
-/* ---------- partner balance ---------- */
+/* ---------- contact balance ---------- */
 
-export function PartnerCard() {
-  const { data: info, error, loading, retry } = useApi<PartnerInfo>("/api/partner");
-  const { data: accountsData } = useApi<{ accounts: Account[] }>("/api/accounts");
+/* One contact's shared balance: what they owe, by pot, plus the settle-up
+ *  flow. Accounts are passed down so each card doesn't refetch them. */
+export function ContactCard({ contact, accounts }: { contact: ContactBalance; accounts: Account[] }) {
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const [settleError, setSettleError] = useState(false);
+  const [settledTick, setSettledTick] = useState(0);
   const [last, setLast] = useState<{ allocations: { potName: string | null; amountCents: number }[]; leftoverCents: number } | null>(null);
 
-  if (loading) {
-    return (
-      <div className="card space-y-3 p-5">
-        <Skeleton className="h-4 w-32" />
-        <Skeleton className="h-9 w-44" />
-        <Skeleton className="h-5 w-full" />
-      </div>
-    );
-  }
-  if (error || !info) return <FetchError onRetry={retry} label="Couldn't load the partner balance." />;
+  // Re-read this contact's balance after a settlement lands.
+  const { data: fresh } = useApi<{ contacts: ContactBalance[] }>(
+    settledTick === 0 ? null : "/api/contacts"
+  );
+  const info = fresh?.contacts.find((c) => c.id === contact.id) ?? contact;
 
   const settled = info.totalOwedCents === 0 && info.creditCents === 0;
-  const accounts = accountsData?.accounts ?? [];
   const dest = accounts.find((a) => a.type === "chequing") ?? accounts[0] ?? null;
 
   const settle = async () => {
@@ -671,14 +701,14 @@ export function PartnerCard() {
       const res = await fetch("/api/settle", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: dest.id, amountCents: cents, note: "Partner settlement" }),
+        body: JSON.stringify({ contactId: contact.id, accountId: dest.id, amountCents: cents, note: `${contact.name} settlement` }),
       }).then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       });
       setLast(res);
       setAmount("");
-      retry();
+      setSettledTick((t) => t + 1);
     } catch {
       setSettleError(true);
     }
@@ -687,9 +717,10 @@ export function PartnerCard() {
 
   return (
     <div className="card p-5">
-      <div className="text-[17px] font-semibold">{settled ? "Settled up" : "Partner owes you"}</div>
+      <div className="text-[17px] font-semibold">{contact.name}</div>
+      <div className="text-[13px] text-[var(--muted)]">{settled ? "Settled up" : "owes you"}</div>
       {settled ? (
-        <div className="mt-1.5 text-[24px] italic">All settled.</div>
+        <div className="t-nums mt-1.5 text-[32px] font-light tracking-tight">$0.00</div>
       ) : (
         <>
           <div className="t-nums mt-1.5 text-[32px] font-light tracking-tight">{money(info.totalOwedCents)}</div>
@@ -751,14 +782,187 @@ export function PartnerCard() {
   );
 }
 
-/* ---------- tabs: pots / close / partner ---------- */
+/* ---------- tabs: pots / close / sharing ---------- */
+
+/* Add or edit a pot: name, group, target, and who it's shared with (which
+ *  contact and their percentage). Deleting moves the pot's history to the
+ *  Uncategorized pot instead of destroying it. */
+export function PotSheet({ pot, groups, onClose, onSaved }: {
+  pot: Pot | null;
+  groups: string[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { data: contactsData } = useApi<{ contacts: ContactBalance[] }>("/api/contacts");
+  const contacts = contactsData?.contacts ?? [];
+  const [name, setName] = useState(pot?.name ?? "");
+  const [group, setGroup] = useState(pot?.group ?? groups[0] ?? "");
+  const [targetType, setTargetType] = useState<"fixed" | "average_3mo" | "savings">(
+    pot && ["fixed", "average_3mo", "savings"].includes(pot.targetType)
+      ? (pot.targetType as "fixed" | "average_3mo" | "savings")
+      : "fixed"
+  );
+  const [target, setTarget] = useState(pot ? String((pot.targetCents / 100).toFixed(2)) : "");
+  const [shared, setShared] = useState(pot?.contactId != null);
+  const [contactId, setContactId] = useState<string>(pot?.contactId != null ? String(pot.contactId) : "");
+  const [sharePct, setSharePct] = useState<string>(pot?.sharePct != null ? String(pot.sharePct) : "50");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const save = async () => {
+    const n = name.trim();
+    if (!n || busy) return;
+    const pct = parseInt(sharePct, 10);
+    if (shared && (!Number.isInteger(pct) || pct < 0 || pct > 100)) {
+      setError("Share must be a whole percent from 0 to 100.");
+      return;
+    }
+    if (shared && !contactId) {
+      setError("Pick a contact to share with.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const body = {
+      name: n,
+      group: group.trim() || "General",
+      targetType,
+      targetCents: Math.round((parseFloat(target) || 0) * 100),
+      contactId: shared ? Number(contactId) : null,
+      sharePct: shared ? pct : null,
+    };
+    try {
+      const r = await fetch(pot ? `/api/pots/${pot.id}` : "/api/pots", {
+        method: pot ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error((await r.json()).error ?? `HTTP ${r.status}`);
+      onSaved();
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't save that pot.");
+    }
+    setBusy(false);
+  };
+
+  const remove = async () => {
+    if (!pot || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/pots/${pot.id}`, { method: "DELETE" });
+      if (!r.ok) throw new Error((await r.json()).error ?? `HTTP ${r.status}`);
+      onSaved();
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't delete that pot.");
+    }
+    setBusy(false);
+  };
+
+  return (
+    <Sheet label={pot ? `Edit ${pot.name}` : "Add pot"} onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <label className="mb-1.5 block text-[13px] font-medium text-[var(--ink-2)]" htmlFor="pot-name">Name</label>
+          <input id="pot-name" type="text" value={name} onChange={(e) => setName(e.target.value)}
+            placeholder="Groceries" className="field t-nums w-full px-3 py-2 text-[15px]" />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-[13px] font-medium text-[var(--ink-2)]" htmlFor="pot-group">Group</label>
+          <input id="pot-group" type="text" value={group} onChange={(e) => setGroup(e.target.value)}
+            list="pot-groups" placeholder="Life" className="field t-nums w-full px-3 py-2 text-[15px]" />
+          <datalist id="pot-groups">
+            {groups.map((g) => <option key={g} value={g} />)}
+          </datalist>
+        </div>
+        <div>
+          <span className="mb-1.5 block text-[13px] font-medium text-[var(--ink-2)]">Target</span>
+          <Segmented
+            ariaLabel="Target type"
+            value={targetType}
+            onChange={setTargetType}
+            options={[
+              { value: "fixed", label: "Fixed" },
+              { value: "average_3mo", label: "3-month avg" },
+              { value: "savings", label: "Savings" },
+            ]}
+          />
+          <input type="text" inputMode="decimal" value={target} onChange={(e) => setTarget(e.target.value)}
+            placeholder="0.00" aria-label="Target amount"
+            className="field t-nums mt-2 w-36 px-3 py-2 text-[15px]" />
+        </div>
+        <div className="rounded-[var(--r-md)] bg-[var(--bg-sunken)] p-4">
+          <label className="flex cursor-pointer items-center gap-2.5 text-[15px] font-medium">
+            <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} className="h-4 w-4 accent-[var(--ink)]" />
+            Share with a contact
+          </label>
+          {shared && (
+            <div className="mt-3 flex items-center gap-2">
+              <select
+                value={contactId}
+                onChange={(e) => setContactId(e.target.value)}
+                aria-label="Contact"
+                className="field t-nums flex-1 px-2 py-2 text-[15px]"
+              >
+                <option value="">Pick a contact…</option>
+                {contacts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <input type="text" inputMode="numeric" value={sharePct} onChange={(e) => setSharePct(e.target.value)}
+                aria-label="Share percent" className="field t-nums w-20 px-2 py-2 text-center text-[15px]" />
+              <span className="text-[13px] text-[var(--muted)]">%</span>
+            </div>
+          )}
+          {shared && contacts.length === 0 && (
+            <div className="mt-2 text-[13px] text-[var(--muted)]">Add a contact in Sharing first.</div>
+          )}
+          <div className="mt-2 text-[13px] text-[var(--muted)]">New split transactions in this pot default to this share.</div>
+        </div>
+        {error && <div className="text-[13px] text-[var(--danger)]">{error}</div>}
+        <div className="flex items-center gap-2">
+          <button onClick={save} disabled={busy || !name.trim()} className="btn-ink flex-1 px-4 py-2.5 text-[15px]">
+            {busy ? "Saving…" : pot ? "Save changes" : "Add pot"}
+          </button>
+          <button onClick={onClose} className="btn-ghost px-4 py-2.5 text-[15px]">Cancel</button>
+        </div>
+        {pot && !confirmDelete && (
+          <button onClick={() => setConfirmDelete(true)} className="cursor-pointer text-[13px] text-[var(--muted)] hover:text-[var(--danger)]">
+            Delete this pot…
+          </button>
+        )}
+        {pot && confirmDelete && (
+          <div className="rounded-[var(--r-md)] border border-[var(--danger)] p-4 text-[13px]">
+            <div className="font-medium">Delete {pot.name}?</div>
+            <div className="mt-1 text-[var(--ink-2)]">
+              Its transactions and assignments move to the Uncategorized pot. Nothing is destroyed, but this can't be undone.
+            </div>
+            <div className="mt-3 flex gap-2">
+              <button onClick={remove} disabled={busy} className="cursor-pointer rounded-[var(--r-pill)] bg-[var(--danger)] px-4 py-2 font-medium text-white">
+                {busy ? "Deleting…" : "Delete pot"}
+              </button>
+              <button onClick={() => setConfirmDelete(false)} className="btn-ghost px-4 py-2">Keep it</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Sheet>
+  );
+}
 
 export function PotsTab({ month }: { month: string }) {
   const { data, error, loading, retry } = useApi<{ pots: Pot[] }>(`/api/pots?month=${month}`);
+  const [sheetPot, setSheetPot] = useState<Pot | "new" | null>(null);
+  const pots = data?.pots ?? [];
+  const groups = [...new Set(pots.map((p) => p.group))].sort();
 
   return (
     <div>
-      <div className="mb-5 font-serif-d text-[24px] font-medium">Pots</div>
+      <div className="mb-5 flex items-baseline justify-between">
+        <div className="font-serif-d text-[24px] font-medium">Pots</div>
+        <button onClick={() => setSheetPot("new")} className="btn-ink px-4 py-2 text-[14px]">Add pot</button>
+      </div>
       {loading ? (
         <div className="space-y-3">
           {[0, 1, 2].map((i) => <Skeleton key={i} className="h-[64px]" />)}
@@ -766,7 +970,15 @@ export function PotsTab({ month }: { month: string }) {
       ) : error ? (
         <FetchError onRetry={retry} label="Couldn't load pots." />
       ) : (
-        <BudgetTable pots={data?.pots ?? []} month={month} onAssigned={retry} />
+        <BudgetTable pots={pots} month={month} onAssigned={retry} onEditPot={(p) => setSheetPot(p)} />
+      )}
+      {sheetPot && (
+        <PotSheet
+          pot={sheetPot === "new" ? null : sheetPot}
+          groups={groups}
+          onClose={() => setSheetPot(null)}
+          onSaved={retry}
+        />
       )}
     </div>
   );
@@ -997,11 +1209,169 @@ export function CloseTab({ month, onGo }: { month: string; onGo: (t: Tab) => voi
   );
 }
 
-export function PartnerTab() {
+/* Manage the people you share expenses with: add, rename inline, delete.
+ *  Deleting is blocked while a pot or split references the contact. */
+export function ContactsManager({ contacts, onChanged }: { contacts: ContactBalance[]; onChanged: () => void }) {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const savingRef = useRef(false);
+
+  const add = async () => {
+    const n = name.trim();
+    if (!n || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/contacts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: n }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error ?? `HTTP ${r.status}`);
+      setName("");
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't add that contact.");
+    }
+    setBusy(false);
+  };
+
+  const rename = async (id: number) => {
+    const n = editName.trim();
+    if (!n || busy || savingRef.current) return;
+    savingRef.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/contacts/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: n }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error ?? `HTTP ${r.status}`);
+      setEditingId(null);
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't rename that contact.");
+    }
+    setBusy(false);
+    savingRef.current = false;
+  };
+
+  const remove = async (id: number) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/contacts/${id}`, { method: "DELETE" });
+      if (!r.ok) throw new Error((await r.json()).error ?? `HTTP ${r.status}`);
+      setConfirmDeleteId(null);
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't delete that contact.");
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div className="card mb-5 p-5">
+      <div className="text-[17px] font-semibold">Contacts</div>
+      <div className="mt-1 text-[13px] text-[var(--muted)]">People you share expenses with. Pots can each be shared with one of them.</div>
+      <ul className="mt-3 space-y-2">
+        {contacts.map((c) => (
+          <li key={c.id} className="flex items-center justify-between gap-3">
+            {editingId === c.id ? (
+              <input
+                autoFocus
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") rename(c.id);
+                  if (e.key === "Escape") setEditingId(null);
+                }}
+                onBlur={() => { if (editingId === c.id) rename(c.id); }}
+                aria-label="Contact name"
+                className="field t-nums flex-1 px-2 py-1.5 text-[15px]"
+              />
+            ) : (
+              <button
+                onClick={() => { setEditingId(c.id); setEditName(c.name); }}
+                className="flex-1 cursor-pointer text-left text-[15px] font-medium hover:underline"
+                title="Rename"
+              >
+                {c.name}
+              </button>
+            )}
+            {confirmDeleteId === c.id ? (
+              <span className="flex items-center gap-2 text-[13px]">
+                <span className="text-[var(--muted)]">Delete?</span>
+                <button onClick={() => remove(c.id)} disabled={busy} className="cursor-pointer font-medium text-[var(--danger)]">Yes</button>
+                <button onClick={() => setConfirmDeleteId(null)} className="cursor-pointer text-[var(--ink-2)]">Keep</button>
+              </span>
+            ) : (
+              <button onClick={() => setConfirmDeleteId(c.id)} className="cursor-pointer text-[13px] text-[var(--muted)] hover:text-[var(--danger)]">
+                Delete
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {contacts.length === 0 && (
+        <div className="mt-3 text-[13px] italic text-[var(--muted)]">No contacts yet. Add one to start splitting expenses.</div>
+      )}
+      <div className="mt-3 flex gap-2">
+        <input
+          type="text"
+          placeholder="New contact name"
+          aria-label="New contact name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") add(); }}
+          className="field t-nums w-44 px-3 py-2 text-[15px]"
+        />
+        <button onClick={add} disabled={busy || !name.trim()} className="btn-ink px-4 py-2 text-[15px]">
+          {busy ? "Adding…" : "Add"}
+        </button>
+      </div>
+      {error && <div className="mt-2 text-[13px] text-[var(--danger)]">{error}</div>}
+    </div>
+  );
+}
+
+export function SharingTab() {
+  const { data, error, loading, retry } = useApi<{ contacts: ContactBalance[] }>("/api/contacts");
+  const { data: accountsData } = useApi<{ accounts: Account[] }>("/api/accounts");
+  const contacts = data?.contacts ?? [];
+  const accounts = accountsData?.accounts ?? [];
+
   return (
     <div>
-      <div className="mb-5 font-serif-d text-[24px] font-medium">Partner</div>
-      <PartnerCard />
+      <div className="mb-5 font-serif-d text-[24px] font-medium">Sharing</div>
+      {loading ? (
+        <div className="space-y-3">
+          {[0, 1].map((i) => (
+            <div key={i} className="card space-y-3 p-5">
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-9 w-44" />
+            </div>
+          ))}
+        </div>
+      ) : error ? (
+        <FetchError onRetry={retry} label="Couldn't load sharing." />
+      ) : (
+        <>
+          <ContactsManager contacts={contacts} onChanged={retry} />
+          {contacts.map((c) => (
+            <div key={c.id} className="mb-5">
+              <ContactCard contact={c} accounts={accounts} />
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 }
@@ -1256,19 +1626,36 @@ export function TransactionSheet({ txn, pots, accounts, onClose, onSaved }: {
   const [accountId, setAccountId] = useState(txn ? String(txn.accountId) : accounts[0] ? String(accounts[0].id) : "");
   const [potId, setPotId] = useState(txn ? (txn.potId != null ? String(txn.potId) : "") : "");
   const [isTransfer, setIsTransfer] = useState(!!txn?.isTransfer);
-  const [split, setSplit] = useState(!!txn?.splitWithPartner);
-  const [partnerAmount, setPartnerAmount] = useState(
-    txn && txn.partnerCents > 0 ? (txn.partnerCents / 100).toFixed(2) : ""
+  const [split, setSplit] = useState(!!txn?.splitWithContact);
+  const [contactId, setContactId] = useState(
+    txn?.splitContactId != null ? String(txn.splitContactId) : ""
+  );
+  const [shareAmount, setShareAmount] = useState(
+    txn && txn.sharedCents > 0 ? (txn.sharedCents / 100).toFixed(2) : ""
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
+  const { data: contactsData } = useApi<{ contacts: ContactBalance[] }>("/api/contacts");
+  const contacts = contactsData?.contacts ?? [];
+
   const toggleSplit = (on: boolean) => {
     setSplit(on);
-    if (on && !partnerAmount) {
-      const cents = Math.round(parseFloat(amount) * 100);
-      if (Number.isFinite(cents) && cents > 0) setPartnerAmount((cents / 200).toFixed(2));
+    if (on) {
+      // Default the contact and share from the pot's share config.
+      const pot = pots.find((p) => String(p.id) === potId);
+      if (!contactId) {
+        const cid = pot?.contactId ?? contacts[0]?.id ?? null;
+        if (cid != null) setContactId(String(cid));
+      }
+      if (!shareAmount) {
+        const cents = Math.round(parseFloat(amount) * 100);
+        if (Number.isFinite(cents) && cents > 0) {
+          const pct = pot?.sharePct ?? 50;
+          setShareAmount(((cents * pct) / 100 / 100).toFixed(2));
+        }
+      }
     }
   };
 
@@ -1294,11 +1681,17 @@ export function TransactionSheet({ txn, pots, accounts, onClose, onSaved }: {
       setError("Pick a pot.");
       return;
     }
-    let pCents = 0;
+    let sCents = 0;
+    let sContactId: number | null = null;
     if (split && !isTransfer) {
-      pCents = Math.round(parseFloat(partnerAmount) * 100);
-      if (!Number.isFinite(pCents) || pCents <= 0 || pCents >= cents) {
-        setError("The partner share must be less than the full amount.");
+      sCents = Math.round(parseFloat(shareAmount) * 100);
+      if (!Number.isFinite(sCents) || sCents <= 0 || sCents >= cents) {
+        setError("The contact's share must be less than the full amount.");
+        return;
+      }
+      sContactId = contactId ? Number(contactId) : null;
+      if (!sContactId) {
+        setError("Pick a contact to split with.");
         return;
       }
     }
@@ -1312,7 +1705,8 @@ export function TransactionSheet({ txn, pots, accounts, onClose, onSaved }: {
       amountCents: signed,
       description: description.trim(),
       isTransfer,
-      partnerCents: split && !isTransfer ? (direction === "out" ? -pCents : pCents) : 0,
+      contactId: sContactId,
+      shareCents: split && !isTransfer ? (direction === "out" ? -sCents : sCents) : 0,
     };
     try {
       const r = await fetch(editing ? `/api/transactions/${txn.id}` : "/api/transactions", {
@@ -1458,20 +1852,40 @@ export function TransactionSheet({ txn, pots, accounts, onClose, onSaved }: {
                 onChange={(e) => toggleSplit(e.target.checked)}
                 className="h-4 w-4 shrink-0 accent-[var(--accent)]"
               />
-              Split with partner
+              Split with a contact
             </label>
             {split && (
-              <div className="mt-2.5">
-                <FormLabel>Partner's share</FormLabel>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={partnerAmount}
-                  onChange={(e) => setPartnerAmount(e.target.value)}
-                  placeholder="0.00"
-                  aria-label="Partner's share"
-                  className="field t-nums w-40 px-3 py-2.5 text-[15px]"
-                />
+              <div className="mt-2.5 space-y-2.5">
+                <div>
+                  <FormLabel>Contact</FormLabel>
+                  {contacts.length > 0 ? (
+                    <select
+                      value={contactId}
+                      onChange={(e) => setContactId(e.target.value)}
+                      aria-label="Contact to split with"
+                      className="field t-nums w-full px-3 py-2.5 text-[15px]"
+                    >
+                      <option value="">Pick a contact…</option>
+                      {contacts.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="text-[13px] text-[var(--muted)]">Add a contact in Sharing first.</div>
+                  )}
+                </div>
+                <div>
+                  <FormLabel>Their share</FormLabel>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={shareAmount}
+                    onChange={(e) => setShareAmount(e.target.value)}
+                    placeholder="0.00"
+                    aria-label="Contact's share"
+                    className="field t-nums w-40 px-3 py-2.5 text-[15px]"
+                  />
+                </div>
               </div>
             )}
           </div>
@@ -1657,7 +2071,7 @@ export function TransactionsTab({ month }: { month: string }) {
                       <span aria-hidden>·</span>
                       <span className="truncate">{t.potName ?? "Uncategorized"}</span>
                       {t.isTransfer ? <TxnBadge>Transfer</TxnBadge> : null}
-                      {t.splitWithPartner ? <TxnBadge>split</TxnBadge> : null}
+                      {t.splitWithContact ? <TxnBadge>{t.splitContactName ? `split · ${t.splitContactName}` : "split"}</TxnBadge> : null}
                       {t.status === "pending_review" ? (
                         <span className="font-medium text-[var(--warning)]">needs review</span>
                       ) : null}
@@ -1696,7 +2110,7 @@ export function TransactionsTab({ month }: { month: string }) {
 
 /* ---------- app ---------- */
 
-export type Tab = "overview" | "pots" | "transactions" | "insights" | "close" | "partner" | "review" | "accounts";
+export type Tab = "overview" | "pots" | "transactions" | "insights" | "close" | "sharing" | "review" | "accounts";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -1704,21 +2118,64 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "transactions", label: "Transactions" },
   { id: "insights", label: "Insights" },
   { id: "close", label: "Close" },
-  { id: "partner", label: "Partner" },
+  { id: "sharing", label: "Sharing" },
   { id: "review", label: "Review" },
   { id: "accounts", label: "Accounts" },
 ];
 
 const tabLabel = (id: Tab) => TABS.find((t) => t.id === id)?.label ?? id;
 
-// The bottom bar is narrow: Transactions shortens to Txns there.
-const mobileTabLabel = (id: Tab) => (id === "transactions" ? "Txns" : tabLabel(id));
-
 const MONTH_TABS: Tab[] = ["overview", "pots", "transactions", "insights", "close"];
 
 // Mobile bottom bar: five tabs plus a "More" sheet for the rest.
 const MOBILE_TABS: Tab[] = ["overview", "pots", "transactions", "insights", "close"];
-const SHEET_TABS: Tab[] = ["partner", "review", "accounts"];
+const SHEET_TABS: Tab[] = ["sharing", "review", "accounts"];
+
+/* Icon-only mobile tab bar: one clean inline SVG per tab, no icon library.
+ * Selected renders in dark ink, inactive in muted grey. */
+function TabIcon({ id }: { id: Tab | "more" }) {
+  const common = {
+    width: 24,
+    height: 24,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    "aria-hidden": true,
+  } as const;
+  switch (id) {
+    case "overview":
+      return (
+        <svg {...common}><path d="M4 11.5 12 4l8 7.5" /><path d="M6 10.5V20h12v-9.5" /></svg>
+      );
+    case "pots":
+      return (
+        <svg {...common}><path d="M12 3.5 3.5 8 12 12.5 20.5 8 12 3.5Z" /><path d="M4.5 12.5 12 16.7l7.5-4.2" /><path d="M4.5 16.5 12 20.7l7.5-4.2" /></svg>
+      );
+    case "transactions":
+      return (
+        <svg {...common}><path d="M6 3.5h12V21l-2.2-1.6-1.8 1.6-2-1.6-2 1.6-1.8-1.6L6 21V3.5Z" /><path d="M9.5 8.5h5M9.5 12h5" /></svg>
+      );
+    case "insights":
+      return (
+        <svg {...common}><path d="M4 4v15.5h16" /><path d="M9 15.5v-4M13.5 15.5v-7M18 15.5v-2.5" /></svg>
+      );
+    case "close":
+      return (
+        <svg {...common}><circle cx="12" cy="12" r="8.5" /><path d="M8.5 12.3l2.4 2.4 4.6-5.4" /></svg>
+      );
+    default:
+      return (
+        <svg {...common}>
+          <circle cx="5.5" cy="12" r="1.7" fill="currentColor" stroke="none" />
+          <circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none" />
+          <circle cx="18.5" cy="12" r="1.7" fill="currentColor" stroke="none" />
+        </svg>
+      );
+  }
+}
 
 export function CountBadge({ n, className = "" }: { n: number; className?: string }) {
   return (
@@ -1806,7 +2263,7 @@ export default function App() {
 
           {tab === "close" && <CloseTab key={`c-${refreshKey}-${month}`} month={month} onGo={go} />}
 
-          {tab === "partner" && <PartnerTab key={`pt-${refreshKey}`} />}
+          {tab === "sharing" && <SharingTab key={`s-${refreshKey}`} />}
 
           {tab === "review" && (
             <div>
@@ -1827,7 +2284,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* mobile bottom tab bar */}
+      {/* mobile bottom tab bar: icon-only, same tabs in the same order */}
       <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--hairline)] bg-[var(--surface)] pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Primary">
         <div className="grid grid-cols-6">
           {MOBILE_TABS.map((id) => {
@@ -1836,12 +2293,14 @@ export default function App() {
               <button
                 key={id}
                 onClick={() => go(id)}
-                className={`relative flex min-h-[64px] flex-col items-center justify-center gap-1 text-[11px] transition active:scale-95 ${
-                  active ? "font-semibold text-[var(--ink)]" : "text-[var(--muted)]"
+                aria-label={tabLabel(id)}
+                aria-current={active ? "page" : undefined}
+                className={`relative flex min-h-[64px] flex-col items-center justify-center gap-1 transition active:scale-95 ${
+                  active ? "text-[var(--ink)]" : "text-[var(--muted)]"
                 }`}
               >
                 <span className={`h-1.5 w-1.5 rounded-full ${active ? "bg-[var(--ink)]" : "bg-transparent"}`} />
-                {mobileTabLabel(id)}
+                <TabIcon id={id} />
                 {id === "close" && closeAlert && (
                   <span className="absolute right-4 top-3 h-2 w-2 rounded-full bg-[var(--warning)]" />
                 )}
@@ -1850,12 +2309,14 @@ export default function App() {
           })}
           <button
             onClick={() => setSheetOpen(true)}
-            className={`relative flex min-h-[64px] flex-col items-center justify-center gap-1 text-[11px] transition active:scale-95 ${
-              SHEET_TABS.includes(tab) ? "font-semibold text-[var(--ink)]" : "text-[var(--muted)]"
+            aria-label="More"
+            aria-expanded={sheetOpen}
+            className={`relative flex min-h-[64px] flex-col items-center justify-center gap-1 transition active:scale-95 ${
+              SHEET_TABS.includes(tab) ? "text-[var(--ink)]" : "text-[var(--muted)]"
             }`}
           >
             <span className={`h-1.5 w-1.5 rounded-full ${SHEET_TABS.includes(tab) ? "bg-[var(--ink)]" : "bg-transparent"}`} />
-            More
+            <TabIcon id="more" />
             {pendingCount > 0 && (
               <span className="t-nums absolute right-3 top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--ink)] px-1 text-[10px] font-bold text-[var(--bg)]">
                 {pendingCount}

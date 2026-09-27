@@ -24,8 +24,8 @@ const url = `/api/close-preview?month=${MONTH}`;
 
 export const Loaded: Story = {
   parameters: {
-    mockApi: { get: { [url]: makeClosePreview({ partnerOwedCents: 42180 }) } } satisfies MockApiConfig,
-    docs: { description: { story: "Close preview loaded with a partner balance still owed." } },
+    mockApi: { get: { [url]: makeClosePreview({ sharedOwedCents: 42180, sharedOwedBy: [{ name: "Alex", cents: 42180 }] }) } } satisfies MockApiConfig,
+    docs: { description: { story: "Close preview loaded with a contact's balance still owed." } },
   },
 };
 

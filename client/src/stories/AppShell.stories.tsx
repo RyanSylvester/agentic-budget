@@ -3,6 +3,7 @@ import { userEvent, within } from "storybook/test";
 import App from "../App";
 import {
   fixtureAccounts,
+  fixtureContacts,
   fixtureHistory,
   fixtureListedTxns,
   fixturePots,
@@ -10,7 +11,6 @@ import {
   makeAttention,
   makeClosePreview,
   makeOverview,
-  makePartnerInfo,
 } from "./fixtures";
 import type { MockApiConfig } from "./mockApi";
 
@@ -21,12 +21,12 @@ const topPot = [...fixturePots].sort((a, b) => b.spentCents - a.spentCents)[0];
 
 const fullApi = {
   get: {
-    "/api/attention": makeAttention({ unsettledPartnerCents: 42180 }),
+    "/api/attention": makeAttention({ unsettledSharedCents: 42180, sharedOwedBy: [{ contactId: 1, name: "Alex", cents: 42180 }] }),
     "/api/review": { transactions: fixtureReviewTxns },
     [`/api/overview?month=${CUR}`]: makeOverview({ month: CUR }),
     [`/api/pots?month=${CUR}`]: { pots: fixturePots },
-    [`/api/close-preview?month=${CUR}`]: makeClosePreview({ partnerOwedCents: 42180, month: CUR }),
-    "/api/partner": makePartnerInfo(),
+    [`/api/close-preview?month=${CUR}`]: makeClosePreview({ sharedOwedCents: 42180, sharedOwedBy: [{ name: "Alex", cents: 42180 }], month: CUR }),
+    "/api/contacts": { contacts: fixtureContacts },
     "/api/accounts": { accounts: fixtureAccounts },
     [`/api/pot-history?potId=${topPot.id}&months=6`]: { history: fixtureHistory },
     [`/api/transactions?month=${CUR}`]: { month: CUR, transactions: fixtureListedTxns },
@@ -103,13 +103,13 @@ export const Close: Story = {
   },
 };
 
-export const Partner: Story = {
+export const Sharing: Story = {
   parameters: {
-    docs: { description: { story: "Navigating to the Partner tab. (Interaction test.)" } },
+    docs: { description: { story: "Navigating to the Sharing tab. (Interaction test.)" } },
   },
   play: async ({ canvasElement }) => {
-    await goToTab(canvasElement, "Partner");
-    await within(canvasElement).findByText("Partner owes you");
+    await goToTab(canvasElement, "Sharing");
+    await within(canvasElement).findByText("Alex");
   },
 };
 

@@ -3,9 +3,11 @@
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { existsSync } from "node:fs";
-import { openDb, getSetting } from "./db";
+import { openDb } from "./db";
 import { monthSpend, potSpend, recentTransactions, listTransactions, spendTrend, assignedTotal, rtaCents, potHistory } from "./queries";
-import { applySettlement, partnerCredit, partnerOwed } from "./settle";
+import { applySettlement, contactCredit, contactOwed } from "./settle";
+import { contactBalances, createContact, renameContact, deleteContact } from "./contacts";
+import { createPot, updatePot, deletePot, potExists } from "./pots";
 import { reconcile, suggestClear } from "./reconcile";
 import { closePreview } from "./close";
 import { assignToPot, assignedToPot } from "./assign";
@@ -42,7 +44,6 @@ app.get("/api/overview", (c) => {
     confirmedSpendCents: monthSpend(db, month),
     pendingCount: pending.n,
     recent: recentTransactions(db, 10, month),
-    partnerName: getSetting(db, "partner_name") ?? "Partner",
     rtaCents: rtaCents(db, month),
     assignedCents: assignedTotal(db, month),
   });
@@ -53,7 +54,9 @@ app.get("/api/review", (c) => {
   const transactions = db.query(
     `SELECT t.id, t.date, t.description, t.amount_cents, t.source, t.status, t.review_reason,
             COALESCE((SELECT SUM(-s.amount_cents) FROM splits s
-                      WHERE s.transaction_id = t.id AND s.owner = 'partner' AND s.amount_cents < 0), 0) AS partner_cents
+                      WHERE s.transaction_id = t.id AND s.owner = 'contact' AND s.amount_cents < 0), 0) AS shared_cents,
+            (SELECT c.name FROM splits s JOIN contacts c ON c.id = s.contact_id
+             WHERE s.transaction_id = t.id AND s.owner = 'contact' LIMIT 1) AS split_contact_name
      FROM transactions t WHERE t.status = 'pending_review' AND t.voided = 0 ORDER BY t.id`
   ).all();
   return c.json({ transactions });
@@ -134,13 +137,24 @@ app.get("/api/attention", (c) => {
       return { id: a.id, name: a.name, diffCents: cleared.total - (last?.actual_balance_cents ?? 0) };
     })
     .filter((a) => a.diffCents !== 0);
-  const owed = partnerOwed(db).reduce((a, o) => a + o.owedCents, 0);
+  const owed = contactOwed(db);
+  const byContact = new Map<number, { name: string; cents: number }>();
+  for (const o of owed) {
+    const e = byContact.get(o.contactId) ?? { name: o.contactName, cents: 0 };
+    e.cents += o.owedCents;
+    byContact.set(o.contactId, e);
+  }
+  const sharedOwedBy = [...byContact.entries()]
+    .map(([contactId, v]) => ({ contactId, ...v }))
+    .sort((a, b) => b.cents - a.cents);
+  const sharedOwedCents = sharedOwedBy.reduce((a, o) => a + o.cents, 0);
   return c.json({
     month,
     pendingReviewCount: pending.n,
     unreconciledAccounts,
     rtaCents: rtaCents(db, month),
-    unsettledPartnerCents: Math.max(0, owed - partnerCredit(db)),
+    unsettledSharedCents: Math.max(0, sharedOwedCents - contactCredit(db)),
+    sharedOwedBy,
   });
 });
 
@@ -213,7 +227,7 @@ app.post("/api/transactions/:id/clear", (c) => {
 });
 
 /** Every non-voided transaction in a month, newest first, with pot and
- *  partner-share detail. Powers the Transactions page. */
+ *  contact-share detail. Powers the Transactions page. */
 app.get("/api/transactions", (c) => {
   const db = openDb();
   const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
@@ -222,7 +236,7 @@ app.get("/api/transactions", (c) => {
 });
 
 /** Record a manually entered transaction. Body: { date, accountId, potId,
- *  amountCents (signed, nonzero), description, isTransfer?, partnerCents? }. */
+ *  amountCents (signed, nonzero), description, isTransfer?, contactId?, shareCents? }. */
 app.post("/api/transactions", async (c) => {
   const db = openDb();
   const { ok, body } = await readJson(c);
@@ -265,15 +279,117 @@ app.delete("/api/transactions/:id", (c) => {
 app.get("/api/pots", (c) => {
   const db = openDb();
   const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
-  const pots = db.query("SELECT id, name, pot_group, target_cents, is_assignable FROM pots WHERE hidden = 0 ORDER BY id").all() as any[];
+  const pots = db.query(
+    `SELECT p.id, p.name, p.pot_group, p.target_type, p.target_cents, p.is_assignable, p.contact_id, p.share_pct,
+            c.name AS contact_name
+     FROM pots p LEFT JOIN contacts c ON c.id = p.contact_id
+     WHERE p.hidden = 0 ORDER BY p.id`
+  ).all() as any[];
   return c.json({
     month,
-    partnerName: getSetting(db, "partner_name") ?? "Partner",
     pots: pots.map((p) => {
-      const { userCents, partnerCents } = potSpend(db, p.id, month);
-      return { id: p.id, name: p.name, group: p.pot_group, targetCents: p.target_cents, spentCents: userCents, partnerCents, assignable: p.is_assignable === 1, assignedCents: assignedToPot(db, month, p.id) };
+      const { userCents, sharedCents } = potSpend(db, p.id, month);
+      return {
+        id: p.id, name: p.name, group: p.pot_group, targetType: p.target_type, targetCents: p.target_cents,
+        spentCents: userCents, sharedCents,
+        contactId: p.contact_id, contactName: p.contact_name, sharePct: p.share_pct,
+        assignable: p.is_assignable === 1, assignedCents: assignedToPot(db, month, p.id),
+      };
     }),
   });
+});
+
+/** Create a pot. Body: { name, group?, targetCents?, targetType?, contactId?, sharePct? }. */
+app.post("/api/pots", async (c) => {
+  const db = openDb();
+  const { ok, body } = await readJson(c);
+  if (!ok) return c.json({ error: "malformed JSON" }, 400);
+  try {
+    const id = createPot(db, body ?? {});
+    return c.json({ ok: true, id });
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 400);
+  }
+});
+
+/** Update a pot's name, group, target, or share config. */
+app.put("/api/pots/:id", async (c) => {
+  const db = openDb();
+  const id = badId(c, "id");
+  if (id === null) return c.json({ error: "bad pot id" }, 400);
+  if (!potExists(db, id)) return c.json({ error: `no pot ${id}` }, 404);
+  const { ok, body } = await readJson(c);
+  if (!ok) return c.json({ error: "malformed JSON" }, 400);
+  try {
+    updatePot(db, id, body ?? {});
+    return c.json({ ok: true });
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 400);
+  }
+});
+
+/** Delete a pot. Its transactions, splits, and assignments move to the
+ *  Uncategorized pot; nothing is destroyed. */
+app.delete("/api/pots/:id", (c) => {
+  const db = openDb();
+  const id = badId(c, "id");
+  if (id === null) return c.json({ error: "bad pot id" }, 400);
+  if (!potExists(db, id)) return c.json({ error: `no pot ${id}` }, 404);
+  try {
+    const summary = deletePot(db, id);
+    return c.json({ ok: true, ...summary });
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 400);
+  }
+});
+
+/** Every contact with what they owe, grouped by pot. Powers Sharing. */
+app.get("/api/contacts", (c) => {
+  const db = openDb();
+  return c.json({ contacts: contactBalances(db) });
+});
+
+/** Add a contact. Body: { name }. */
+app.post("/api/contacts", async (c) => {
+  const db = openDb();
+  const { ok, body } = await readJson(c);
+  if (!ok) return c.json({ error: "malformed JSON" }, 400);
+  try {
+    const id = createContact(db, body?.name);
+    return c.json({ ok: true, id });
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 400);
+  }
+});
+
+/** Rename a contact. Body: { name }. */
+app.put("/api/contacts/:id", async (c) => {
+  const db = openDb();
+  const id = badId(c, "id");
+  if (id === null) return c.json({ error: "bad contact id" }, 400);
+  const { ok, body } = await readJson(c);
+  if (!ok) return c.json({ error: "malformed JSON" }, 400);
+  try {
+    renameContact(db, id, body?.name);
+    return c.json({ ok: true });
+  } catch (e) {
+    const msg = (e as Error).message;
+    return c.json({ error: msg }, msg.startsWith("no contact") ? 404 : 400);
+  }
+});
+
+/** Delete a contact. Blocked while pots or splits reference them. */
+app.delete("/api/contacts/:id", (c) => {
+  const db = openDb();
+  const id = badId(c, "id");
+  if (id === null) return c.json({ error: "bad contact id" }, 400);
+  try {
+    deleteContact(db, id);
+    return c.json({ ok: true });
+  } catch (e) {
+    const msg = (e as Error).message;
+    return c.json({ error: msg }, msg.startsWith("no contact") ? 404 : 400);
+  }
 });
 
 app.get("/api/trend", (c) => {
@@ -309,35 +425,25 @@ app.get("/api/close-preview", (c) => {
   return c.json(closePreview(db, month));
 });
 
-// What the partner owes the user: their outstanding shares, oldest first, grouped by pot.
-app.get("/api/partner", (c) => {
-  const db = openDb();
-  const owed = partnerOwed(db);
-  const byPot = new Map<string, number>();
-  for (const o of owed) {
-    const name = o.potName ?? "Uncategorized";
-    byPot.set(name, (byPot.get(name) ?? 0) + o.owedCents);
-  }
-  return c.json({
-    partnerName: getSetting(db, "partner_name") ?? "Partner",
-    totalOwedCents: owed.reduce((a, o) => a + o.owedCents, 0),
-    creditCents: partnerCredit(db),
-    byPot: [...byPot.entries()].map(([pot, cents]) => ({ pot, cents })).sort((a, b) => b.cents - a.cents),
-    oldest: owed[0]?.date ?? null,
-  });
-});
-
-// Record a lump sum from the partner and allocate it against what they owe, oldest first.
+// Record a lump sum from a contact and allocate it against what they owe, oldest first.
+// Body: { contactId, accountId, amountCents, note? }.
 app.post("/api/settle", async (c) => {
   const db = openDb();
   const { ok, body } = await readJson(c);
   if (!ok) return c.json({ error: "malformed JSON" }, 400);
   const amountCents = Math.round(Number(body?.amountCents));
   const accountId = Number(body?.accountId);
+  const contactId = Number(body?.contactId);
   if (!accountId || !amountCents || amountCents <= 0) return c.json({ error: "accountId and positive amountCents required" }, 400);
+  if (!contactId) return c.json({ error: "contactId required" }, 400);
   if (!db.query("SELECT 1 FROM accounts WHERE id = ?").get(accountId)) return c.json({ error: `no account ${accountId}` }, 404);
-  const summary = applySettlement(db, { accountId, amountCents, note: body?.note, enteredBy: "user" });
-  return c.json(summary);
+  try {
+    const summary = applySettlement(db, { contactId, accountId, amountCents, note: body?.note, enteredBy: "user" });
+    return c.json(summary);
+  } catch (e) {
+    const msg = (e as Error).message;
+    return c.json({ error: msg }, msg.startsWith("no contact") ? 404 : 400);
+  }
 });
 
 const dist = "./client/dist";

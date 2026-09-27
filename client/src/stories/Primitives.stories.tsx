@@ -58,7 +58,7 @@ export const FetchErrorDefault: StoryObj = {
 };
 
 export const FetchErrorCustomLabel: StoryObj = {
-  render: () => <FetchError onRetry={fn()} label="Couldn't load the partner balance." />,
+  render: () => <FetchError onRetry={fn()} label="Couldn't load the shared balance." />,
   parameters: {
     docs: {
       description: {

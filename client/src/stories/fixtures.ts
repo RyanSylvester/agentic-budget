@@ -1,13 +1,14 @@
 /* Representative mock data for stories. Everything here is fictional:
-   no real transaction descriptions, no personal names. */
+   no real transaction descriptions, no personal names. Contact names used
+   ("Alex", "Sam") are fictional stand-ins, never real people. */
 
 import type {
   Account,
   Attention,
   ClosePreviewData,
+  ContactBalance,
   ListedTxn,
   Overview,
-  PartnerInfo,
   Pot,
   PotHistoryPoint,
   Txn,
@@ -23,20 +24,24 @@ export function makePot(over: Partial<Pot> = {}): Pot {
     id: nid(),
     name: "Sample pot",
     group: "Joint Living",
+    targetType: "fixed",
     targetCents: 0,
     spentCents: 0,
-    partnerCents: 0,
+    sharedCents: 0,
     assignable: true,
     assignedCents: 0,
+    contactId: null,
+    contactName: null,
+    sharePct: null,
     ...over,
   };
 }
 
 export const fixturePots: Pot[] = [
-  makePot({ name: "Rent share", group: "Joint Living", targetCents: 172000, spentCents: 171953, partnerCents: 171953, assignedCents: 172000 }),
+  makePot({ name: "Rent share", group: "Joint Living", targetCents: 172000, spentCents: 171953, sharedCents: 171953, assignedCents: 172000, contactId: 1, contactName: "Alex", sharePct: 50 }),
   makePot({ name: "Utilities", group: "Joint Living", targetCents: 14000, spentCents: 13820, assignedCents: 14000 }),
   makePot({ name: "Internet", group: "Joint Living", spentCents: 8995, assignedCents: 9000 }),
-  makePot({ name: "Groceries", group: "Food", targetCents: 60000, spentCents: 55263, partnerCents: 27631, assignedCents: 60000 }),
+  makePot({ name: "Groceries", group: "Food", targetCents: 60000, spentCents: 55263, sharedCents: 27631, assignedCents: 60000, contactId: 1, contactName: "Alex", sharePct: 50 }),
   makePot({ name: "Dining out", group: "Food", targetCents: 20000, spentCents: 23450, assignedCents: 20000 }),
   makePot({ name: "Coffee", group: "Food", spentCents: 4850, assignedCents: 5000 }),
   makePot({ name: "Transit", group: "Transport", targetCents: 15000, spentCents: 15000, assignedCents: 15000 }),
@@ -53,21 +58,22 @@ export function makeTxn(over: Partial<Txn> = {}): Txn {
     description: "Mock purchase",
     user_cents: -2599,
     is_transfer: 0,
-    split_with_partner: 0,
+    split_with_contact: 0,
+    split_contact_name: null,
     source: "mock-import",
     status: "confirmed",
-    partner_cents: 0,
+    shared_cents: 0,
     review_reason: null,
     ...over,
   };
 }
 
 export const fixtureTxns: Txn[] = [
-  makeTxn({ date: "2026-09-27", description: "Mock grocery run", user_cents: -8421, split_with_partner: 1, partner_cents: 4210 }),
+  makeTxn({ date: "2026-09-27", description: "Mock grocery run", user_cents: -8421, split_with_contact: 1, split_contact_name: "Alex", shared_cents: 4210 }),
   makeTxn({ date: "2026-09-26", description: "Mock transit top-up", user_cents: -15000 }),
   makeTxn({ date: "2026-09-25", description: "Mock paycheck deposit", user_cents: 250000, is_transfer: 0 }),
   makeTxn({ date: "2026-09-24", description: "Mock transfer between accounts", user_cents: 89182, is_transfer: 1 }),
-  makeTxn({ date: "2026-09-23", description: "Mock dinner out", user_cents: -9650, split_with_partner: 1, partner_cents: 4825 }),
+  makeTxn({ date: "2026-09-23", description: "Mock dinner out", user_cents: -9650, split_with_contact: 1, split_contact_name: "Alex", shared_cents: 4825 }),
   makeTxn({ date: "2026-09-22", description: "Mock coffee stop", user_cents: -485 }),
 ];
 
@@ -77,7 +83,6 @@ export function makeOverview(over: Partial<Overview> = {}): Overview {
     confirmedSpendCents: 272123,
     pendingCount: 0,
     recent: fixtureTxns,
-    partnerName: "Partner",
     rtaCents: 503394,
     assignedCents: 0,
     ...over,
@@ -90,7 +95,8 @@ export function makeAttention(over: Partial<Attention> = {}): Attention {
     pendingReviewCount: 3,
     unreconciledAccounts: [{ name: "Mock Chequing" }, { name: "Mock Credit Card" }],
     rtaCents: 503394,
-    unsettledPartnerCents: 0,
+    unsettledSharedCents: 0,
+    sharedOwedBy: [],
     ...over,
   };
 }
@@ -104,14 +110,16 @@ export function makeClosePreview(over: Partial<ClosePreviewData> = {}): ClosePre
     assignedCents: 8633,
     rtaBeforeCents: 503394,
     movedToSavingsCents: 503394,
-    partnerOwedCents: 0,
+    sharedOwedCents: 0,
+    sharedOwedBy: [],
     ...over,
   };
 }
 
-export function makePartnerInfo(over: Partial<PartnerInfo> = {}): PartnerInfo {
+export function makeContactBalance(over: Partial<ContactBalance> = {}): ContactBalance {
   return {
-    partnerName: "Partner",
+    id: nid(),
+    name: "Alex",
     totalOwedCents: 42180,
     creditCents: 0,
     byPot: [
@@ -122,6 +130,11 @@ export function makePartnerInfo(over: Partial<PartnerInfo> = {}): PartnerInfo {
     ...over,
   };
 }
+
+export const fixtureContacts: ContactBalance[] = [
+  makeContactBalance(),
+  makeContactBalance({ id: 2, name: "Sam", totalOwedCents: 0, creditCents: 0, byPot: [], oldest: null }),
+];
 
 export function makeAccount(over: Partial<Account> = {}): Account {
   return {
@@ -195,18 +208,20 @@ export function makeListedTxn(over: Partial<ListedTxn> = {}): ListedTxn {
     potId: groceriesPot.id,
     potName: groceriesPot.name,
     potGroup: groceriesPot.group,
-    splitWithPartner: 0,
-    partnerCents: 0,
+    splitWithContact: 0,
+    sharedCents: 0,
+    splitContactId: null,
+    splitContactName: null,
     ...over,
   };
 }
 
 export const fixtureListedTxns: ListedTxn[] = [
-  makeListedTxn({ date: "2026-09-27", description: "Mock grocery run", amountCents: -8421, splitWithPartner: 1, partnerCents: 4210 }),
+  makeListedTxn({ date: "2026-09-27", description: "Mock grocery run", amountCents: -8421, splitWithContact: 1, sharedCents: 4210, splitContactId: 1, splitContactName: "Alex" }),
   makeListedTxn({ date: "2026-09-26", description: "Mock transit top-up", amountCents: -15000, potId: transitPot.id, potName: transitPot.name, potGroup: transitPot.group }),
   makeListedTxn({ date: "2026-09-25", description: "Mock paycheck deposit", amountCents: 250000, potId: paycheckPot.id, potName: paycheckPot.name, potGroup: paycheckPot.group }),
   makeListedTxn({ date: "2026-09-24", description: "Mock transfer between accounts", amountCents: -89182, isTransfer: 1, potId: null, potName: null, potGroup: null }),
-  makeListedTxn({ date: "2026-09-23", description: "Mock dinner out", amountCents: -9650, splitWithPartner: 1, partnerCents: 4825, potId: diningPot.id, potName: diningPot.name, potGroup: diningPot.group }),
+  makeListedTxn({ date: "2026-09-23", description: "Mock dinner out", amountCents: -9650, splitWithContact: 1, sharedCents: 4825, splitContactId: 1, splitContactName: "Alex", potId: diningPot.id, potName: diningPot.name, potGroup: diningPot.group }),
   makeListedTxn({ date: "2026-09-22", description: "Mock coffee stop", amountCents: -485, potId: coffeePot.id, potName: coffeePot.name, potGroup: coffeePot.group }),
   makeListedTxn({ date: "2026-09-21", description: "Mock ambiguous charge", amountCents: -1299, status: "pending_review" }),
   makeListedTxn({ date: "2026-09-20", description: "Mock uncategorized import", amountCents: -3200, potId: null, potName: null, potGroup: null }),

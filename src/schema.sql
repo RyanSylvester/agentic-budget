@@ -19,7 +19,21 @@ CREATE TABLE IF NOT EXISTS pots (
   hidden        INTEGER NOT NULL DEFAULT 0,
   -- Income-group pots (paychecks, interest, windfalls) receive money;
   -- dollars are never assigned *to* them, so assign flows reject them.
-  is_assignable INTEGER NOT NULL DEFAULT 1
+  is_assignable INTEGER NOT NULL DEFAULT 1,
+  -- Optional sharing: which contact this pot is shared with and their
+  -- percentage share (0-100). NULL contact_id = not shared. This is the
+  -- default for new split transactions; each transaction stores its own
+  -- actual split amounts in splits.
+  contact_id   INTEGER NULL REFERENCES contacts(id),
+  share_pct    INTEGER NULL
+);
+
+-- People the user shares expenses with. Names are user data: stored here,
+-- rendered in the UI as data, never hardcoded in code.
+CREATE TABLE IF NOT EXISTS contacts (
+  id         INTEGER PRIMARY KEY,
+  name       TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -82,20 +96,21 @@ CREATE TABLE IF NOT EXISTS reconciliations (
   created_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
--- Splits: who pays what on a transaction. The user splits parts of the budget
--- with a partner (e.g. housing), so every transaction is divided into owner
+-- Splits: who pays what on a transaction. The user shares parts of the budget
+-- with contacts (e.g. housing), so every transaction is divided into owner
 -- shares. All of the user's views sum only owner='user' — "$1,670 in housing"
--- never includes the partner's half. Splits always sum to the transaction amount.
+-- never includes a contact's share. Splits always sum to the transaction amount.
 CREATE TABLE IF NOT EXISTS splits (
   id             INTEGER PRIMARY KEY,
   transaction_id INTEGER NOT NULL REFERENCES transactions(id),
   pot_id         INTEGER REFERENCES pots(id),
-  owner          TEXT NOT NULL CHECK (owner IN ('user','partner')),
+  owner          TEXT NOT NULL CHECK (owner IN ('user','contact')),
+  contact_id     INTEGER NULL REFERENCES contacts(id),
   amount_cents   INTEGER NOT NULL
 );
 
--- Settlements: when the partner sends a lump sum, it lands as a (100%
--- partner-owned, so the user's spend views ignore it) transaction, then gets
+-- Settlements: when a contact sends a lump sum, it lands as a (100%
+-- contact-owned, so the user's spend views ignore it) transaction, then gets
 -- allocated against their outstanding shares oldest-first.
 CREATE TABLE IF NOT EXISTS settlements (
   id              INTEGER PRIMARY KEY,
@@ -110,12 +125,12 @@ CREATE TABLE IF NOT EXISTS settlements (
 CREATE TABLE IF NOT EXISTS settlement_allocations (
   id            INTEGER PRIMARY KEY,
   settlement_id INTEGER NOT NULL REFERENCES settlements(id),
-  split_id      INTEGER NOT NULL REFERENCES splits(id),  -- partner's split being paid down
+  split_id      INTEGER NOT NULL REFERENCES splits(id),  -- the contact's split being paid down
   amount_cents  INTEGER NOT NULL   -- positive
 );
 
--- App settings as data (never hardcoded in code): partner display name,
--- defaults, and other user-facing configuration.
+-- App settings as data (never hardcoded in code): defaults and other
+-- user-facing configuration.
 CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL

@@ -4,6 +4,7 @@ import { TransactionsTab, TransactionSheet } from "../App";
 import {
   MONTH,
   fixtureAccounts,
+  fixtureContacts,
   fixtureListedTxns,
   fixturePots,
 } from "./fixtures";
@@ -19,6 +20,7 @@ const txnsApi = {
     [`/api/transactions?month=${MONTH}`]: { month: MONTH, transactions: fixtureListedTxns },
     [`/api/pots?month=${MONTH}`]: { pots: fixturePots },
     "/api/accounts": { accounts: fixtureAccounts },
+    "/api/contacts": { contacts: fixtureContacts },
   },
   post: {
     "/api/transactions": { ok: true, id: 999 },
@@ -61,7 +63,7 @@ export const List: Story = {
     docs: {
       description: {
         story:
-          "A typical month: outflows, an inflow, a transfer, two partner splits, a pending-review item, and an uncategorized import.",
+          "A typical month: outflows, an inflow, a transfer, two contact splits, a pending-review item, and an uncategorized import.",
       },
     },
   },
@@ -126,7 +128,7 @@ export const AddSheet: Story = {
     docs: {
       description: {
         story:
-          "The blank add form: description, Out/In amount, date, account, pot, plus transfer and partner-split options. Renders as a bottom sheet on mobile and a centered dialog on desktop.",
+          "The blank add form: description, Out/In amount, date, account, pot, plus transfer and contact-split options. Renders as a bottom sheet on mobile and a centered dialog on desktop.",
       },
     },
   },
@@ -150,17 +152,30 @@ export const SplitSheet: Story = {
     docs: {
       description: {
         story:
-          "The partner-split section: checking the box reveals the partner's share field, prefilled with half the amount.",
+          "The contact-split section: checking the box reveals a contact picker and their share field, prefilled from the pot's share config (or half the amount).",
       },
     },
   },
   render: () => (
-    <TransactionSheet txn={{ ...firstTxn, splitWithPartner: 0, partnerCents: 0 }} {...sheetProps} />
+    <TransactionSheet txn={{ ...firstTxn, splitWithContact: 0, sharedCents: 0, splitContactId: null, splitContactName: null }} {...sheetProps} />
   ),
   play: async ({ canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByLabelText("Split with partner"));
-    await within(canvasElement).findByLabelText("Partner's share");
+    await userEvent.click(within(canvasElement).getByLabelText("Split with a contact"));
+    await within(canvasElement).findByLabelText("Contact to split with");
+    await within(canvasElement).findByLabelText("Contact's share");
   },
+};
+
+export const SplitSheetEditExisting: Story = {
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "Editing a split transaction: the contact picker and share amount come prefilled from the row.",
+      },
+    },
+  },
+  render: () => <TransactionSheet txn={firstTxn} {...sheetProps} />,
 };
 
 export const DeleteConfirmation: Story = {

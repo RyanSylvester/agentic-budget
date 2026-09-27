@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { userEvent, within } from "storybook/test";
 import { PotsTab } from "../App";
-import { fixturePots, MONTH } from "./fixtures";
+import { fixtureContacts, fixturePots, MONTH } from "./fixtures";
 import type { MockApiConfig } from "./mockApi";
 
 const meta: Meta<typeof PotsTab> = {
@@ -46,5 +47,23 @@ export const Empty: Story = {
   parameters: {
     mockApi: { get: { [url]: { pots: [] } } } satisfies MockApiConfig,
     docs: { description: { story: "No pots for the month." } },
+  },
+};
+
+export const AddPotFlow: Story = {
+  parameters: {
+    mockApi: {
+      get: {
+        [url]: { pots: fixturePots },
+        "/api/contacts": { contacts: fixtureContacts },
+      },
+      post: { "/api/pots": { ok: true, id: 999 } },
+    } satisfies MockApiConfig,
+    docs: { description: { story: "The Add pot button opens the pot editor sheet. (Interaction test.)" } },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Add pot" }));
+    await canvas.findByLabelText("Name");
   },
 };

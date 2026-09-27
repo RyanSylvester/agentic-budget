@@ -11,7 +11,7 @@ const meta: Meta<typeof AttentionCard> = {
     docs: {
       description: {
         component:
-          "The needs-attention card on the overview page. It surfaces the short list that matters right now: transactions waiting for review, accounts that do not reconcile, unassigned money, and what the partner owes.",
+          "The needs-attention card on the overview page. It surfaces the short list that matters right now: transactions waiting for review, accounts that do not reconcile, unassigned money, and outstanding shared balances.",
       },
     },
   },
@@ -29,12 +29,12 @@ const base = {
 export const AllItems: Story = {
   args: {
     ...base,
-    attention: makeAttention({ unsettledPartnerCents: 42180 }),
+    attention: makeAttention({ unsettledSharedCents: 42180, sharedOwedBy: [{ contactId: 1, name: "Alex", cents: 42180 }] }),
   },
   parameters: {
     docs: {
       description: {
-        story: "Every attention item present at once: review queue, unreconciled accounts, unassigned money, partner balance.",
+        story: "Every attention item present at once: review queue, unreconciled accounts, unassigned money, shared balance.",
       },
     },
   },
@@ -47,7 +47,7 @@ export const ReviewOnly: Story = {
       pendingReviewCount: 1,
       unreconciledAccounts: [],
       rtaCents: 0,
-      unsettledPartnerCents: 0,
+      unsettledSharedCents: 0,
     }),
   },
   parameters: {
@@ -55,18 +55,38 @@ export const ReviewOnly: Story = {
   },
 };
 
-export const PartnerOwesOnly: Story = {
+export const SharedOwesOnly: Story = {
   args: {
     ...base,
     attention: makeAttention({
       pendingReviewCount: 0,
       unreconciledAccounts: [],
       rtaCents: 0,
-      unsettledPartnerCents: 129900,
+      unsettledSharedCents: 129900,
+      sharedOwedBy: [
+        { contactId: 1, name: "Alex", cents: 89900 },
+        { contactId: 2, name: "Sam", cents: 40000 },
+      ],
     }),
   },
   parameters: {
-    docs: { description: { story: "Only an unsettled partner balance to surface." } },
+    docs: { description: { story: "Only unsettled shared balances to surface; with two contacts owing, the card shows the total." } },
+  },
+};
+
+export const SingleContactOwes: Story = {
+  args: {
+    ...base,
+    attention: makeAttention({
+      pendingReviewCount: 0,
+      unreconciledAccounts: [],
+      rtaCents: 0,
+      unsettledSharedCents: 89900,
+      sharedOwedBy: [{ contactId: 1, name: "Alex", cents: 89900 }],
+    }),
+  },
+  parameters: {
+    docs: { description: { story: "One contact owing reads as \"{name} owes $X\" and jumps to the Sharing tab." } },
   },
 };
 
@@ -90,7 +110,7 @@ export const NothingToShow: Story = {
       pendingReviewCount: 0,
       unreconciledAccounts: [],
       rtaCents: 0,
-      unsettledPartnerCents: 0,
+      unsettledSharedCents: 0,
     }),
   },
   parameters: {
