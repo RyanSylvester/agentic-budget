@@ -26,26 +26,25 @@ export function openDb(path: string = DB_PATH): Database {
   if (!cols.some((c) => c.name === "is_transfer")) {
     fresh.exec("ALTER TABLE transactions ADD COLUMN is_transfer INTEGER NOT NULL DEFAULT 0");
   }
-  // Legacy YNAB-import columns (no longer synced — the app is standalone).
-  // Kept for history; ynab_id values are inert metadata.
+  // Soft-delete flag for retired pots (history kept, hidden from views).
   const potCols = fresh.query("PRAGMA table_info(pots)").all() as { name: string }[];
-  if (!potCols.some((c) => c.name === "ynab_id")) {
-    // SQLite cannot ADD COLUMN with a UNIQUE constraint — add plain, then index.
-    fresh.exec("ALTER TABLE pots ADD COLUMN ynab_id TEXT");
-    fresh.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_pots_ynab_id ON pots(ynab_id)");
-  }
-  if (!potCols.some((c) => c.name === "ynab_group_id")) {
-    fresh.exec("ALTER TABLE pots ADD COLUMN ynab_group_id TEXT");
-  }
   if (!potCols.some((c) => c.name === "hidden")) {
     fresh.exec("ALTER TABLE pots ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0");
   }
-  // Backfill splits: pre-split transactions were 100% Ryan's.
+  // Backfill splits: pre-split transactions were 100% the user's.
   const unsplit = fresh.query(
     "SELECT id, pot_id, amount_cents FROM transactions WHERE id NOT IN (SELECT transaction_id FROM splits)"
   ).all() as { id: number; pot_id: number | null; amount_cents: number }[];
-  const ins = fresh.query("INSERT INTO splits (transaction_id, pot_id, owner, amount_cents) VALUES (?, ?, 'ryan', ?)");
+  const ins = fresh.query("INSERT INTO splits (transaction_id, pot_id, owner, amount_cents) VALUES (?, ?, 'user', ?)");
   for (const t of unsplit) ins.run(t.id, t.pot_id, t.amount_cents);
+  // Seed default settings (INSERT OR IGNORE: never overwrite user data).
+  fresh.exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('partner_name', 'Partner')");
   db = fresh;
   return db;
+}
+
+/** Read an app setting. Returns null when unset. */
+export function getSetting(db: Database, key: string): string | null {
+  const r = db.query("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | null;
+  return r?.value ?? null;
 }

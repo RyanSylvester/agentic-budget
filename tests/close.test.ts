@@ -48,7 +48,7 @@ describe("closePreview / applyClose (live data)", () => {
       const t = db.query(
         "INSERT INTO transactions (date, account_id, amount_cents, description, source, entered_by, status, cleared) VALUES (?, 1, ?, 't', 'manual', 'agent', 'confirmed', 'cleared') RETURNING id"
       ).get(date, amount) as { id: number };
-      db.query("INSERT INTO splits (transaction_id, pot_id, owner, amount_cents) VALUES (?, ?, 'ryan', ?)").run(t.id, pot, amount);
+      db.query("INSERT INTO splits (transaction_id, pot_id, owner, amount_cents) VALUES (?, ?, 'user', ?)").run(t.id, pot, amount);
     };
     // paycheck + housing + groceries, Jun-Sep 2026
     for (const m of ["06", "07", "08"]) {

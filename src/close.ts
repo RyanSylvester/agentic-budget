@@ -1,5 +1,5 @@
 /** Month-end close math. Pure functions: same input, same output, fully tested.
- *  Ryan's rules: the month starts and ends at $0; leftover RTA goes to
+ *  The close rules: the month starts and ends at $0; leftover RTA goes to
  *  secondary savings; next month is wireframed from history.
  */
 
@@ -37,7 +37,7 @@ export function closeMonth(input: CloseInput): { rtaEndCents: number; movedToSav
 
 import type { Database } from "bun:sqlite";
 import { monthSpend, monthInflows, potSpend, assignedTotal } from "./queries";
-import { lillyOwed } from "./settle";
+import { partnerOwed } from "./settle";
 
 /** Shift a YYYY-MM month by delta months. */
 export function shiftMonth(month: string, delta: number): string {
@@ -64,7 +64,7 @@ export interface ClosePreview {
   assignedCents: number;
   rtaBeforeCents: number;
   movedToSavingsCents: number;
-  lillyOwedCents: number;
+  partnerOwedCents: number;
   pots: PotCloseLine[];
 }
 
@@ -75,8 +75,8 @@ export function closePreview(db: Database, month: string): ClosePreview {
   ).all() as { id: number; name: string; target_type: "fixed" | "average_3mo" | "savings"; target_cents: number }[];
 
   const lines: PotCloseLine[] = pots.map((p) => {
-    const historyCents = [3, 2, 1].map((i) => potSpend(db, p.id, shiftMonth(month, -i)).ryanCents);
-    const spentCents = potSpend(db, p.id, month).ryanCents;
+    const historyCents = [3, 2, 1].map((i) => potSpend(db, p.id, shiftMonth(month, -i)).userCents);
+    const spentCents = potSpend(db, p.id, month).userCents;
     const wireframeCents = wireframeTarget({ potId: p.id, targetType: p.target_type, historyCents });
     return { potId: p.id, name: p.name, targetType: p.target_type, targetCents: p.target_cents, spentCents, historyCents, wireframeCents };
   });
@@ -86,14 +86,14 @@ export function closePreview(db: Database, month: string): ClosePreview {
   const assignedCents = assignedTotal(db);
   const rtaBeforeCents = inflowsCents - assignedCents;
   const { movedToSavingsCents } = closeMonth({ rtaStartCents: rtaBeforeCents });
-  const lillyOwedCents = lillyOwed(db).reduce((a, o) => a + o.owedCents, 0);
+  const partnerOwedCents = partnerOwed(db).reduce((a, o) => a + o.owedCents, 0);
 
-  return { month, nextMonth: shiftMonth(month, 1), inflowsCents, spentCents, assignedCents, rtaBeforeCents, movedToSavingsCents, lillyOwedCents, pots: lines };
+  return { month, nextMonth: shiftMonth(month, 1), inflowsCents, spentCents, assignedCents, rtaBeforeCents, movedToSavingsCents, partnerOwedCents, pots: lines };
 }
 
 /** Apply the close: record it and wireframe next month's pot targets.
  *  Throws if this month was already closed. Human review happens before
- *  the agent runs this (Ryan's rule). */
+ *  the agent runs this. */
 export function applyClose(db: Database, preview: ClosePreview): void {
   const exists = db.query(`SELECT 1 FROM month_closes WHERE month = ?`).get(preview.month);
   if (exists) throw new Error(`close for ${preview.month} already applied`);

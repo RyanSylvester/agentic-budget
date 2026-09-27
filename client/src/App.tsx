@@ -6,13 +6,13 @@ interface Txn {
   id: number;
   date: string;
   description: string;
-  ryan_cents: number;
+  user_cents: number;
   amount_cents?: number; // present on /api/review items only
   is_transfer: number;
-  split_with_lilly: number;
+  split_with_partner: number;
   source: string;
   status: string;
-  lilly_cents: number;
+  partner_cents: number;
   review_reason: string | null;
 }
 
@@ -21,6 +21,7 @@ interface Overview {
   confirmedSpendCents: number;
   pendingCount: number;
   recent: Txn[];
+  partnerName: string;
 }
 
 interface ClosePreviewData {
@@ -30,7 +31,7 @@ interface ClosePreviewData {
   spentCents: number;
   rtaBeforeCents: number;
   movedToSavingsCents: number;
-  lillyOwedCents: number;
+  partnerOwedCents: number;
 }
 
 interface Account {
@@ -49,10 +50,11 @@ interface Pot {
   group: string;
   targetCents: number;
   spentCents: number;
-  lillyCents: number;
+  partnerCents: number;
 }
 
-interface LillyInfo {
+interface PartnerInfo {
+  partnerName: string;
   totalOwedCents: number;
   creditCents: number;
   byPot: { pot: string; cents: number }[];
@@ -121,7 +123,7 @@ function Hero({ overview, isCurrent }: { overview: Overview | null; isCurrent: b
   );
 }
 
-function PotCard({ p }: { p: Pot }) {
+function PotCard({ p, partnerName }: { p: Pot; partnerName: string }) {
   const hasTarget = p.targetCents > 0;
   const pct = hasTarget ? (p.spentCents / p.targetCents) * 100 : 0;
   const over = hasTarget && p.spentCents > p.targetCents;
@@ -137,8 +139,8 @@ function PotCard({ p }: { p: Pot }) {
         ) : (
           <span className="text-[var(--ink)]">{money(p.spentCents)}</span>
         )}
-        {p.lillyCents > 0 && (
-          <span> · {p.lillyCents === p.spentCents ? "Lilly's half" : `${money(p.lillyCents)} Lilly's`}</span>
+        {p.partnerCents > 0 && (
+          <span> · {p.partnerCents === p.spentCents ? `${partnerName}'s half` : `${money(p.partnerCents)} ${partnerName}'s`}</span>
         )}
       </div>
       {hasTarget && (
@@ -164,7 +166,7 @@ function PotCard({ p }: { p: Pot }) {
   );
 }
 
-function PotsGrid({ pots }: { pots: Pot[] }) {
+function PotsGrid({ pots, partnerName }: { pots: Pot[]; partnerName: string }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   if (pots.length === 0)
     return <p className="font-serif-d text-[17px] italic text-[var(--muted)]">No pots yet. They'll appear here once the budget is set up.</p>;
@@ -196,7 +198,7 @@ function PotsGrid({ pots }: { pots: Pot[] }) {
             </button>
             {isOpen && (
               <div className="grid grid-cols-2 gap-3">
-                {g.pots.map((p) => <PotCard key={p.id} p={p} />)}
+                {g.pots.map((p) => <PotCard key={p.id} p={p} partnerName={partnerName} />)}
               </div>
             )}
           </div>
@@ -206,7 +208,7 @@ function PotsGrid({ pots }: { pots: Pot[] }) {
   );
 }
 
-function RecentActivity({ txns }: { txns: Txn[] }) {
+function RecentActivity({ txns, partnerName }: { txns: Txn[]; partnerName: string }) {
   if (txns.length === 0) return null;
   return (
     <div>
@@ -219,11 +221,11 @@ function RecentActivity({ txns }: { txns: Txn[] }) {
               <div className="mt-0.5 text-[13px] text-[var(--muted)]">
                 {t.date}
                 {t.is_transfer ? " · transfer" : ""}
-                {t.split_with_lilly ? " · split with Lilly" : ""}
+                {t.split_with_partner ? ` · split with ${partnerName}` : ""}
               </div>
             </div>
-            <span className={`t-nums shrink-0 text-[15px] ${t.ryan_cents < 0 ? "" : "font-medium text-[var(--success)]"}`}>
-              {money(t.ryan_cents)}
+            <span className={`t-nums shrink-0 text-[15px] ${t.user_cents < 0 ? "" : "font-medium text-[var(--success)]"}`}>
+              {money(t.user_cents)}
             </span>
           </li>
         ))}
@@ -298,6 +300,7 @@ function MonthNav({ month, onChange }: { month: string; onChange: (m: string) =>
 function OverviewTab({ month, onGo }: { month: string; onGo: (t: "review" | "accounts") => void }) {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [pots, setPots] = useState<Pot[]>([]);
+  const [partnerName, setPartnerName] = useState("Partner");
   const [trend, setTrend] = useState<TrendPoint[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [close, setClose] = useState<ClosePreviewData | null>(null);
@@ -306,7 +309,7 @@ function OverviewTab({ month, onGo }: { month: string; onGo: (t: "review" | "acc
 
   useEffect(() => {
     setOverview(null);
-    fetch(`/api/overview?month=${month}`).then((r) => r.json()).then(setOverview);
+    fetch(`/api/overview?month=${month}`).then((r) => r.json()).then((d) => { setOverview(d); setPartnerName(d.partnerName ?? "Partner"); });
     fetch(`/api/pots?month=${month}`).then((r) => r.json()).then((d) => setPots(d.pots));
     fetch(`/api/close-preview?month=${month}`).then((r) => r.json()).then(setClose);
   }, [month]);
@@ -320,12 +323,12 @@ function OverviewTab({ month, onGo }: { month: string; onGo: (t: "review" | "acc
     <div className="space-y-7">
       <Hero overview={overview} isCurrent={month === current} />
       <ClickableAttention overview={overview} accounts={accounts} onGo={onGo} />
-      <LillyCard />
+      <PartnerCard />
       <div>
         <div className="mb-3"><Eyebrow>Pots</Eyebrow></div>
-        <PotsGrid pots={pots} />
+        <PotsGrid pots={pots} partnerName={partnerName} />
       </div>
-      <RecentActivity txns={overview?.recent ?? []} />
+      <RecentActivity txns={overview?.recent ?? []} partnerName={partnerName} />
       <CloseCard preview={close} />
       <Trend data={trend} />
     </div>
@@ -360,15 +363,15 @@ function ClickableAttention({ overview, accounts, onGo }: { overview: Overview |
   );
 }
 
-/* ---------- lilly owes ---------- */
+/* ---------- partner balance ---------- */
 
-function LillyCard() {
-  const [info, setInfo] = useState<LillyInfo | null>(null);
+function PartnerCard() {
+  const [info, setInfo] = useState<PartnerInfo | null>(null);
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const [last, setLast] = useState<{ allocations: { potName: string | null; amountCents: number }[]; leftoverCents: number } | null>(null);
 
-  const load = () => fetch("/api/lilly").then((r) => r.json()).then(setInfo);
+  const load = () => fetch("/api/partner").then((r) => r.json()).then(setInfo);
   useEffect(() => { load(); }, []);
 
   if (!info || (info.totalOwedCents === 0 && info.creditCents === 0)) return null;
@@ -384,7 +387,7 @@ function LillyCard() {
       const res = await fetch("/api/settle", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: acct.id, amountCents: cents, note: "Lilly settlement" }),
+        body: JSON.stringify({ accountId: acct.id, amountCents: cents, note: "Partner settlement" }),
       }).then((r) => r.json());
       setLast(res);
       setAmount("");
@@ -395,7 +398,7 @@ function LillyCard() {
 
   return (
     <div className="card p-5">
-      <Eyebrow>Lilly owes you</Eyebrow>
+      <Eyebrow>{info.partnerName} owes you</Eyebrow>
       <div className="t-nums mt-1.5 text-[32px] font-light tracking-tight">{money(info.totalOwedCents)}</div>
       {info.oldest && <div className="mt-1 text-[13px] text-[var(--muted)]">oldest since {info.oldest}</div>}
       <ul className="mt-3 space-y-1">

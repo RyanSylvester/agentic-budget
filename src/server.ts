@@ -3,9 +3,9 @@
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { existsSync } from "node:fs";
-import { openDb } from "./db";
+import { openDb, getSetting } from "./db";
 import { monthSpend, potSpend, recentTransactions, spendTrend } from "./queries";
-import { applySettlement, lillyCredit, lillyOwed } from "./settle";
+import { applySettlement, partnerCredit, partnerOwed } from "./settle";
 import { reconcile, suggestClear } from "./reconcile";
 import { closePreview } from "./close";
 
@@ -15,7 +15,7 @@ app.get("/api/overview", (c) => {
   const db = openDb();
   const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
   const pending = db.query("SELECT COUNT(*) AS n FROM transactions WHERE status = 'pending_review'").get() as { n: number };
-  return c.json({ month, confirmedSpendCents: monthSpend(db, month), pendingCount: pending.n, recent: recentTransactions(db, 10, month) });
+  return c.json({ month, confirmedSpendCents: monthSpend(db, month), pendingCount: pending.n, recent: recentTransactions(db, 10, month), partnerName: getSetting(db, "partner_name") ?? "Partner" });
 });
 
 app.get("/api/review", (c) => {
@@ -23,7 +23,7 @@ app.get("/api/review", (c) => {
   const transactions = db.query(
     `SELECT t.id, t.date, t.description, t.amount_cents, t.source, t.status, t.review_reason,
             COALESCE((SELECT SUM(-s.amount_cents) FROM splits s
-                      WHERE s.transaction_id = t.id AND s.owner = 'lilly' AND s.amount_cents < 0), 0) AS lilly_cents
+                      WHERE s.transaction_id = t.id AND s.owner = 'partner' AND s.amount_cents < 0), 0) AS partner_cents
      FROM transactions t WHERE t.status = 'pending_review' ORDER BY t.id`
   ).all();
   return c.json({ transactions });
@@ -104,9 +104,10 @@ app.get("/api/pots", (c) => {
   const pots = db.query("SELECT id, name, pot_group, target_cents FROM pots WHERE hidden = 0 ORDER BY id").all() as any[];
   return c.json({
     month,
+    partnerName: getSetting(db, "partner_name") ?? "Partner",
     pots: pots.map((p) => {
-      const { ryanCents, lillyCents } = potSpend(db, p.id, month);
-      return { id: p.id, name: p.name, group: p.pot_group, targetCents: p.target_cents, spentCents: ryanCents, lillyCents };
+      const { userCents, partnerCents } = potSpend(db, p.id, month);
+      return { id: p.id, name: p.name, group: p.pot_group, targetCents: p.target_cents, spentCents: userCents, partnerCents };
     }),
   });
 });
@@ -117,31 +118,32 @@ app.get("/api/trend", (c) => {
 });
 
 /** Read-only month-end close preview. The agent applies the close after
- *  Ryan's review; this endpoint never writes. */
+ *  the user's review; this endpoint never writes. */
 app.get("/api/close-preview", (c) => {
   const db = openDb();
   const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
   return c.json(closePreview(db, month));
 });
 
-// What Lilly owes Ryan: her outstanding shares, oldest first, grouped by pot.
-app.get("/api/lilly", (c) => {
+// What the partner owes the user: their outstanding shares, oldest first, grouped by pot.
+app.get("/api/partner", (c) => {
   const db = openDb();
-  const owed = lillyOwed(db);
+  const owed = partnerOwed(db);
   const byPot = new Map<string, number>();
   for (const o of owed) {
     const name = o.potName ?? "Uncategorized";
     byPot.set(name, (byPot.get(name) ?? 0) + o.owedCents);
   }
   return c.json({
+    partnerName: getSetting(db, "partner_name") ?? "Partner",
     totalOwedCents: owed.reduce((a, o) => a + o.owedCents, 0),
-    creditCents: lillyCredit(db),
+    creditCents: partnerCredit(db),
     byPot: [...byPot.entries()].map(([pot, cents]) => ({ pot, cents })).sort((a, b) => b.cents - a.cents),
     oldest: owed[0]?.date ?? null,
   });
 });
 
-// Record a lump sum from Lilly and allocate it against what she owes, oldest first.
+// Record a lump sum from the partner and allocate it against what they owe, oldest first.
 app.post("/api/settle", async (c) => {
   const db = openDb();
   const body = await c.req.json();

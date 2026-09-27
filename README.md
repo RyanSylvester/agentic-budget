@@ -1,8 +1,8 @@
 # agentic-budget
 
 Agentic-first personal budgeting. The agent is the write path; the human gets
-the understanding. A replacement for YNAB, built around one person's actual
-rules instead of fighting them.
+the understanding. Built around one person's actual rules instead of fighting
+them.
 
 ## The idea
 
@@ -32,23 +32,24 @@ bun src/cli.ts serve         # dashboard at http://localhost:3000
 
 ## How it works
 
-- **Pots** are managed directly in this app (standalone, no YNAB sync).
+- **Pots** are managed directly in this app.
   The agent creates, renames, and retires pots as the budget evolves.
   Each pot has a target type: `fixed` (bills copied from history), `average_3mo`
   (variables), or `savings` (sinks that get leftovers, never assignments).
-- **Splits**: every transaction is split by owner. Ryan's share counts in his
-  views; Lilly's share is recorded as what she owes and never counted as his
-  spending. Settlements allocate her lump sums oldest-first.
-- **Transfers** (`is_transfer`) move between his own accounts: counted in
+- **Splits**: every transaction is split by owner (`user` / `partner`).
+  The user's share counts in their views; the partner's share is recorded
+  as what they owe and never counted as the user's spending. Settlements
+  allocate the partner's lump sums oldest-first.
+- **Transfers** (`is_transfer`) move between the user's own accounts: counted in
   reconciliation, never in spending.
 - **Review queue**: only entries the agent wasn't sure about land here. One tap
   to confirm.
 - **Month-end close**: Ready-to-Assign must end at exactly $0; the leftover
   moves to secondary savings and next month's pot targets are wireframed from
-  history. The agent applies the close after Ryan's review
+  history. The agent applies the close after the user's review
   (`bun src/cli.ts close --month YYYY-MM` to preview).
 
 ## Status
 
-Working app with live data (imported from YNAB Aug 27 – Sep 26 2026).
-Standalone: no sync with YNAB; the agent manages the budget directly.
+Working app with live data (Aug 27 – Sep 26 2026).
+The agent manages the budget directly.

@@ -1,11 +1,11 @@
 /** Reconciliation: compare the budget's account balance against the real-world
- *  balance (read by the agent from a statement), YNAB-style.
+ *  balance (read by the agent from a statement).
  *  Pure functions; the server handles the database writes.
  */
 
 export interface ReconcileInput {
   /** Sum of cleared + reconciled transactions only, in cents.
-   *  (Uncleared = still pending at the bank, so excluded, YNAB-style.) */
+   *  (Uncleared = still pending at the bank, so excluded.) */
   clearedBalanceCents: number;
   /** Real balance from the bank/statement, in cents. */
   actualBalanceCents: number;

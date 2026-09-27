@@ -8,17 +8,14 @@ CREATE TABLE IF NOT EXISTS accounts (
   last4     TEXT
 );
 
--- Pots are managed directly in this app (standalone — no YNAB sync).
--- ynab_id / ynab_group_id are legacy columns from the one-time YNAB import;
--- they are inert metadata now. hidden is unused.
+-- Pots are managed directly in this app. hidden=1 keeps a retired pot's
+-- history while hiding it from views.
 CREATE TABLE IF NOT EXISTS pots (
   id           INTEGER PRIMARY KEY,
   name         TEXT NOT NULL,
   pot_group    TEXT NOT NULL,
   target_type  TEXT NOT NULL CHECK (target_type IN ('fixed','average_3mo','savings')),
   target_cents INTEGER NOT NULL DEFAULT 0,
-  ynab_id       TEXT UNIQUE,
-  ynab_group_id TEXT,
   hidden        INTEGER NOT NULL DEFAULT 0
 );
 
@@ -30,17 +27,17 @@ CREATE TABLE IF NOT EXISTS transactions (
   amount_cents INTEGER NOT NULL,            -- negative = outflow
   description  TEXT NOT NULL,
   source       TEXT NOT NULL CHECK (source IN ('gmail','mention','manual')),
-  entered_by   TEXT NOT NULL CHECK (entered_by IN ('agent','ryan')),
+  entered_by   TEXT NOT NULL CHECK (entered_by IN ('agent','user')),
   status       TEXT NOT NULL DEFAULT 'pending_review'
                CHECK (status IN ('pending_review','confirmed')),
-  -- YNAB-style cleared states. Reconciliation compares the budget balance
+  -- Cleared states. Reconciliation compares the budget balance
   -- against the real account balance; 'reconciled' locks the match.
   cleared      TEXT NOT NULL DEFAULT 'uncleared'
                CHECK (cleared IN ('uncleared','cleared','reconciled')),
-  -- Only uncertain agent entries wait for review (Ryan 2026-09-26);
+  -- Only uncertain agent entries wait for review;
   -- the reason is shown in the review queue.
   review_reason TEXT,
-  -- Movements between Ryan's own accounts (holding-account loop, TFSA
+  -- Movements between the user's own accounts (holding-account loop, savings
   -- contributions). Real money for reconciliation, never spending.
   is_transfer  INTEGER NOT NULL DEFAULT 0,
   created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
@@ -52,7 +49,7 @@ CREATE TABLE IF NOT EXISTS month_closes (
   id               INTEGER PRIMARY KEY,
   month            TEXT NOT NULL UNIQUE,   -- YYYY-MM
   rta_start_cents  INTEGER NOT NULL,
-  rta_end_cents    INTEGER NOT NULL,       -- must be 0 per Ryan's rule
+  rta_end_cents    INTEGER NOT NULL,       -- must be 0 at close
   moved_to_savings_cents INTEGER NOT NULL,
   applied_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
@@ -68,21 +65,21 @@ CREATE TABLE IF NOT EXISTS reconciliations (
   created_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
--- Splits: who pays what on a transaction. Ryan splits parts of the budget
--- with Lilly (e.g. housing), so every transaction is divided into owner
--- shares. All of Ryan's views sum only owner='ryan' — "$1,670 in housing"
--- never includes Lilly's half. Splits always sum to the transaction amount.
+-- Splits: who pays what on a transaction. The user splits parts of the budget
+-- with a partner (e.g. housing), so every transaction is divided into owner
+-- shares. All of the user's views sum only owner='user' — "$1,670 in housing"
+-- never includes the partner's half. Splits always sum to the transaction amount.
 CREATE TABLE IF NOT EXISTS splits (
   id             INTEGER PRIMARY KEY,
   transaction_id INTEGER NOT NULL REFERENCES transactions(id),
   pot_id         INTEGER REFERENCES pots(id),
-  owner          TEXT NOT NULL CHECK (owner IN ('ryan','lilly')),
+  owner          TEXT NOT NULL CHECK (owner IN ('user','partner')),
   amount_cents   INTEGER NOT NULL
 );
 
--- Settlements: when Lilly sends a lump sum, it lands as a (100% Lilly-owned,
--- so Ryan's spend views ignore it) transaction, then gets allocated against
--- her outstanding shares oldest-first — "filling up those buckets".
+-- Settlements: when the partner sends a lump sum, it lands as a (100%
+-- partner-owned, so the user's spend views ignore it) transaction, then gets
+-- allocated against their outstanding shares oldest-first.
 CREATE TABLE IF NOT EXISTS settlements (
   id              INTEGER PRIMARY KEY,
   transaction_id  INTEGER NOT NULL REFERENCES transactions(id),
@@ -96,6 +93,13 @@ CREATE TABLE IF NOT EXISTS settlements (
 CREATE TABLE IF NOT EXISTS settlement_allocations (
   id            INTEGER PRIMARY KEY,
   settlement_id INTEGER NOT NULL REFERENCES settlements(id),
-  split_id      INTEGER NOT NULL REFERENCES splits(id),  -- Lilly's split being paid down
+  split_id      INTEGER NOT NULL REFERENCES splits(id),  -- partner's split being paid down
   amount_cents  INTEGER NOT NULL   -- positive
+);
+
+-- App settings as data (never hardcoded in code): partner display name,
+-- defaults, and other user-facing configuration.
+CREATE TABLE IF NOT EXISTS settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
 );
