@@ -37,6 +37,12 @@ const meta: Meta<typeof App> = {
   parameters: {
     mockApi: fullApi,
     layout: "fullscreen",
+    docs: {
+      description: {
+        component:
+          "The whole app: sidebar navigation, month context, and all seven tabs, with every API route mocked. Use these stories to click through the full experience and to capture screens.",
+      },
+    },
   },
 };
 
@@ -49,9 +55,16 @@ async function goToTab(canvasElement: HTMLElement, label: string) {
   await userEvent.click(within(aside).getByRole("button", { name: new RegExp(`^${label}`) }));
 }
 
-export const Overview: Story = {};
+export const Overview: Story = {
+  parameters: {
+    docs: { description: { story: "The app opens on the Overview tab." } },
+  },
+};
 
 export const Pots: Story = {
+  parameters: {
+    docs: { description: { story: "Navigating to the Pots tab. (Interaction test.)" } },
+  },
   play: async ({ canvasElement }) => {
     await goToTab(canvasElement, "Pots");
     await within(canvasElement).findByText("Rent share");
@@ -59,6 +72,9 @@ export const Pots: Story = {
 };
 
 export const Insights: Story = {
+  parameters: {
+    docs: { description: { story: "Navigating to the Insights tab. (Interaction test.)" } },
+  },
   play: async ({ canvasElement }) => {
     await goToTab(canvasElement, "Insights");
     await within(canvasElement).findByText("Where the money went");
@@ -66,6 +82,9 @@ export const Insights: Story = {
 };
 
 export const Close: Story = {
+  parameters: {
+    docs: { description: { story: "Navigating to the Close tab. (Interaction test.)" } },
+  },
   play: async ({ canvasElement }) => {
     await goToTab(canvasElement, "Close");
     await within(canvasElement).findByText("How the month closes");
@@ -73,6 +92,9 @@ export const Close: Story = {
 };
 
 export const Partner: Story = {
+  parameters: {
+    docs: { description: { story: "Navigating to the Partner tab. (Interaction test.)" } },
+  },
   play: async ({ canvasElement }) => {
     await goToTab(canvasElement, "Partner");
     await within(canvasElement).findByText("Partner owes you");
@@ -80,6 +102,9 @@ export const Partner: Story = {
 };
 
 export const Review: Story = {
+  parameters: {
+    docs: { description: { story: "Navigating to the Review tab. (Interaction test.)" } },
+  },
   play: async ({ canvasElement }) => {
     await goToTab(canvasElement, "Review");
     await within(canvasElement).findByText("Mock ambiguous charge");
@@ -87,6 +112,9 @@ export const Review: Story = {
 };
 
 export const Accounts: Story = {
+  parameters: {
+    docs: { description: { story: "Navigating to the Accounts tab. (Interaction test.)" } },
+  },
   play: async ({ canvasElement }) => {
     await goToTab(canvasElement, "Accounts");
     await within(canvasElement).findByText("Mock Credit Card");

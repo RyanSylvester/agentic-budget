@@ -8,6 +8,14 @@ const meta: Meta<typeof InsightsTab> = {
   title: "Tabs/InsightsTab",
   component: InsightsTab,
   args: { month: MONTH },
+  parameters: {
+    docs: {
+      description: {
+        component:
+          "The full Insights tab: the spending donut plus six-month bars for a chosen pot, with a search picker to switch pots.",
+      },
+    },
+  },
 };
 
 export default meta;
@@ -36,7 +44,10 @@ const loadedApi = {
 } satisfies MockApiConfig;
 
 export const Loaded: Story = {
-  parameters: { mockApi: loadedApi },
+  parameters: {
+    mockApi: loadedApi,
+    docs: { description: { story: "Donut and bars loaded for the top-spending pot." } },
+  },
 };
 
 export const DonutEmpty: Story = {
@@ -51,12 +62,14 @@ export const DonutEmpty: Story = {
         },
       },
     } satisfies MockApiConfig,
+    docs: { description: { story: "No spending this month: the donut shows its empty state while pots still list." } },
   },
 };
 
 export const PotsError: Story = {
   parameters: {
     mockApi: { failGet: [potsUrl] } satisfies MockApiConfig,
+    docs: { description: { story: "The shared error card when pots fail to load." } },
   },
 };
 
@@ -66,11 +79,19 @@ export const HistoryError: Story = {
       get: { [potsUrl]: { pots: fixturePots } },
       failGet: [historyUrl(topPot.id)],
     } satisfies MockApiConfig,
+    docs: { description: { story: "The shared error card when a pot's history fails to load." } },
   },
 };
 
 export const PickerSearch: Story = {
-  parameters: { mockApi: loadedApi },
+  parameters: {
+    mockApi: loadedApi,
+    docs: {
+      description: {
+        story: "Typing in the pot picker filters the list; picking a pot reloads the bars. (Interaction test.)",
+      },
+    },
+  },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const input = await canvas.findByLabelText("Search pots");

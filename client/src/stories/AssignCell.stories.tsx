@@ -12,18 +12,33 @@ const meta: Meta<typeof AssignCell> = {
     month: "2026-09",
     onAssigned: fn(),
   },
+  parameters: {
+    docs: {
+      description: {
+        component:
+          "The inline editor inside the Assigned column. Click a value to type a new one; Enter commits, Escape cancels.",
+      },
+    },
+  },
 };
 
 export default meta;
 type Story = StoryObj<typeof AssignCell>;
 
-export const Default: Story = {};
+export const Default: Story = {
+  parameters: {
+    docs: { description: { story: "The resting state: the assigned amount as a button." } },
+  },
+};
 
 export const CommitSucceeds: Story = {
   parameters: {
     mockApi: {
       post: { "/api/assign": { ok: true } },
     } satisfies MockApiConfig,
+    docs: {
+      description: { story: "Typing 750 and pressing Enter posts to the API and closes the editor. (Interaction test.)" },
+    },
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
@@ -43,6 +58,9 @@ export const CommitFails: Story = {
     mockApi: {
       failPost: ["/api/assign"],
     } satisfies MockApiConfig,
+    docs: {
+      description: { story: "A failed save shows an inline error and keeps the editor open so nothing is lost." },
+    },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
@@ -56,6 +74,9 @@ export const CommitFails: Story = {
 };
 
 export const EscapeCancels: Story = {
+  parameters: {
+    docs: { description: { story: "Escape closes the editor without saving or calling back. (Interaction test.)" } },
+  },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole("button", { name: /Assign to Groceries/ }));

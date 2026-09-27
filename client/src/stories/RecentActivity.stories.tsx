@@ -5,6 +5,14 @@ import { fixtureTxns, makeTxn } from "./fixtures";
 const meta: Meta<typeof RecentActivity> = {
   title: "Overview/RecentActivity",
   component: RecentActivity,
+  parameters: {
+    docs: {
+      description: {
+        component:
+          "The latest transactions on the overview page, newest first. Transfers are hidden since they are just money moving between your own accounts.",
+      },
+    },
+  },
 };
 
 export default meta;
@@ -23,10 +31,16 @@ export const Mixed: Story = {
 
 export const Loading: Story = {
   args: { txns: [], loading: true },
+  parameters: {
+    docs: { description: { story: "Skeleton rows while transactions load." } },
+  },
 };
 
 export const Empty: Story = {
   args: { txns: [] },
+  parameters: {
+    docs: { description: { story: "No transactions this month yet." } },
+  },
 };
 
 export const OnlyTransfers: Story = {
@@ -48,5 +62,8 @@ export const LongDescriptions: Story = {
     txns: [
       makeTxn({ description: "Mock purchase with a very long description that should truncate gracefully in the row" }),
     ],
+  },
+  parameters: {
+    docs: { description: { story: "Long merchant descriptions truncate instead of wrapping the row." } },
   },
 };

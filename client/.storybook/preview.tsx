@@ -55,6 +55,7 @@ function ThemeScope({ theme, children }: { theme: string; children: React.ReactN
 }
 
 const preview: Preview = {
+  tags: ["autodocs"],
   globalTypes: {
     theme: {
       name: "Theme",

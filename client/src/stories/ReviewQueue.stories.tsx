@@ -8,6 +8,14 @@ const meta: Meta<typeof ReviewQueue> = {
   title: "Review/ReviewQueue",
   component: ReviewQueue,
   args: { onChange: fn() },
+  parameters: {
+    docs: {
+      description: {
+        component:
+          "Transactions the app could not categorize on its own. Confirm each one to file it; confirmed rows leave the queue.",
+      },
+    },
+  },
 };
 
 export default meta;
@@ -18,24 +26,28 @@ const list = { transactions: fixtureReviewTxns };
 export const Items: Story = {
   parameters: {
     mockApi: { get: { "/api/review": list } } satisfies MockApiConfig,
+    docs: { description: { story: "Two transactions waiting for review." } },
   },
 };
 
 export const Empty: Story = {
   parameters: {
     mockApi: { get: { "/api/review": { transactions: [] } } } satisfies MockApiConfig,
+    docs: { description: { story: "Queue clear: the empty state." } },
   },
 };
 
 export const Loading: Story = {
   parameters: {
     mockApi: { get: { "/api/review": () => new Promise(() => {}) } } satisfies MockApiConfig,
+    docs: { description: { story: "Skeleton rows while the queue loads." } },
   },
 };
 
 export const Error: Story = {
   parameters: {
     mockApi: { failGet: ["/api/review"] } satisfies MockApiConfig,
+    docs: { description: { story: "The shared error card with retry." } },
   },
 };
 
@@ -45,6 +57,9 @@ export const ConfirmFlow: Story = {
       get: { "/api/review": list },
       post: { "/api/review/101/confirm": { ok: true } },
     } satisfies MockApiConfig,
+    docs: {
+      description: { story: "Confirming a transaction files it and removes the row. (Interaction test.)" },
+    },
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);

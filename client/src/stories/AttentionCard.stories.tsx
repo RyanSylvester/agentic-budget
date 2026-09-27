@@ -7,6 +7,14 @@ const meta: Meta<typeof AttentionCard> = {
   title: "Overview/AttentionCard",
   component: AttentionCard,
   args: { onGo: fn() },
+  parameters: {
+    docs: {
+      description: {
+        component:
+          "The needs-attention card on the overview page. It surfaces the short list that matters right now: transactions waiting for review, accounts that do not reconcile, unassigned money, and what the partner owes.",
+      },
+    },
+  },
 };
 
 export default meta;
@@ -23,6 +31,13 @@ export const AllItems: Story = {
     ...base,
     attention: makeAttention({ unsettledPartnerCents: 42180 }),
   },
+  parameters: {
+    docs: {
+      description: {
+        story: "Every attention item present at once: review queue, unreconciled accounts, unassigned money, partner balance.",
+      },
+    },
+  },
 };
 
 export const ReviewOnly: Story = {
@@ -34,6 +49,9 @@ export const ReviewOnly: Story = {
       rtaCents: 0,
       unsettledPartnerCents: 0,
     }),
+  },
+  parameters: {
+    docs: { description: { story: "Only the review queue needs work; everything else is clear." } },
   },
 };
 
@@ -47,6 +65,9 @@ export const PartnerOwesOnly: Story = {
       unsettledPartnerCents: 129900,
     }),
   },
+  parameters: {
+    docs: { description: { story: "Only an unsettled partner balance to surface." } },
+  },
 };
 
 export const LegacyFallback: Story = {
@@ -54,6 +75,11 @@ export const LegacyFallback: Story = {
     ...base,
     attention: null,
     overview: makeOverview({ pendingCount: 2 }),
+  },
+  parameters: {
+    docs: {
+      description: { story: "Fallback when the attention endpoint is unavailable: falls back to the pending review count." },
+    },
   },
 };
 

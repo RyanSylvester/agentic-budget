@@ -7,6 +7,14 @@ import type { MockApiConfig } from "./mockApi";
 const meta: Meta<typeof AccountsView> = {
   title: "Accounts/AccountsView",
   component: AccountsView,
+  parameters: {
+    docs: {
+      description: {
+        component:
+          "Bank and credit accounts with balances. Each account can be reconciled against its real-world balance; credit cards show what is owed.",
+      },
+    },
+  },
 };
 
 export default meta;
@@ -19,24 +27,28 @@ const reconcileUrl = `/api/accounts/${chequingId}/reconcile`;
 export const Mixed: Story = {
   parameters: {
     mockApi: { get: { "/api/accounts": accounts } } satisfies MockApiConfig,
+    docs: { description: { story: "Chequing, savings, and a credit card showing its owed balance." } },
   },
 };
 
 export const Loading: Story = {
   parameters: {
     mockApi: { get: { "/api/accounts": () => new Promise(() => {}) } } satisfies MockApiConfig,
+    docs: { description: { story: "Skeleton rows while accounts load." } },
   },
 };
 
 export const Error: Story = {
   parameters: {
     mockApi: { failGet: ["/api/accounts"] } satisfies MockApiConfig,
+    docs: { description: { story: "The shared error card with retry." } },
   },
 };
 
 export const Empty: Story = {
   parameters: {
     mockApi: { get: { "/api/accounts": { accounts: [] } } } satisfies MockApiConfig,
+    docs: { description: { story: "No accounts yet: the empty state." } },
   },
 };
 
@@ -53,6 +65,9 @@ export const ReconcileBalanced: Story = {
         },
       },
     } satisfies MockApiConfig,
+    docs: {
+      description: { story: "Entering the true balance matches: the account is marked balanced. (Interaction test.)" },
+    },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
@@ -83,6 +98,11 @@ export const ReconcileWithDifference: Story = {
         "/api/transactions/202/clear": { ok: true },
       },
     } satisfies MockApiConfig,
+    docs: {
+      description: {
+        story: "A mismatch lists uncleared transactions and suggests the likeliest one to clear. (Interaction test.)",
+      },
+    },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);

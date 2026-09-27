@@ -7,6 +7,14 @@ import type { MockApiConfig } from "./mockApi";
 const meta: Meta<typeof PartnerCard> = {
   title: "Partner/PartnerCard",
   component: PartnerCard,
+  parameters: {
+    docs: {
+      description: {
+        component:
+          "The partner settlement card. It totals what the partner owes across shared pots, applies any credit first, and records payments received.",
+      },
+    },
+  },
 };
 
 export default meta;
@@ -22,6 +30,7 @@ export const Owes: Story = {
         "/api/accounts": accounts,
       },
     } satisfies MockApiConfig,
+    docs: { description: { story: "A balance owed across shared pots." } },
   },
 };
 
@@ -33,6 +42,7 @@ export const OwesWithCredit: Story = {
         "/api/accounts": accounts,
       },
     } satisfies MockApiConfig,
+    docs: { description: { story: "Existing credit reduces what is owed before anything new is counted." } },
   },
 };
 
@@ -44,6 +54,7 @@ export const Settled: Story = {
         "/api/accounts": accounts,
       },
     } satisfies MockApiConfig,
+    docs: { description: { story: "Nothing owed: the settled state." } },
   },
 };
 
@@ -55,6 +66,7 @@ export const Loading: Story = {
         "/api/accounts": accounts,
       },
     } satisfies MockApiConfig,
+    docs: { description: { story: "Skeleton while the partner balance loads." } },
   },
 };
 
@@ -64,6 +76,7 @@ export const Error: Story = {
       failGet: ["/api/partner"],
       get: { "/api/accounts": accounts },
     } satisfies MockApiConfig,
+    docs: { description: { story: "The shared error card with retry." } },
   },
 };
 
@@ -84,6 +97,9 @@ export const SettleFlow: Story = {
         },
       },
     } satisfies MockApiConfig,
+    docs: {
+      description: { story: "Recording a payment fills the shared pots and confirms. (Interaction test.)" },
+    },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
@@ -103,6 +119,7 @@ export const SettleFails: Story = {
       },
       failPost: ["/api/settle"],
     } satisfies MockApiConfig,
+    docs: { description: { story: "A failed payment shows an inline error; nothing is recorded." } },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
@@ -121,6 +138,7 @@ export const NoChequingAccount: Story = {
         "/api/accounts": { accounts: [] },
       },
     } satisfies MockApiConfig,
+    docs: { description: { story: "Settling is disabled until at least one chequing account exists." } },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);

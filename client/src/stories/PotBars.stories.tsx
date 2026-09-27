@@ -5,6 +5,13 @@ import { fixtureHistory } from "./fixtures";
 const meta: Meta<typeof PotBars> = {
   title: "Insights/PotBars",
   component: PotBars,
+  parameters: {
+    docs: {
+      description: {
+        component: "Six months of spending for one pot as solid ink bars, with a thin rule marking the three-month average.",
+      },
+    },
+  },
 };
 
 export default meta;
@@ -12,6 +19,9 @@ type Story = StoryObj<typeof PotBars>;
 
 export const Typical: Story = {
   args: { history: fixtureHistory },
+  parameters: {
+    docs: { description: { story: "Six months of varied spending with the average line." } },
+  },
 };
 
 export const AllZero: Story = {
@@ -34,6 +44,9 @@ export const AllZero: Story = {
 
 export const SingleMonth: Story = {
   args: { history: [{ month: "2026-09", spentCents: 55263 }] },
+  parameters: {
+    docs: { description: { story: "Only one month of history: a single bar, no average." } },
+  },
 };
 
 export const Empty: Story = {

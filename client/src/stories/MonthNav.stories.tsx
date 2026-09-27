@@ -6,6 +6,14 @@ const meta: Meta<typeof MonthNav> = {
   title: "Navigation/MonthNav",
   component: MonthNav,
   args: { onChange: fn() },
+  parameters: {
+    docs: {
+      description: {
+        component:
+          "The month stepper used above the budget table and insights. Borderless chevrons move one month at a time; the forward chevron disables on the current month.",
+      },
+    },
+  },
 };
 
 export default meta;
@@ -15,8 +23,14 @@ type Story = StoryObj<typeof MonthNav>;
 // next-button state only shows when the story month matches today.
 export const CurrentMonth: Story = {
   args: { month: new Date().toISOString().slice(0, 7) },
+  parameters: {
+    docs: { description: { story: "On the current month the forward chevron is disabled." } },
+  },
 };
 
 export const PastMonth: Story = {
   args: { month: "2026-08" },
+  parameters: {
+    docs: { description: { story: "On a past month both chevrons are active." } },
+  },
 };
