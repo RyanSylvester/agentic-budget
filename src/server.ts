@@ -4,11 +4,11 @@ import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { existsSync } from "node:fs";
 import { openDb, getSetting } from "./db";
-import { monthSpend, potSpend, recentTransactions, spendTrend, assignedTotal, rtaCents } from "./queries";
+import { monthSpend, potSpend, recentTransactions, spendTrend, assignedTotal, rtaCents, potHistory } from "./queries";
 import { applySettlement, partnerCredit, partnerOwed } from "./settle";
 import { reconcile, suggestClear } from "./reconcile";
 import { closePreview } from "./close";
-import { assignToPot } from "./assign";
+import { assignToPot, assignedToPot } from "./assign";
 import { validMonth } from "./money";
 
 const app = new Hono();
@@ -220,7 +220,7 @@ app.get("/api/pots", (c) => {
     partnerName: getSetting(db, "partner_name") ?? "Partner",
     pots: pots.map((p) => {
       const { userCents, partnerCents } = potSpend(db, p.id, month);
-      return { id: p.id, name: p.name, group: p.pot_group, targetCents: p.target_cents, spentCents: userCents, partnerCents, assignable: p.is_assignable === 1 };
+      return { id: p.id, name: p.name, group: p.pot_group, targetCents: p.target_cents, spentCents: userCents, partnerCents, assignable: p.is_assignable === 1, assignedCents: assignedToPot(db, month, p.id) };
     }),
   });
 });
@@ -228,6 +228,25 @@ app.get("/api/pots", (c) => {
 app.get("/api/trend", (c) => {
   const db = openDb();
   return c.json({ trend: spendTrend(db) });
+});
+
+/** Validate the pot-history query params. Pure so it can be unit-tested. */
+export function parseHistoryQuery(query: Record<string, string | undefined>): { potId: number; months: number } | { error: string } {
+  const potId = parseInt(query.potId ?? "", 10);
+  if (!Number.isInteger(potId) || potId <= 0) return { error: "bad potId; expected a positive integer" };
+  const months = parseInt(query.months ?? "6", 10);
+  if (!Number.isInteger(months) || months < 1 || months > 12) return { error: "bad months; expected an integer from 1 to 12" };
+  return { potId, months };
+}
+
+/** One pot's spend per month, oldest first. Drives the per-pot history chart. */
+app.get("/api/pot-history", (c) => {
+  const db = openDb();
+  const parsed = parseHistoryQuery({ potId: c.req.query("potId"), months: c.req.query("months") });
+  if ("error" in parsed) return c.json({ error: parsed.error }, 400);
+  const pot = db.query("SELECT id FROM pots WHERE id = ? AND hidden = 0").get(parsed.potId);
+  if (!pot) return c.json({ error: `no pot ${parsed.potId}` }, 404);
+  return c.json({ potId: parsed.potId, history: potHistory(db, parsed.potId, parsed.months) });
 });
 
 /** Read-only month-end close preview. The agent applies the close after

@@ -32,6 +32,25 @@ export function potSpend(db: Database, potId: number, month: string): { userCent
   return { userCents: r.user, partnerCents: r.partner };
 }
 
+/** Shift a YYYY-MM month back by n months. */
+function shiftBack(month: string, n: number): string {
+  const [y, m] = month.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 - n, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** One pot's user spend for the last N months, oldest first. Powers the
+ *  per-pot history chart. */
+export function potHistory(db: Database, potId: number, months: number, endMonth?: string): { month: string; spentCents: number }[] {
+  const end = endMonth ?? new Date().toISOString().slice(0, 7);
+  const out: { month: string; spentCents: number }[] = [];
+  for (let i = months - 1; i >= 0; i--) {
+    const m = shiftBack(end, i);
+    out.push({ month: m, spentCents: potSpend(db, potId, m).userCents });
+  }
+  return out;
+}
+
 /** Last N months of the user's spend, oldest first. */
 export function spendTrend(db: Database, limit = 6): { month: string; spent: number }[] {
   const rows = db.query(
