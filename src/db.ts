@@ -26,6 +26,19 @@ export function openDb(path: string = DB_PATH): Database {
   if (!cols.some((c) => c.name === "is_transfer")) {
     fresh.exec("ALTER TABLE transactions ADD COLUMN is_transfer INTEGER NOT NULL DEFAULT 0");
   }
+  // YNAB-architecture taxonomy: pots sync from YNAB by stable id (src/ynab.ts).
+  const potCols = fresh.query("PRAGMA table_info(pots)").all() as { name: string }[];
+  if (!potCols.some((c) => c.name === "ynab_id")) {
+    // SQLite cannot ADD COLUMN with a UNIQUE constraint — add plain, then index.
+    fresh.exec("ALTER TABLE pots ADD COLUMN ynab_id TEXT");
+    fresh.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_pots_ynab_id ON pots(ynab_id)");
+  }
+  if (!potCols.some((c) => c.name === "ynab_group_id")) {
+    fresh.exec("ALTER TABLE pots ADD COLUMN ynab_group_id TEXT");
+  }
+  if (!potCols.some((c) => c.name === "hidden")) {
+    fresh.exec("ALTER TABLE pots ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0");
+  }
   // Backfill splits: pre-split transactions were 100% Ryan's.
   const unsplit = fresh.query(
     "SELECT id, pot_id, amount_cents FROM transactions WHERE id NOT IN (SELECT transaction_id FROM splits)"

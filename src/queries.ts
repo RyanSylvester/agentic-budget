@@ -77,6 +77,6 @@ export function monthInflows(db: Database, month: string): number {
 
 /** Sum of current pot targets: what is assigned for the month, in cents. */
 export function assignedTotal(db: Database): number {
-  const r = db.query(`SELECT COALESCE(SUM(target_cents), 0) AS a FROM pots`).get() as { a: number };
+  const r = db.query(`SELECT COALESCE(SUM(target_cents), 0) AS a FROM pots WHERE hidden = 0`).get() as { a: number };
   return r.a;
 }

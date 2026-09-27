@@ -8,14 +8,19 @@ CREATE TABLE IF NOT EXISTS accounts (
   last4     TEXT
 );
 
--- Pots replace YNAB categories. target_type encodes Ryan's rules:
--- fixed = bills copied from history, average_3mo = variables, savings = sinks.
+-- Pots mirror the YNAB category taxonomy 1:1. YNAB is the source of truth:
+-- categories are synced by stable id (see src/ynab.ts), never hardcoded.
+-- ynab_id / ynab_group_id are the YNAB UUIDs; name and pot_group are labels
+-- that follow YNAB renames. hidden mirrors YNAB's hidden/deleted flags.
 CREATE TABLE IF NOT EXISTS pots (
   id           INTEGER PRIMARY KEY,
   name         TEXT NOT NULL,
   pot_group    TEXT NOT NULL,
   target_type  TEXT NOT NULL CHECK (target_type IN ('fixed','average_3mo','savings')),
-  target_cents INTEGER NOT NULL DEFAULT 0
+  target_cents INTEGER NOT NULL DEFAULT 0,
+  ynab_id       TEXT UNIQUE,
+  ynab_group_id TEXT,
+  hidden        INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS transactions (

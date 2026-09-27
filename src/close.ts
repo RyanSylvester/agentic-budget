@@ -71,7 +71,7 @@ export interface ClosePreview {
 /** Everything the month-end close needs, read from live data. */
 export function closePreview(db: Database, month: string): ClosePreview {
   const pots = db.query(
-    `SELECT id, name, target_type, target_cents FROM pots ORDER BY id`
+    `SELECT id, name, target_type, target_cents FROM pots WHERE hidden = 0 ORDER BY id`
   ).all() as { id: number; name: string; target_type: "fixed" | "average_3mo" | "savings"; target_cents: number }[];
 
   const lines: PotCloseLine[] = pots.map((p) => {

@@ -101,7 +101,7 @@ app.post("/api/transactions/:id/clear", (c) => {
 app.get("/api/pots", (c) => {
   const db = openDb();
   const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
-  const pots = db.query("SELECT id, name, pot_group, target_cents FROM pots ORDER BY id").all() as any[];
+  const pots = db.query("SELECT id, name, pot_group, target_cents FROM pots WHERE hidden = 0 ORDER BY id").all() as any[];
   return c.json({
     month,
     pots: pots.map((p) => {
