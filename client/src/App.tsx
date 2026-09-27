@@ -54,6 +54,7 @@ interface Pot {
   targetCents: number;
   spentCents: number;
   partnerCents: number;
+  assignable: boolean;
   assignedCents?: number;
 }
 
@@ -76,6 +77,11 @@ interface Attention {
   unreconciledAccounts: Array<string | { name: string }>;
   rtaCents: number;
   unsettledPartnerCents: number;
+}
+
+interface PotHistoryPoint {
+  month: string;
+  spentCents: number;
 }
 
 /* ---------- helpers ---------- */
@@ -216,136 +222,202 @@ function Hero({ overview, isCurrent, loading }: { overview: Overview | null; isC
   );
 }
 
-function PotCard({ p, month, onAssigned }: { p: Pot; month: string; onAssigned: () => void }) {
-  const hasTarget = p.targetCents > 0;
-  const pct = hasTarget ? (p.spentCents / p.targetCents) * 100 : 0;
-  const over = hasTarget && p.spentCents > p.targetCents;
-  const left = p.targetCents - p.spentCents;
+/* ---------- budget table ---------- */
 
+// Inline assign control: the Assigned cell is the button. Click to edit,
+// Enter commits, Escape or click-away cancels. The control is never hidden.
+function AssignCell({ pot, month, onAssigned }: { pot: Pot; month: string; onAssigned: () => void }) {
+  const [editing, setEditing] = useState(false);
   const [amt, setAmt] = useState("");
   const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [assignError, setAssignError] = useState(false);
+  const [failed, setFailed] = useState(false);
 
-  const assign = async () => {
+  const commit = async () => {
     const cents = Math.round(parseFloat(amt) * 100);
-    if (!Number.isFinite(cents) || cents <= 0 || busy) return;
+    if (!Number.isFinite(cents) || cents < 0 || busy) return;
     setBusy(true);
-    setAssignError(false);
+    setFailed(false);
     try {
       const r = await fetch("/api/assign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ month, potId: p.id, cents }),
+        body: JSON.stringify({ month, potId: pot.id, cents }),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setEditing(false);
       setAmt("");
-      setSaved(true);
-      window.setTimeout(() => setSaved(false), 2000);
       onAssigned();
     } catch {
-      setAssignError(true);
+      setFailed(true);
     }
     setBusy(false);
   };
 
+  if (!editing) {
+    return (
+      <button
+        onClick={() => {
+          setAmt(((pot.assignedCents ?? 0) / 100).toFixed(2));
+          setEditing(true);
+        }}
+        title={`Assign to ${pot.name}`}
+        className="t-nums rounded-[var(--r-sm)] px-2 py-2 text-left text-[15px] text-[var(--ink)] underline decoration-[var(--hairline-strong)] decoration-dotted underline-offset-4 transition hover:bg-[var(--bg-sunken)] active:scale-95 sm:py-1"
+      >
+        {money(pot.assignedCents ?? 0)}
+      </button>
+    );
+  }
   return (
-    <div className="card p-4">
+    <span className="inline-flex items-center gap-2">
+      <input
+        autoFocus
+        type="text"
+        inputMode="decimal"
+        aria-label={`Assign money to ${pot.name}`}
+        value={amt}
+        onChange={(e) => setAmt(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") {
+            setEditing(false);
+            setFailed(false);
+          }
+        }}
+        onBlur={() => {
+          if (!busy) {
+            setEditing(false);
+            setFailed(false);
+          }
+        }}
+        className="field t-nums w-24 px-2 py-1.5 text-[15px]"
+      />
+      {failed && <span className="text-[13px] text-[var(--danger)]">Couldn't save.</span>}
+    </span>
+  );
+}
+
+function SplitSuffix({ p }: { p: Pot }) {
+  if (p.partnerCents <= 0) return null;
+  return (
+    <span className="text-[13px] text-[var(--muted)]">
+      {" "}· {p.partnerCents === p.spentCents ? "split 50/50" : `partner ${money(p.partnerCents)}`}
+    </span>
+  );
+}
+
+// Available = assigned minus spent. Green when positive, warm red only
+// when overspent, muted at exactly zero.
+function Available({ assignedCents, spentCents, className = "" }: { assignedCents: number; spentCents: number; className?: string }) {
+  const avail = assignedCents - spentCents;
+  const color = avail > 0 ? "var(--success)" : avail < 0 ? "var(--danger)" : "var(--muted)";
+  return (
+    <span className={`t-nums font-medium ${className}`} style={{ color }}>
+      {money(avail)}
+    </span>
+  );
+}
+
+function PotNameCell({ p }: { p: Pot }) {
+  return (
+    <div className="min-w-0">
       <div className="truncate text-[15px] font-semibold">{p.name}</div>
-      <div className="t-nums mt-1 text-[13px] text-[var(--muted)]">
-        {hasTarget ? (
-          <>
-            <span className="text-[var(--ink)]">{money(p.spentCents)}</span> of {money(p.targetCents)}
-          </>
-        ) : (
-          <span className="text-[var(--ink)]">{money(p.spentCents)}</span>
-        )}
-        {p.partnerCents > 0 && (
-          <span> · {p.partnerCents === p.spentCents ? "split 50/50" : `partner ${money(p.partnerCents)}`}</span>
-        )}
+      <div className="mt-0.5 text-[12px] text-[var(--muted)]">
+        {p.targetCents > 0 ? `target ${money(p.targetCents)}` : "no target"}
       </div>
-      {hasTarget && (
-        <>
-          <div className="mt-2.5 h-[6px] overflow-hidden rounded-full bg-[var(--bg-sunken)]">
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${Math.min(100, pct)}%`,
-                background: over ? "var(--danger)" : "var(--accent)",
-              }}
-            />
-          </div>
-          <div
-            className="t-nums mt-1.5 text-[13px] font-semibold"
-            style={{ color: over ? "var(--danger)" : "var(--muted)" }}
-          >
-            {over ? `${money(left)} over` : `${money(left)} left`}
-          </div>
-        </>
-      )}
-      {p.assignedCents != null && p.assignedCents > 0 && (
-        <div className="t-nums mt-1.5 text-[13px] text-[var(--muted)]">{money(p.assignedCents)} assigned</div>
-      )}
-      <div className="mt-3 flex gap-2">
-        <input
-          type="text"
-          inputMode="decimal"
-          placeholder="Assign $"
-          aria-label={`Assign money to ${p.name}`}
-          value={amt}
-          onChange={(e) => setAmt(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") assign();
-          }}
-          className="field t-nums min-w-0 flex-1 px-3 py-2 text-[14px]"
-        />
-        <button onClick={assign} disabled={busy} className="btn-ink shrink-0 px-3.5 py-2 text-[14px]">
-          {busy ? "Saving…" : saved ? "Saved" : "Assign"}
-        </button>
-      </div>
-      {assignError && <div className="mt-1.5 text-[13px] text-[var(--danger)]">Couldn't save. Try again.</div>}
     </div>
   );
 }
 
-function PotsGrid({ pots, month, onAssigned }: { pots: Pot[]; month: string; onAssigned: () => void }) {
+function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: string; onAssigned: () => void }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   if (pots.length === 0)
     return <p className="font-serif-d text-[17px] italic text-[var(--muted)]">No pots yet. They'll appear here once the budget is set up.</p>;
 
+  const earners = pots.filter((p) => p.assignable);
+  const income = pots.filter((p) => !p.assignable);
+
   const groups: { name: string; pots: Pot[] }[] = [];
-  for (const p of pots) {
+  for (const p of earners) {
     const g = groups.find((x) => x.name === p.group);
     if (g) g.pots.push(p);
     else groups.push({ name: p.group, pots: [p] });
   }
 
+  const sum = (ps: Pot[], f: (p: Pot) => number) => ps.reduce((a, p) => a + f(p), 0);
+
   return (
-    <div className="space-y-5">
+    <div>
+      <div className="hidden grid-cols-[minmax(0,1fr)_130px_150px_120px] gap-3 border-b border-[var(--hairline-strong)] pb-2 sm:grid">
+        <span className="eyebrow">Pot</span>
+        <span className="eyebrow">Assigned</span>
+        <span className="eyebrow">Spent</span>
+        <span className="eyebrow text-right">Available</span>
+      </div>
       {groups.map((g) => {
-        const spent = g.pots.reduce((a, p) => a + p.spentCents, 0);
-        const target = g.pots.reduce((a, p) => a + p.targetCents, 0);
-        const isOpen = open[g.name] ?? spent > 0;
+        const assigned = sum(g.pots, (p) => p.assignedCents ?? 0);
+        const spent = sum(g.pots, (p) => p.spentCents);
+        const isOpen = open[g.name] ?? true;
         return (
           <div key={g.name}>
             <button
               onClick={() => setOpen((o) => ({ ...o, [g.name]: !isOpen }))}
-              className="mb-2.5 flex w-full items-baseline justify-between text-left"
+              className="flex w-full items-baseline justify-between gap-3 border-b border-[var(--hairline-strong)] py-3 text-left"
             >
-              <span className="font-serif-d text-[20px] font-medium">{titleCase(g.name)}</span>
+              <span className="flex items-baseline gap-2">
+                <span className="font-serif-d text-[19px] font-medium">{titleCase(g.name)}</span>
+                <span className="text-[13px] text-[var(--faint)]">{isOpen ? "▾" : "▸"}</span>
+              </span>
               <span className="t-nums text-[13px] text-[var(--muted)]">
-                {money(spent)}{target > 0 ? ` of ${money(target)}` : ""}
-                <span className="ml-2 inline-block w-3 text-[var(--faint)]">{isOpen ? "▾" : "▸"}</span>
+                {money(assigned)} assigned · {money(spent)} spent ·{" "}
+                <Available assignedCents={assigned} spentCents={spent} className="text-[13px]" />
               </span>
             </button>
-            {isOpen && (
-              <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
-                {g.pots.map((p) => <PotCard key={p.id} p={p} month={month} onAssigned={onAssigned} />)}
-              </div>
-            )}
+            {isOpen &&
+              g.pots.map((p) => (
+                <div key={p.id} className="border-b border-[var(--hairline)] py-3">
+                  {/* narrow screens: name + available up top, assigned/spent below */}
+                  <div className="sm:hidden">
+                    <div className="flex items-start justify-between gap-3">
+                      <PotNameCell p={p} />
+                      <Available assignedCents={p.assignedCents ?? 0} spentCents={p.spentCents} className="shrink-0 pt-0.5" />
+                    </div>
+                    <div className="mt-2 flex items-center gap-4">
+                      <AssignCell pot={p} month={month} onAssigned={onAssigned} />
+                      <span className="t-nums text-[13px] text-[var(--ink-2)]">
+                        {money(p.spentCents)}
+                        <SplitSuffix p={p} />
+                      </span>
+                    </div>
+                  </div>
+                  {/* wide screens: one table row */}
+                  <div className="hidden grid-cols-[minmax(0,1fr)_130px_150px_120px] items-center gap-3 sm:grid">
+                    <PotNameCell p={p} />
+                    <AssignCell pot={p} month={month} onAssigned={onAssigned} />
+                    <span className="t-nums text-[15px]">
+                      {money(p.spentCents)}
+                      <SplitSuffix p={p} />
+                    </span>
+                    <span className="text-right">
+                      <Available assignedCents={p.assignedCents ?? 0} spentCents={p.spentCents} />
+                    </span>
+                  </div>
+                </div>
+              ))}
           </div>
         );
       })}
+      {income.length > 0 && (
+        <div className="mt-8">
+          <div className="mb-1"><Eyebrow>Income</Eyebrow></div>
+          <p className="mb-2 text-[13px] text-[var(--muted)]">Money in. These pots receive; they are never assigned to.</p>
+          {income.map((p) => (
+            <div key={p.id} className="flex items-baseline justify-between gap-3 border-b border-[var(--hairline)] py-3">
+              <PotNameCell p={p} />
+              <span className="t-nums shrink-0 text-[13px] italic text-[var(--faint)]">income</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -420,31 +492,6 @@ function CloseCard({ preview, onGo }: { preview: ClosePreviewData; onGo: (t: Tab
         </button>
       )}
       <p className="mt-3 text-[13px] text-[var(--muted)]">Applied at month-end once ready-to-assign is $0.</p>
-    </div>
-  );
-}
-
-function Trend({ data }: { data: TrendPoint[] }) {
-  if (data.length === 0) return null;
-  const max = Math.max(...data.map((d) => d.spent), 1);
-  return (
-    <div>
-      <div className="mb-2"><Eyebrow>Spending trend</Eyebrow></div>
-      <div className="flex h-28 items-end gap-2.5">
-        {data.map((d, i) => (
-          <div key={d.month} className="flex h-full flex-1 flex-col items-center justify-end gap-1.5">
-            <div
-              title={`${monthLabel(d.month)}: ${money(d.spent)}`}
-              className="w-full rounded-t-[4px]"
-              style={{
-                height: `${Math.max(4, (d.spent / max) * 100)}%`,
-                background: i === data.length - 1 ? "var(--accent)" : "var(--hairline-strong)",
-              }}
-            />
-            <span className="t-nums text-[11px] text-[var(--faint)]">{trendLabel(d.month)}</span>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
@@ -673,24 +720,230 @@ function PartnerCard() {
 
 function PotsTab({ month }: { month: string }) {
   const { data, error, loading, retry } = useApi<{ pots: Pot[] }>(`/api/pots?month=${month}`);
-  const { data: trendData } = useApi<{ trend: TrendPoint[] }>("/api/trend");
 
   return (
-    <div className="space-y-7">
-      <div>
-        <div className="mb-1 font-serif-d text-[24px] font-medium">Pots</div>
-        <p className="mb-5 text-[15px] text-[var(--muted)]">Money with a job. Adjust an assignment below anytime.</p>
-        {loading ? (
-          <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
-            {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-[132px]" />)}
-          </div>
-        ) : error ? (
-          <FetchError onRetry={retry} label="Couldn't load pots." />
-        ) : (
-          <PotsGrid pots={data?.pots ?? []} month={month} onAssigned={retry} />
+    <div>
+      <div className="mb-1 font-serif-d text-[24px] font-medium">Pots</div>
+      <p className="mb-5 text-[15px] text-[var(--muted)]">Every dollar with a job. Tap an Assigned amount to adjust it.</p>
+      {loading ? (
+        <div className="space-y-3">
+          {[0, 1, 2].map((i) => <Skeleton key={i} className="h-[64px]" />)}
+        </div>
+      ) : error ? (
+        <FetchError onRetry={retry} label="Couldn't load pots." />
+      ) : (
+        <BudgetTable pots={data?.pots ?? []} month={month} onAssigned={retry} />
+      )}
+    </div>
+  );
+}
+
+/* ---------- insights ---------- */
+
+const CHART_VARS = ["--chart-1", "--chart-2", "--chart-3", "--chart-4", "--chart-5", "--chart-6", "--chart-7", "--chart-8"];
+const chartColor = (i: number) => `var(${CHART_VARS[i % CHART_VARS.length]})`;
+
+// Donut of this month's user spend by pot group. Hand-rolled SVG; segment
+// colors come from CSS variables so dark mode keeps working.
+function Donut({ segments }: { segments: { label: string; cents: number }[] }) {
+  const total = segments.reduce((a, s) => a + s.cents, 0);
+  if (total <= 0)
+    return <p className="font-serif-d py-6 text-center text-[19px] italic text-[var(--muted)]">No spending this month yet.</p>;
+  const R = 80;
+  const C = 2 * Math.PI * R;
+  let acc = 0;
+  return (
+    <div className="flex flex-col items-center gap-6 sm:flex-row sm:gap-10">
+      <div className="relative shrink-0">
+        <svg viewBox="0 0 200 200" className="h-52 w-52" role="img" aria-label="Spending by pot group">
+          {segments.map((s, i) => {
+            const frac = s.cents / total;
+            const len = Math.max(0, frac * C - 3);
+            const rot = (acc / total) * 360 - 90;
+            acc += s.cents;
+            return (
+              <circle
+                key={s.label}
+                cx="100"
+                cy="100"
+                r={R}
+                fill="none"
+                strokeWidth="30"
+                style={{
+                  stroke: chartColor(i),
+                  strokeDasharray: `${len} ${C}`,
+                  transform: `rotate(${rot}deg)`,
+                  transformOrigin: "100px 100px",
+                  opacity: 0.92,
+                }}
+              />
+            );
+          })}
+        </svg>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+          <div className="t-nums font-serif-d text-[24px] font-medium">{money(total)}</div>
+          <div className="text-[12px] text-[var(--muted)]">spent</div>
+        </div>
+      </div>
+      <ul className="w-full max-w-xs flex-1 space-y-2">
+        {segments.map((s, i) => (
+          <li key={s.label} className="flex items-center gap-2.5 text-[14px]">
+            <span className="h-3 w-3 shrink-0 rounded-[4px]" style={{ background: chartColor(i), opacity: 0.92 }} />
+            <span className="min-w-0 flex-1 truncate">{titleCase(s.label)}</span>
+            <span className="t-nums text-[var(--muted)]">{Math.round((s.cents / total) * 100)}%</span>
+            <span className="t-nums w-20 shrink-0 text-right font-medium">{money(s.cents)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// Six months of one pot's spend, with the 3-month average as a dashed
+// reference line: the same number next month's target is wireframed from.
+function PotBars({ history }: { history: PotHistoryPoint[] }) {
+  if (history.length === 0) return null;
+  const max = Math.max(...history.map((h) => h.spentCents), 1);
+  const last3 = history.slice(-3);
+  const avg = last3.length > 0 ? Math.round(last3.reduce((a, h) => a + h.spentCents, 0) / last3.length) : 0;
+  const avgPct = Math.min(100, (avg / max) * 100);
+  return (
+    <div>
+      <div className="relative h-44">
+        <div className="absolute inset-0 flex items-end gap-2.5 sm:gap-3">
+          {history.map((h, i) => (
+            <div key={h.month} className="flex h-full flex-1 items-end" title={`${monthLabel(h.month)}: ${money(h.spentCents)}`}>
+              <div
+                className="w-full rounded-t-[6px]"
+                style={{
+                  height: `${Math.max(3, (h.spentCents / max) * 100)}%`,
+                  background: i === history.length - 1 ? "var(--accent)" : "var(--hairline-strong)",
+                  opacity: i === history.length - 1 ? 1 : 0.92,
+                }}
+              />
+            </div>
+          ))}
+        </div>
+        {avg > 0 && (
+          <>
+            <div
+              className="pointer-events-none absolute left-0 right-0 border-t border-dashed"
+              style={{ bottom: `${avgPct}%`, borderColor: "var(--warning)" }}
+            />
+            <span
+              className="t-nums pointer-events-none absolute right-0 text-[11px] font-medium"
+              style={{ bottom: `calc(${avgPct}% + 4px)`, color: "var(--warning)" }}
+            >
+              3-mo avg {money(avg)}
+            </span>
+          </>
         )}
       </div>
-      <Trend data={trendData?.trend ?? []} />
+      <div className="mt-1.5 flex gap-2.5 sm:gap-3">
+        {history.map((h) => (
+          <span key={h.month} className="t-nums flex-1 text-center text-[11px] text-[var(--faint)]">
+            {trendLabel(h.month)}
+          </span>
+        ))}
+      </div>
+      <p className="mt-3 text-[13px] text-[var(--muted)]">
+        The dashed line is the 3-month average, the same number next month's target is wireframed from at close.
+      </p>
+    </div>
+  );
+}
+
+function InsightsTab({ month }: { month: string }) {
+  const { data, error, loading, retry } = useApi<{ pots: Pot[] }>(`/api/pots?month=${month}`);
+  const [potId, setPotId] = useState<number | null>(null);
+  const [query, setQuery] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const pots = data?.pots ?? [];
+
+  // Default to the highest-spend pot once pots load.
+  useEffect(() => {
+    if (potId === null && pots.length > 0) {
+      const top = [...pots].sort((a, b) => b.spentCents - a.spentCents)[0];
+      setPotId(top.id);
+    }
+  }, [pots, potId]);
+
+  const { data: histData, error: histError, loading: histLoading, retry: histRetry } = useApi<{ history: PotHistoryPoint[] }>(
+    potId !== null ? `/api/pot-history?potId=${potId}&months=6` : null
+  );
+
+  const byGroup = new Map<string, number>();
+  for (const p of pots) {
+    if (p.spentCents > 0) byGroup.set(p.group, (byGroup.get(p.group) ?? 0) + p.spentCents);
+  }
+  const segments = [...byGroup.entries()]
+    .map(([label, cents]) => ({ label, cents }))
+    .sort((a, b) => b.cents - a.cents);
+
+  const selected = pots.find((p) => p.id === potId) ?? null;
+  const q = query.trim().toLowerCase();
+  const matches = pots.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 8);
+
+  return (
+    <div className="space-y-10">
+      <div>
+        <div className="mb-1 font-serif-d text-[24px] font-medium">Insights</div>
+        <p className="mb-5 text-[15px] text-[var(--muted)]">Where the money went, and where it's trending.</p>
+        <div className="card p-5">
+          <div className="mb-4"><Eyebrow>Where the money went · {monthLabel(month)}</Eyebrow></div>
+          {loading ? (
+            <div className="flex justify-center py-6"><Skeleton className="h-52 w-52 rounded-full" /></div>
+          ) : error ? (
+            <FetchError onRetry={retry} label="Couldn't load spending." />
+          ) : (
+            <Donut segments={segments} />
+          )}
+        </div>
+      </div>
+      <div>
+        <div className="card p-5">
+          <div className="mb-4"><Eyebrow>Spending over time</Eyebrow></div>
+          <div className="relative mb-5">
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => { setQuery(e.target.value); setPickerOpen(true); }}
+              onFocus={() => setPickerOpen(true)}
+              onBlur={() => window.setTimeout(() => setPickerOpen(false), 120)}
+              onKeyDown={(e) => { if (e.key === "Escape") setPickerOpen(false); }}
+              placeholder={selected ? selected.name : "Search pots…"}
+              aria-label="Search pots"
+              className="field w-full px-3 py-2.5 text-[15px]"
+            />
+            {pickerOpen && matches.length > 0 && (
+              <ul className="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-[var(--r-md)] border border-[var(--hairline)] bg-[var(--surface)] py-1" style={{ boxShadow: "var(--shadow-elev)" }}>
+                {matches.map((p) => (
+                  <li key={p.id}>
+                    <button
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => { setPotId(p.id); setQuery(""); setPickerOpen(false); }}
+                      className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-[15px] transition hover:bg-[var(--bg-sunken)] active:bg-[var(--bg-sunken)]"
+                    >
+                      <span className="truncate">{p.name}</span>
+                      <span className="t-nums shrink-0 text-[13px] text-[var(--muted)]">{money(p.spentCents)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          {histLoading ? (
+            <div className="flex h-44 items-end gap-3">
+              {[0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-24 flex-1" />)}
+            </div>
+          ) : histError || !histData ? (
+            <FetchError onRetry={histRetry} label="Couldn't load pot history." />
+          ) : (
+            <PotBars history={histData.history} />
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -894,24 +1147,41 @@ function AccountsView() {
 
 /* ---------- app ---------- */
 
-type Tab = "overview" | "pots" | "close" | "partner" | "review" | "accounts";
+type Tab = "overview" | "pots" | "insights" | "close" | "partner" | "review" | "accounts";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "pots", label: "Pots" },
+  { id: "insights", label: "Insights" },
   { id: "close", label: "Close" },
   { id: "partner", label: "Partner" },
   { id: "review", label: "Review" },
   { id: "accounts", label: "Accounts" },
 ];
 
-const MONTH_TABS: Tab[] = ["overview", "pots", "close"];
+const tabLabel = (id: Tab) => TABS.find((t) => t.id === id)?.label ?? id;
+
+const MONTH_TABS: Tab[] = ["overview", "pots", "insights", "close"];
+
+// Mobile bottom bar: four tabs plus a "More" sheet for the rest.
+const MOBILE_TABS: Tab[] = ["overview", "pots", "insights", "close"];
+const SHEET_TABS: Tab[] = ["partner", "review", "accounts"];
+
+function CountBadge({ n, className = "" }: { n: number; className?: string }) {
+  return (
+    <span className={`t-nums flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--ink)] px-1.5 text-[11px] font-bold text-[var(--bg)] ${className}`}>
+      {n}
+    </span>
+  );
+}
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("overview");
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [pendingCount, setPendingCount] = useState(0);
+  const { data: attention } = useApi<Attention>("/api/attention");
 
   useEffect(() => {
     fetch("/api/review")
@@ -920,59 +1190,145 @@ export default function App() {
       .catch(() => {});
   }, [refreshKey, tab]);
 
+  // Near month-end with money still unassigned, the Close tab earns a dot.
+  const now = new Date();
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const closeAlert = now.getDate() >= lastDay - 2 && (attention?.rtaCents ?? 0) > 0;
+
+  const go = (t: Tab) => {
+    setTab(t);
+    setSheetOpen(false);
+    window.scrollTo(0, 0);
+  };
+
+  const navBadge = (id: Tab) => {
+    if (id === "review" && pendingCount > 0) return <CountBadge n={pendingCount} className="ml-auto" />;
+    if (id === "close" && closeAlert) return <span className="ml-auto h-2 w-2 rounded-full bg-[var(--warning)]" />;
+    return null;
+  };
+
   return (
-    <div className="min-h-screen">
-      <div className="mx-auto max-w-2xl px-5 py-8">
-        <header className="mb-7 flex items-center justify-between gap-3">
-          <h1 className="font-serif-d shrink-0 whitespace-nowrap text-[19px] font-medium tracking-tight">Daybook</h1>
-          <nav
-            className="no-scrollbar flex min-w-0 gap-0.5 overflow-x-auto rounded-full border border-[var(--hairline)] bg-[var(--surface)] p-1 text-[13px]"
-            style={{ boxShadow: "var(--shadow-card)" }}
-          >
-            {TABS.map(({ id, label }) => (
+    <div className="min-h-screen md:flex">
+      {/* desktop sidebar rail */}
+      <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r border-[var(--hairline)] px-4 py-6 md:flex">
+        <div className="px-3 font-serif-d text-[22px] font-medium tracking-tight">Daybook</div>
+        <div className="mx-3 my-5 border-t border-[var(--hairline)]" />
+        <nav className="flex flex-col gap-0.5" aria-label="Primary">
+          {TABS.map(({ id }) => {
+            const active = tab === id;
+            return (
               <button
                 key={id}
-                onClick={() => setTab(id)}
-                className={`relative shrink-0 rounded-full px-2.5 py-1.5 transition active:scale-95 ${tab === id ? "pill-active font-medium" : "text-[var(--muted)]"}`}
+                onClick={() => go(id)}
+                aria-current={active ? "page" : undefined}
+                className={`flex h-11 items-center rounded-[var(--r-md)] px-3 text-left text-[15px] transition active:scale-[0.99] ${
+                  active
+                    ? "bg-[var(--accent-soft)] font-medium text-[var(--ink)]"
+                    : "text-[var(--muted)] hover:bg-[var(--bg-sunken)] hover:text-[var(--ink-2)]"
+                }`}
+                style={active ? { boxShadow: "inset 2px 0 0 var(--accent)" } : undefined}
               >
-                {label}
-                {id === "review" && pendingCount > 0 && (
-                  <span className="t-nums absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#161513] px-1 text-[11px] font-bold text-[#faf9f5]">
-                    {pendingCount}
-                  </span>
+                {tabLabel(id)}
+                {navBadge(id)}
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
+
+      {/* content column */}
+      <div className="min-w-0 flex-1">
+        <header className="flex items-center justify-between px-5 pb-1 pt-5 md:hidden">
+          <span className="font-serif-d text-[19px] font-medium tracking-tight">Daybook</span>
+        </header>
+        <div className="mx-auto max-w-5xl px-5 pb-32 pt-2 md:px-8 md:py-8 md:pb-16">
+          {MONTH_TABS.includes(tab) && <MonthNav month={month} onChange={setMonth} />}
+
+          {tab === "overview" && <OverviewTab key={`o-${refreshKey}-${month}`} month={month} onGo={go} />}
+
+          {tab === "pots" && <PotsTab key={`p-${refreshKey}-${month}`} month={month} />}
+
+          {tab === "insights" && <InsightsTab key={`i-${refreshKey}-${month}`} month={month} />}
+
+          {tab === "close" && <CloseTab key={`c-${refreshKey}-${month}`} month={month} onGo={go} />}
+
+          {tab === "partner" && <PartnerTab key={`pt-${refreshKey}`} />}
+
+          {tab === "review" && (
+            <div>
+              <div className="mb-1 font-serif-d text-[24px] font-medium">Review</div>
+              <p className="mb-5 text-[15px] text-[var(--muted)]">
+                Only the entries that weren't clear. One tap to confirm.
+              </p>
+              <ReviewQueue onChange={() => setRefreshKey((k) => k + 1)} />
+            </div>
+          )}
+
+          {tab === "accounts" && (
+            <div>
+              <div className="mb-5 font-serif-d text-[24px] font-medium">Accounts</div>
+              <AccountsView />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* mobile bottom tab bar */}
+      <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--hairline)] bg-[var(--surface)] pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Primary">
+        <div className="grid grid-cols-5">
+          {MOBILE_TABS.map((id) => {
+            const active = tab === id;
+            return (
+              <button
+                key={id}
+                onClick={() => go(id)}
+                className={`relative flex min-h-[64px] flex-col items-center justify-center gap-1 text-[11px] transition active:scale-95 ${
+                  active ? "font-semibold text-[var(--ink)]" : "text-[var(--muted)]"
+                }`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${active ? "bg-[var(--accent)]" : "bg-transparent"}`} />
+                {tabLabel(id)}
+                {id === "close" && closeAlert && (
+                  <span className="absolute right-4 top-3 h-2 w-2 rounded-full bg-[var(--warning)]" />
                 )}
               </button>
+            );
+          })}
+          <button
+            onClick={() => setSheetOpen(true)}
+            className={`relative flex min-h-[64px] flex-col items-center justify-center gap-1 text-[11px] transition active:scale-95 ${
+              SHEET_TABS.includes(tab) ? "font-semibold text-[var(--ink)]" : "text-[var(--muted)]"
+            }`}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${SHEET_TABS.includes(tab) ? "bg-[var(--accent)]" : "bg-transparent"}`} />
+            More
+            {pendingCount > 0 && (
+              <span className="t-nums absolute right-3 top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--ink)] px-1 text-[10px] font-bold text-[var(--bg)]">
+                {pendingCount}
+              </span>
+            )}
+          </button>
+        </div>
+      </nav>
+
+      {/* mobile "More" bottom sheet */}
+      {sheetOpen && (
+        <div className="fixed inset-0 z-30 md:hidden" role="dialog" aria-label="More">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setSheetOpen(false)} />
+          <div className="absolute inset-x-0 bottom-0 rounded-t-[var(--r-lg)] border-t border-[var(--hairline)] bg-[var(--surface)] p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
+            {SHEET_TABS.map((id) => (
+              <button
+                key={id}
+                onClick={() => go(id)}
+                className="flex min-h-[52px] w-full items-center justify-between rounded-[var(--r-md)] px-3 text-left text-[16px] transition active:bg-[var(--bg-sunken)]"
+              >
+                <span className={tab === id ? "font-medium" : undefined}>{tabLabel(id)}</span>
+                {id === "review" && pendingCount > 0 && <CountBadge n={pendingCount} />}
+              </button>
             ))}
-          </nav>
-        </header>
-
-        {MONTH_TABS.includes(tab) && <MonthNav month={month} onChange={setMonth} />}
-
-        {tab === "overview" && <OverviewTab key={`o-${refreshKey}-${month}`} month={month} onGo={setTab} />}
-
-        {tab === "pots" && <PotsTab key={`p-${refreshKey}-${month}`} month={month} />}
-
-        {tab === "close" && <CloseTab key={`c-${refreshKey}-${month}`} month={month} onGo={setTab} />}
-
-        {tab === "partner" && <PartnerTab key={`pt-${refreshKey}`} />}
-
-        {tab === "review" && (
-          <div>
-            <div className="mb-1 font-serif-d text-[24px] font-medium">Review</div>
-            <p className="mb-5 text-[15px] text-[var(--muted)]">
-              Only the entries that weren't clear. One tap to confirm.
-            </p>
-            <ReviewQueue onChange={() => setRefreshKey((k) => k + 1)} />
           </div>
-        )}
-
-        {tab === "accounts" && (
-          <div>
-            <div className="mb-5 font-serif-d text-[24px] font-medium">Accounts</div>
-            <AccountsView />
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

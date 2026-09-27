@@ -33,6 +33,17 @@
   --r-lg: 18px;
   --r-pill: 999px;
 
+  /* Warm categorical ramp for charts. Components reference these tokens,
+     never raw colors, so dark mode keeps working. */
+  --chart-1: #1f6b43;
+  --chart-2: #b97a1b;
+  --chart-3: #be5a32;
+  --chart-4: #c9a227;
+  --chart-5: #7a8b3f;
+  --chart-6: #8a6d4b;
+  --chart-7: #4f7f6b;
+  --chart-8: #a09c8e;
+
   --shadow-card: 0 1px 2px rgba(20, 20, 19, 0.05);
   --shadow-elev: 0 12px 32px rgba(20, 20, 19, 0.1);
 
@@ -66,6 +77,15 @@
 
     --shadow-card: none;
     --shadow-elev: 0 12px 32px rgba(0, 0, 0, 0.4);
+
+    --chart-1: #4cab7c;
+    --chart-2: #d99a3d;
+    --chart-3: #d4695f;
+    --chart-4: #d9b93d;
+    --chart-5: #9aa856;
+    --chart-6: #b08d5f;
+    --chart-7: #6fa08c;
+    --chart-8: #8b877a;
   }
 }
 
