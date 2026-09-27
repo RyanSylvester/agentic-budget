@@ -347,7 +347,7 @@ function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: string; 
 
   return (
     <div>
-      <div className="hidden grid-cols-[minmax(0,1fr)_130px_150px_120px] gap-3 border-b border-[var(--hairline-strong)] pb-2 sm:grid">
+      <div className="hidden grid-cols-[minmax(0,1fr)_130px_170px_120px] gap-3 border-b border-[var(--hairline-strong)] pb-2 sm:grid">
         <span className="eyebrow">Pot</span>
         <span className="eyebrow">Assigned</span>
         <span className="eyebrow">Spent</span>
@@ -363,11 +363,11 @@ function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: string; 
               onClick={() => setOpen((o) => ({ ...o, [g.name]: !isOpen }))}
               className="flex w-full items-baseline justify-between gap-3 border-b border-[var(--hairline-strong)] py-3 text-left"
             >
-              <span className="flex items-baseline gap-2">
-                <span className="font-serif-d text-[19px] font-medium">{titleCase(g.name)}</span>
-                <span className="text-[13px] text-[var(--faint)]">{isOpen ? "▾" : "▸"}</span>
+              <span className="flex min-w-0 items-baseline gap-2">
+                <span className="truncate font-serif-d text-[19px] font-medium">{titleCase(g.name)}</span>
+                <span className="shrink-0 text-[13px] text-[var(--faint)]">{isOpen ? "▾" : "▸"}</span>
               </span>
-              <span className="t-nums text-[13px] text-[var(--muted)]">
+              <span className="t-nums shrink-0 whitespace-nowrap text-[13px] text-[var(--muted)]">
                 {money(assigned)} assigned · {money(spent)} spent ·{" "}
                 <Available assignedCents={assigned} spentCents={spent} className="text-[13px]" />
               </span>
@@ -390,10 +390,10 @@ function BudgetTable({ pots, month, onAssigned }: { pots: Pot[]; month: string; 
                     </div>
                   </div>
                   {/* wide screens: one table row */}
-                  <div className="hidden grid-cols-[minmax(0,1fr)_130px_150px_120px] items-center gap-3 sm:grid">
+                  <div className="hidden grid-cols-[minmax(0,1fr)_130px_170px_120px] items-center gap-3 sm:grid">
                     <PotNameCell p={p} />
                     <AssignCell pot={p} month={month} onAssigned={onAssigned} />
-                    <span className="t-nums text-[15px]">
+                    <span className="t-nums whitespace-nowrap text-[15px]">
                       {money(p.spentCents)}
                       <SplitSuffix p={p} />
                     </span>
