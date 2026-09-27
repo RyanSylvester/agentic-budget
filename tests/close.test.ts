@@ -103,7 +103,7 @@ describe("closePreview / applyClose (live data)", () => {
     assignToPot(db, "2026-09", 1, 300000); // partial: RTA = 200000
     const p = closePreview(db, "2026-09");
     expect(p.rtaBeforeCents).toBe(200000);
-    expect(() => applyClose(db, p)).toThrow("RTA is $2000.00; assign every dollar before closing");
+    expect(() => applyClose(db, p)).toThrow("RTA is $2000.00; the close applies at month-end once every dollar is assigned");
     // nothing was written: the close is all-or-nothing
     expect(db.query("SELECT COUNT(*) AS n FROM month_closes").get() as { n: number }).toEqual({ n: 0 });
   });

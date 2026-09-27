@@ -96,14 +96,15 @@ export function closePreview(db: Database, month: string): ClosePreview {
   return { month, nextMonth: shiftMonth(month, 1), inflowsCents, spentCents, assignedCents, rtaBeforeCents, movedToSavingsCents, partnerOwedCents, pots: lines };
 }
 
-/** Apply the close: record it and wireframe next month's pot targets.
- *  Refuses when Ready-to-Assign is not exactly $0 — the owner's ritual is
- *  that every dollar is assigned before the month ends. Throws if this month
- *  was already closed. All-or-nothing. Human review happens before the
+/** Apply the month-end close: record it and wireframe next month's pot targets.
+ *  The $0 rule binds only here, at apply time: Ready-to-Assign must be exactly
+ *  $0 when the month is closed. Mid-month it is free to be anything; the
+ *  dashboard shows it as a neutral number until the last day. Throws if this
+ *  month was already closed. All-or-nothing. Human review happens before the
  *  agent runs this. */
 export function applyClose(db: Database, preview: ClosePreview): void {
   if (preview.rtaBeforeCents !== 0) {
-    throw new Error(`RTA is $${fmtCents(preview.rtaBeforeCents)}; assign every dollar before closing`);
+    throw new Error(`RTA is $${fmtCents(preview.rtaBeforeCents)}; the close applies at month-end once every dollar is assigned`);
   }
   db.transaction(() => {
     const exists = db.query(`SELECT 1 FROM month_closes WHERE month = ?`).get(preview.month);
