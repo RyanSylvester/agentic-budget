@@ -1,0 +1,86 @@
+import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
+import { readFileSync } from "node:fs";
+import { monthSpend, potSpend } from "../src/queries";
+import { allocateSettlement, applySettlement, lillyCredit, lillyOwed } from "../src/settle";
+
+function seed(): Database {
+  const db = new Database(":memory:");
+  db.exec(readFileSync("src/schema.sql", "utf8"));
+  db.exec(`INSERT INTO accounts (name, type) VALUES ('Chequing','chequing')`);
+  db.exec(`INSERT INTO pots (name, pot_group, target_type, target_cents) VALUES ('Housing','essentials','fixed',300000), ('Groceries','essentials','average_3mo',120000)`);
+  return db;
+}
+
+function addTxn(db: Database, date: string, amountCents: number, ryanCents: number, lillyCents: number, potId: number) {
+  const t = db.query(
+    "INSERT INTO transactions (date, account_id, amount_cents, description, source, entered_by, status, cleared) VALUES (?, 1, ?, 't', 'manual', 'agent', 'confirmed', 'cleared') RETURNING id"
+  ).get(date, amountCents) as { id: number };
+  const ins = db.query("INSERT INTO splits (transaction_id, pot_id, owner, amount_cents) VALUES (?, ?, ?, ?)");
+  ins.run(t.id, potId, "ryan", ryanCents);
+  if (lillyCents !== 0) ins.run(t.id, potId, "lilly", -lillyCents);
+}
+
+describe("splits", () => {
+  test("Ryan's views exclude Lilly's share", () => {
+    const db = seed();
+    // $3,340 rent, split evenly, housing pot
+    addTxn(db, "2026-09-01", -334000, -167000, 167000, 1);
+    expect(monthSpend(db, "2026-09")).toBe(167000);
+    expect(potSpend(db, 1, "2026-09")).toEqual({ ryanCents: 167000, lillyCents: 167000 });
+    // unsplit grocery run still counts fully
+    addTxn(db, "2026-09-02", -8000, -8000, 0, 2);
+    expect(monthSpend(db, "2026-09")).toBe(175000);
+  });
+
+  test("pending_review transactions don't count", () => {
+    const db = seed();
+    db.exec(`INSERT INTO transactions (date, account_id, amount_cents, description, source, entered_by, status, cleared) VALUES ('2026-09-03', 1, -50000, 't', 'manual', 'agent', 'pending_review', 'uncleared')`);
+    const t = db.query("SELECT id FROM transactions").get() as { id: number };
+    db.query("INSERT INTO splits (transaction_id, pot_id, owner, amount_cents) VALUES (?, 1, 'ryan', -50000)").run(t.id);
+    expect(monthSpend(db, "2026-09")).toBe(0);
+  });
+});
+
+describe("settlements", () => {
+  test("allocateSettlement fills oldest first", () => {
+    const owed = [
+      { splitId: 1, potName: "Housing", date: "2026-09-01", owedCents: 167000 },
+      { splitId: 2, potName: "Groceries", date: "2026-09-05", owedCents: 4000 },
+    ];
+    const r = allocateSettlement(owed, 200000);
+    expect(r.allocations).toEqual([
+      { splitId: 1, potName: "Housing", amountCents: 167000 },
+      { splitId: 2, potName: "Groceries", amountCents: 4000 },
+    ]);
+    expect(r.leftoverCents).toBe(29000);
+  });
+
+  test("overpayment becomes leftover credit", () => {
+    const owed = [{ splitId: 1, potName: "Housing", date: "2026-09-01", owedCents: 167000 }];
+    const r = allocateSettlement(owed, 200000);
+    expect(r.allocations).toEqual([{ splitId: 1, potName: "Housing", amountCents: 167000 }]);
+    expect(r.leftoverCents).toBe(33000);
+  });
+
+  test("applySettlement end to end: lump sum fills buckets, Ryan's spend untouched", () => {
+    const db = seed();
+    addTxn(db, "2026-09-01", -334000, -167000, 167000, 1); // rent split
+    addTxn(db, "2026-09-05", -9000, -4500, 4500, 2);       // groceries split
+    expect(lillyOwed(db).reduce((a, o) => a + o.owedCents, 0)).toBe(171500);
+
+    const summary = applySettlement(db, { accountId: 1, amountCents: 200000, note: "Lilly e-transfer" });
+    expect(summary.allocations.map((a) => a.amountCents)).toEqual([167000, 4500]);
+    expect(summary.leftoverCents).toBe(28500);
+
+    // Buckets filled, credit recorded
+    expect(lillyOwed(db)).toEqual([]);
+    expect(lillyCredit(db)).toBe(28500);
+
+    // Ryan's spend unchanged: the settlement is real money (reconcile sees it)
+    // but invisible to his views.
+    expect(monthSpend(db, "2026-09")).toBe(171500);
+    const acct = db.query("SELECT COALESCE(SUM(amount_cents),0) AS t FROM transactions WHERE account_id = 1").get() as { t: number };
+    expect(acct.t).toBe(-334000 - 9000 + 200000);
+  });
+});
