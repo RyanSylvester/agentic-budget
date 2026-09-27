@@ -1,5 +1,148 @@
 @import "tailwindcss";
 
+/* Warm Ledger design system. Light/dark via variable swap on
+   prefers-color-scheme; components reference tokens, never raw colors. */
+
 :root {
   color-scheme: light dark;
+
+  --bg: #faf9f5;
+  --bg-sunken: #f1eee4;
+  --surface: #ffffff;
+
+  --ink: #141413;
+  --ink-2: #44423c;
+  --muted: #8b887c;
+  --faint: #b7b3a6;
+
+  --hairline: #e7e3d5;
+  --hairline-strong: #d8d3c0;
+
+  --accent: #1f6b43;
+  --accent-soft: #e3efe7;
+  --on-accent: #ffffff;
+
+  --success: #2e9e5b;
+  --warning: #b97a1b;
+  --warning-soft: #f6ecdb;
+  --danger: #be3b32;
+  --danger-soft: #f8e9e5;
+
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-pill: 999px;
+
+  --shadow-card: 0 1px 2px rgba(20, 20, 19, 0.05);
+  --shadow-elev: 0 12px 32px rgba(20, 20, 19, 0.1);
+
+  --font-sans: "Inter", -apple-system, "SF Pro Text", "Segoe UI", sans-serif;
+  --font-serif: "Newsreader", Georgia, "Times New Roman", serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131210;
+    --bg-sunken: #0d0c0b;
+    --surface: #1c1b18;
+
+    --ink: #f4f1e9;
+    --ink-2: #d8d4c8;
+    --muted: #a09c8e;
+    --faint: #6e6a5e;
+
+    --hairline: rgba(244, 241, 233, 0.1);
+    --hairline-strong: rgba(244, 241, 233, 0.18);
+
+    --accent: #4cab7c;
+    --accent-soft: rgba(76, 171, 124, 0.16);
+    --on-accent: #0d0c0b;
+
+    --success: #3fba6f;
+    --warning: #d99a3d;
+    --warning-soft: rgba(217, 154, 61, 0.14);
+    --danger: #d4695f;
+    --danger-soft: rgba(212, 105, 95, 0.14);
+
+    --shadow-card: none;
+    --shadow-elev: 0 12px 32px rgba(0, 0, 0, 0.4);
+  }
+}
+
+@layer base {
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    background: var(--accent-soft);
+  }
+}
+
+@layer components {
+  .t-nums {
+    font-variant-numeric: tabular-nums;
+  }
+  .font-serif-d {
+    font-family: var(--font-serif);
+    font-optical-sizing: auto;
+  }
+  .eyebrow {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-card);
+  }
+  .pill-active {
+    background: var(--ink);
+    color: var(--bg);
+  }
+  .btn-ink {
+    background: var(--ink);
+    color: var(--bg);
+    border-radius: var(--r-pill);
+    font-weight: 500;
+    transition: transform 150ms ease-out, opacity 150ms ease-out;
+  }
+  .btn-ink:hover {
+    opacity: 0.85;
+  }
+  .btn-ink:active {
+    transform: scale(0.98);
+  }
+  .btn-ink:disabled {
+    opacity: 0.5;
+  }
+  .field {
+    background: transparent;
+    border: 1px solid var(--hairline-strong);
+    border-radius: var(--r-md);
+    color: var(--ink);
+  }
+  .field::placeholder {
+    color: var(--faint);
+  }
+  .field:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    border-color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }

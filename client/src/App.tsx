@@ -75,27 +75,20 @@ const monthLabel = (ym: string) => {
   return `${MONTHS[m - 1]} ${y}`;
 };
 
+// "JOINT LIVING" -> "Joint Living" for serif section headers.
+const titleCase = (s: string) =>
+  s.split(" ").map((w) => (w === "&" ? w : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())).join(" ");
+
+function shiftMonth(ym: string, delta: number) {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 /* ---------- primitives ---------- */
 
-function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return (
-    <div className={`rounded-2xl border border-zinc-200/80 bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:border-zinc-800 dark:bg-zinc-900 ${className}`}>
-      {children}
-    </div>
-  );
-}
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-400 dark:text-zinc-500">{children}</div>;
-}
-
-function ProgressBar({ pct }: { pct: number }) {
-  const color = pct > 100 ? "bg-rose-500" : pct >= 80 ? "bg-amber-400" : "bg-emerald-500";
-  return (
-    <div className="h-1.5 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
-      <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${Math.min(100, pct)}%` }} />
-    </div>
-  );
+function Eyebrow({ children }: { children: React.ReactNode }) {
+  return <div className="eyebrow">{children}</div>;
 }
 
 /* ---------- overview pieces ---------- */
@@ -107,46 +100,74 @@ function Hero({ overview, isCurrent }: { overview: Overview | null; isCurrent: b
   const spent = overview?.confirmedSpendCents ?? 0;
   const daily = spent / Math.max(1, day);
   return (
-    <Card className="overflow-hidden">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-400 dark:text-zinc-500">
-        {overview ? monthLabel(overview.month) : "…"}
-      </div>
-      <div className="mt-2 text-[44px] font-semibold leading-none tracking-tight tabular-nums">
+    <div className="pb-1 pt-2">
+      {!isCurrent && (
+        <div className="font-serif-d text-[17px] italic text-[var(--muted)]">final for the month</div>
+      )}
+      <div className="t-nums mt-1 text-[56px] font-light leading-none tracking-[-0.02em]">
         {overview ? money(spent) : "…"}
       </div>
-      <div className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+      <div className="mt-2.5 text-[15px]">
         {isCurrent ? (
-          <>spent so far · <span className="tabular-nums">{money(Math.round(daily))}/day</span> · day {day} of {daysInMonth}</>
+          <>
+            <span className="t-nums font-medium text-[var(--ink-2)]">{money(Math.round(daily))}/day</span>
+            <span className="text-[var(--muted)]"> · day {day} of {daysInMonth}</span>
+          </>
         ) : (
-          <>final for the month</>
+          <span className="text-[var(--muted)]">{overview ? monthLabel(overview.month) : ""}</span>
         )}
       </div>
-    </Card>
+    </div>
   );
 }
 
 function PotCard({ p }: { p: Pot }) {
-  const pct = p.targetCents > 0 ? (p.spentCents / p.targetCents) * 100 : 0;
+  const hasTarget = p.targetCents > 0;
+  const pct = hasTarget ? (p.spentCents / p.targetCents) * 100 : 0;
+  const over = hasTarget && p.spentCents > p.targetCents;
   const left = p.targetCents - p.spentCents;
   return (
-    <Card className="p-4">
-      <div className="truncate text-sm font-medium">{p.name}</div>
-      <div className="mt-1 text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
-        <span className="text-zinc-900 dark:text-zinc-100">{money(p.spentCents)}</span> of {money(p.targetCents)}
-        {p.lillyCents > 0 && <span className="text-zinc-400"> · {money(p.lillyCents)} Lilly's share</span>}
+    <div className="card p-4">
+      <div className="truncate text-[15px] font-semibold">{p.name}</div>
+      <div className="t-nums mt-1 text-[13px] text-[var(--muted)]">
+        {hasTarget ? (
+          <>
+            <span className="text-[var(--ink)]">{money(p.spentCents)}</span> of {money(p.targetCents)}
+          </>
+        ) : (
+          <span className="text-[var(--ink)]">{money(p.spentCents)}</span>
+        )}
+        {p.lillyCents > 0 && (
+          <span> · {p.lillyCents === p.spentCents ? "Lilly's half" : `${money(p.lillyCents)} Lilly's`}</span>
+        )}
       </div>
-      <div className="mt-2"><ProgressBar pct={pct} /></div>
-      <div className={`mt-1.5 text-xs tabular-nums ${left < 0 ? "text-rose-500" : "text-zinc-400"}`}>
-        {left < 0 ? `${money(left)} over` : `${money(left)} left`}
-      </div>
-    </Card>
+      {hasTarget && (
+        <>
+          <div className="mt-2.5 h-[6px] overflow-hidden rounded-full bg-[var(--bg-sunken)]">
+            <div
+              className="h-full rounded-full"
+              style={{
+                width: `${Math.min(100, pct)}%`,
+                background: over ? "var(--danger)" : "var(--accent)",
+              }}
+            />
+          </div>
+          <div
+            className="t-nums mt-1.5 text-[13px] font-semibold"
+            style={{ color: over ? "var(--danger)" : "var(--muted)" }}
+          >
+            {over ? `${money(left)} over` : `${money(left)} left`}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
 function PotsGrid({ pots }: { pots: Pot[] }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   if (pots.length === 0)
-    return <p className="text-sm text-zinc-500">No pots yet. They'll appear here once the budget is set up.</p>;
+    return <p className="font-serif-d text-[17px] italic text-[var(--muted)]">No pots yet. They'll appear here once the budget is set up.</p>;
 
   const groups: { name: string; pots: Pot[] }[] = [];
   for (const p of pots) {
@@ -156,7 +177,7 @@ function PotsGrid({ pots }: { pots: Pot[] }) {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {groups.map((g) => {
         const spent = g.pots.reduce((a, p) => a + p.spentCents, 0);
         const target = g.pots.reduce((a, p) => a + p.targetCents, 0);
@@ -165,13 +186,12 @@ function PotsGrid({ pots }: { pots: Pot[] }) {
           <div key={g.name}>
             <button
               onClick={() => setOpen((o) => ({ ...o, [g.name]: !isOpen }))}
-              className="mb-2 flex w-full items-center justify-between text-left"
+              className="mb-2.5 flex w-full items-baseline justify-between text-left"
             >
-              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-400 dark:text-zinc-500">
-                {g.name}
-              </span>
-              <span className="text-xs tabular-nums text-zinc-400">
-                {money(spent)}{target > 0 ? ` of ${money(target)}` : ""} · {isOpen ? "▾" : "▸"}
+              <span className="font-serif-d text-[20px] font-medium">{titleCase(g.name)}</span>
+              <span className="t-nums text-[13px] text-[var(--muted)]">
+                {money(spent)}{target > 0 ? ` of ${money(target)}` : ""}
+                <span className="ml-2 inline-block w-3 text-[var(--faint)]">{isOpen ? "▾" : "▸"}</span>
               </span>
             </button>
             {isOpen && (
@@ -189,46 +209,46 @@ function PotsGrid({ pots }: { pots: Pot[] }) {
 function RecentActivity({ txns }: { txns: Txn[] }) {
   if (txns.length === 0) return null;
   return (
-    <Card>
-      <SectionLabel>Recent activity</SectionLabel>
-      <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+    <div>
+      <div className="mb-2"><Eyebrow>Recent activity</Eyebrow></div>
+      <ul>
         {txns.slice(0, 8).map((t) => (
-          <li key={t.id} className="flex items-center justify-between gap-3 py-2">
+          <li key={t.id} className="flex items-center justify-between gap-3 border-b border-[var(--hairline)] py-2.5 last:border-0">
             <div className="min-w-0">
-              <div className="truncate text-sm">{t.description}</div>
-              <div className="text-xs text-zinc-400">
+              <div className="truncate text-[15px]">{t.description}</div>
+              <div className="mt-0.5 text-[13px] text-[var(--muted)]">
                 {t.date}
                 {t.is_transfer ? " · transfer" : ""}
                 {t.split_with_lilly ? " · split with Lilly" : ""}
               </div>
             </div>
-            <span className={`shrink-0 text-sm tabular-nums ${t.ryan_cents < 0 ? "" : "text-emerald-600 dark:text-emerald-400"}`}>
+            <span className={`t-nums shrink-0 text-[15px] ${t.ryan_cents < 0 ? "" : "font-medium text-[var(--success)]"}`}>
               {money(t.ryan_cents)}
             </span>
           </li>
         ))}
       </ul>
-    </Card>
+    </div>
   );
 }
 
 function CloseCard({ preview }: { preview: ClosePreviewData | null }) {
   if (!preview) return null;
   return (
-    <Card>
-      <SectionLabel>Month-end preview</SectionLabel>
-      <div className="space-y-1.5 text-sm">
-        <div className="flex justify-between"><span className="text-zinc-500">Inflows</span><span className="tabular-nums">{money(preview.inflowsCents)}</span></div>
-        <div className="flex justify-between"><span className="text-zinc-500">Spent</span><span className="tabular-nums">{money(preview.spentCents)}</span></div>
-        <div className="flex justify-between font-medium">
-          <span>Ready to assign</span><span className="tabular-nums">{money(preview.rtaBeforeCents)}</span>
+    <div className="card p-5">
+      <div className="mb-3"><Eyebrow>Month-end preview</Eyebrow></div>
+      <div className="space-y-1.5 text-[15px]">
+        <div className="flex justify-between"><span className="text-[var(--muted)]">Inflows</span><span className="t-nums">{money(preview.inflowsCents)}</span></div>
+        <div className="flex justify-between"><span className="text-[var(--muted)]">Spent</span><span className="t-nums">{money(preview.spentCents)}</span></div>
+        <div className="flex justify-between border-t border-[var(--hairline)] pt-1.5 font-semibold">
+          <span>Ready to assign</span><span className="t-nums">{money(preview.rtaBeforeCents)}</span>
         </div>
-        <div className="flex justify-between text-xs text-zinc-500">
-          <span>→ moves to secondary savings at close</span><span className="tabular-nums">{money(preview.movedToSavingsCents)}</span>
+        <div className="flex justify-between text-[13px] text-[var(--muted)]">
+          <span>Moves to secondary savings at close</span><span className="t-nums">{money(preview.movedToSavingsCents)}</span>
         </div>
       </div>
-      <p className="mt-3 text-xs text-zinc-400">The agent applies the close at month-end after your review.</p>
-    </Card>
+      <p className="mt-3 text-[13px] text-[var(--muted)]">The agent applies the close at month-end after your review.</p>
+    </div>
   );
 }
 
@@ -236,48 +256,40 @@ function Trend({ data }: { data: TrendPoint[] }) {
   if (data.length === 0) return null;
   const max = Math.max(...data.map((d) => d.spent), 1);
   return (
-    <Card>
-      <SectionLabel>Spending trend</SectionLabel>
+    <div>
+      <div className="mb-2"><Eyebrow>Spending trend</Eyebrow></div>
       <div className="flex h-28 items-end gap-2.5">
         {data.map((d, i) => (
           <div key={d.month} className="flex h-full flex-1 flex-col items-center justify-end gap-1.5">
             <div
               title={`${monthLabel(d.month)}: ${money(d.spent)}`}
-              className={`w-full rounded-t-md ${i === data.length - 1 ? "bg-zinc-900 dark:bg-zinc-100" : "bg-zinc-200 dark:bg-zinc-700"}`}
-              style={{ height: `${Math.max(4, (d.spent / max) * 100)}%` }}
+              className="w-full rounded-t-[4px]"
+              style={{
+                height: `${Math.max(4, (d.spent / max) * 100)}%`,
+                background: i === data.length - 1 ? "var(--accent)" : "var(--hairline-strong)",
+              }}
             />
-            <span className="text-[10px] tabular-nums text-zinc-400">{d.month.slice(5)}</span>
+            <span className="t-nums text-[11px] text-[var(--faint)]">{d.month.slice(5)}</span>
           </div>
         ))}
       </div>
-    </Card>
+    </div>
   );
-}
-
-function shiftMonth(ym: string, delta: number) {
-  const [y, m] = ym.split("-").map(Number);
-  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 function MonthNav({ month, onChange }: { month: string; onChange: (m: string) => void }) {
   const current = new Date().toISOString().slice(0, 7);
   const atCurrent = month >= current;
+  const btn =
+    "flex h-9 w-9 items-center justify-center rounded-full border border-[var(--hairline-strong)] text-[17px] text-[var(--ink-2)] transition active:scale-95 disabled:opacity-40";
   return (
-    <div className="mb-4 flex items-center justify-between">
-      <button
-        onClick={() => onChange(shiftMonth(month, -1))}
-        className="rounded-full border border-zinc-200/80 bg-white px-3 py-1.5 text-sm text-zinc-500 shadow-sm transition hover:text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:text-zinc-100"
-      >
-        ← {monthLabel(shiftMonth(month, -1)).split(" ")[0]}
+    <div className="mb-5 flex items-center justify-between">
+      <button aria-label="Previous month" onClick={() => onChange(shiftMonth(month, -1))} className={btn}>
+        ‹
       </button>
-      <span className="text-sm font-medium tabular-nums">{monthLabel(month)}</span>
-      <button
-        onClick={() => onChange(shiftMonth(month, 1))}
-        disabled={atCurrent}
-        className="rounded-full border border-zinc-200/80 bg-white px-3 py-1.5 text-sm text-zinc-500 shadow-sm transition hover:text-zinc-900 disabled:opacity-40 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:text-zinc-100"
-      >
-        {monthLabel(shiftMonth(month, 1)).split(" ")[0]} →
+      <span className="font-serif-d text-[17px] italic">{monthLabel(month)}</span>
+      <button aria-label="Next month" onClick={() => onChange(shiftMonth(month, 1))} disabled={atCurrent} className={btn}>
+        ›
       </button>
     </div>
   );
@@ -305,12 +317,12 @@ function OverviewTab({ month, onGo }: { month: string; onGo: (t: "review" | "acc
   }, []);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-7">
       <Hero overview={overview} isCurrent={month === current} />
       <ClickableAttention overview={overview} accounts={accounts} onGo={onGo} />
       <LillyCard />
       <div>
-        <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-400 dark:text-zinc-500">Pots</div>
+        <div className="mb-3"><Eyebrow>Pots</Eyebrow></div>
         <PotsGrid pots={pots} />
       </div>
       <RecentActivity txns={overview?.recent ?? []} />
@@ -329,22 +341,22 @@ function ClickableAttention({ overview, accounts, onGo }: { overview: Overview |
       items.push({ label: `${a.name} not reconciled yet`, tab: "accounts" });
   if (items.length === 0) return null;
   return (
-    <Card>
-      <SectionLabel>Needs attention</SectionLabel>
-      <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+    <div className="card px-5 py-4">
+      <div className="mb-1"><Eyebrow>Needs attention</Eyebrow></div>
+      <ul>
         {items.map((it, i) => (
-          <li key={i}>
-            <button onClick={() => onGo(it.tab)} className="flex w-full items-center justify-between py-2 text-left text-sm hover:opacity-70">
+          <li key={i} className="border-b border-[var(--hairline)] last:border-0">
+            <button onClick={() => onGo(it.tab)} className="flex w-full items-center justify-between py-2.5 text-left text-[15px] transition active:scale-[0.99]">
               <span className="flex items-center gap-2.5">
-                <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400" />
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--warning)]" />
                 {it.label}
               </span>
-              <span className="text-zinc-400">→</span>
+              <span className="text-[var(--faint)]">→</span>
             </button>
           </li>
         ))}
       </ul>
-    </Card>
+    </div>
   );
 }
 
@@ -382,55 +394,51 @@ function LillyCard() {
   };
 
   return (
-    <Card>
-      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-zinc-400 dark:text-zinc-500">Lilly owes you</div>
-      <div className="mt-1 text-3xl font-semibold tracking-tight tabular-nums">{money(info.totalOwedCents)}</div>
-      {info.oldest && <div className="mt-1 text-xs text-zinc-500">oldest since {info.oldest}</div>}
+    <div className="card p-5">
+      <Eyebrow>Lilly owes you</Eyebrow>
+      <div className="t-nums mt-1.5 text-[32px] font-light tracking-tight">{money(info.totalOwedCents)}</div>
+      {info.oldest && <div className="mt-1 text-[13px] text-[var(--muted)]">oldest since {info.oldest}</div>}
       <ul className="mt-3 space-y-1">
         {info.byPot.map((b) => (
-          <li key={b.pot} className="flex items-center justify-between text-sm">
-            <span className="text-zinc-600 dark:text-zinc-400">{b.pot}</span>
-            <span className="tabular-nums">{money(b.cents)}</span>
+          <li key={b.pot} className="flex items-center justify-between text-[15px]">
+            <span className="text-[var(--ink-2)]">{b.pot}</span>
+            <span className="t-nums">{money(b.cents)}</span>
           </li>
         ))}
       </ul>
       {info.creditCents > 0 && (
-        <div className="mt-2 text-xs text-emerald-600 dark:text-emerald-400">{money(info.creditCents)} credit from overpayment</div>
+        <div className="mt-2 text-[13px] font-medium text-[var(--success)]">{money(info.creditCents)} credit from overpayment</div>
       )}
-      <div className="mt-3 flex gap-2">
+      <div className="mt-4 flex gap-2">
         <input
           type="number"
           step="0.01"
           placeholder="Lump sum received"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          className="w-44 rounded-lg border border-zinc-200 bg-transparent px-2.5 py-1.5 text-sm tabular-nums dark:border-zinc-700"
+          className="field t-nums w-44 px-3 py-2 text-[15px]"
         />
-        <button
-          onClick={settle}
-          disabled={busy}
-          className="rounded-lg bg-zinc-900 px-3.5 py-1.5 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:opacity-50 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200"
-        >
+        <button onClick={settle} disabled={busy} className="btn-ink px-4 py-2 text-[15px]">
           {busy ? "Settling…" : "Settle up"}
         </button>
       </div>
       {last && (
-        <div className="mt-3 rounded-xl bg-zinc-50 p-3.5 text-sm dark:bg-zinc-800/60">
-          <div className="font-medium">Buckets filled</div>
-          <ul className="mt-1.5 space-y-1 text-xs">
+        <div className="mt-3 rounded-[var(--r-md)] bg-[var(--bg-sunken)] p-4 text-[15px]">
+          <div className="font-semibold">Buckets filled</div>
+          <ul className="mt-1.5 space-y-1 text-[13px]">
             {last.allocations.map((a, i) => (
               <li key={i} className="flex items-center justify-between">
-                <span className="text-zinc-600 dark:text-zinc-400">{a.potName ?? "Uncategorized"}</span>
-                <span className="tabular-nums">{money(a.amountCents)}</span>
+                <span className="text-[var(--ink-2)]">{a.potName ?? "Uncategorized"}</span>
+                <span className="t-nums">{money(a.amountCents)}</span>
               </li>
             ))}
           </ul>
           {last.leftoverCents > 0 && (
-            <div className="mt-1.5 text-xs text-emerald-600 dark:text-emerald-400">{money(last.leftoverCents)} kept as credit</div>
+            <div className="mt-1.5 text-[13px] font-medium text-[var(--success)]">{money(last.leftoverCents)} kept as credit</div>
           )}
         </div>
       )}
-    </Card>
+    </div>
   );
 }
 
@@ -449,30 +457,23 @@ function ReviewQueue({ onChange }: { onChange: () => void }) {
   };
 
   if (txns.length === 0)
-    return <p className="text-sm text-zinc-500">All clear. Nothing needs your eyes.</p>;
+    return <p className="font-serif-d py-6 text-center text-[19px] italic text-[var(--muted)]">All clear.</p>;
 
   return (
-    <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+    <ul className="space-y-3">
       {txns.map((t) => (
-        <li key={t.id} className="flex items-center justify-between gap-3 py-3">
-          <div className="min-w-0">
-            <div className="truncate text-sm font-medium">{t.description}</div>
-            <div className="text-xs text-zinc-500">{t.date} · via {t.source}</div>
+        <li key={t.id} className="card flex items-center justify-between gap-3 overflow-hidden">
+          <div className="w-1 self-stretch bg-[var(--warning)]" />
+          <div className="min-w-0 flex-1 py-3.5">
+            <div className="truncate text-[15px] font-semibold">{t.description}</div>
+            <div className="mt-0.5 text-[13px] text-[var(--muted)]">{t.date} · via {t.source}</div>
             {t.review_reason && (
-              <div className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">Agent wasn't sure: {t.review_reason}</div>
+              <div className="mt-1 text-[13px] font-medium text-[var(--warning)]">Agent wasn't sure: {t.review_reason}</div>
             )}
           </div>
-          <div className="flex shrink-0 items-center gap-3">
-            <span className="text-sm tabular-nums">{money(t.amount_cents)}</span>
-            {t.lilly_cents > 0 && (
-              <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-700 dark:bg-violet-500/15 dark:text-violet-300">
-                split · {money(t.lilly_cents)} Lilly
-              </span>
-            )}
-            <button
-              onClick={() => confirm(t.id)}
-              className="rounded-full bg-zinc-900 px-3.5 py-1.5 text-xs font-medium text-white transition hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200"
-            >
+          <div className="flex shrink-0 flex-col items-end gap-2 py-3.5 pr-4">
+            <span className="t-nums text-[15px]">{money(t.amount_cents ?? 0)}</span>
+            <button onClick={() => confirm(t.id)} className="btn-ink px-4 py-1.5 text-[13px]">
               Confirm
             </button>
           </div>
@@ -491,6 +492,14 @@ interface ReconcileResponse {
   actualBalanceCents: number;
   uncleared?: { id: number; date: string; description: string; amount_cents: number }[];
   suggestedClearId?: number | null;
+}
+
+function clearedLabel(a: Account): string {
+  // Credit-card cleared balances are negative (money owed): say so plainly
+  // instead of rendering a double negative like "Cleared −$653.65".
+  if (a.clearedBalanceCents < 0 && a.type === "credit_card")
+    return `Owed ${money(-a.clearedBalanceCents)}`;
+  return `Cleared ${money(a.clearedBalanceCents)}`;
 }
 
 function AccountsView() {
@@ -520,50 +529,47 @@ function AccountsView() {
   };
 
   if (accounts.length === 0)
-    return <p className="text-sm text-zinc-500">No accounts yet.</p>;
+    return <p className="font-serif-d text-[17px] italic text-[var(--muted)]">No accounts yet.</p>;
 
   return (
     <div className="space-y-4">
       {accounts.map((a) => (
-        <Card key={a.id}>
-          <div className="flex items-baseline justify-between">
-            <div className="font-medium">{a.name}</div>
-            <div className="text-lg tabular-nums">{money(a.workingBalanceCents)}</div>
+        <div key={a.id} className="card p-5">
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="text-[15px] font-semibold">{a.name}</div>
+            <div className="t-nums text-[32px] font-light tracking-tight">{money(a.workingBalanceCents)}</div>
           </div>
-          <div className="mt-1 text-xs text-zinc-500">
-            Cleared {money(a.clearedBalanceCents)}
+          <div className="mt-1 text-[13px] text-[var(--muted)]">
+            {clearedLabel(a)}
             {a.lastReconciledAt ? ` · reconciled ${a.lastReconciledAt.slice(0, 10)}` : " · never reconciled"}
           </div>
-          <div className="mt-3 flex gap-2">
+          <div className="mt-4 flex gap-2">
             <input
               type="number"
               step="0.01"
               placeholder="Actual balance"
               value={actual[a.id] ?? ""}
               onChange={(e) => setActual((p) => ({ ...p, [a.id]: e.target.value }))}
-              className="w-36 rounded-lg border border-zinc-200 bg-transparent px-2.5 py-1.5 text-sm tabular-nums dark:border-zinc-700"
+              className="field t-nums w-36 px-3 py-2 text-[15px]"
             />
-            <button
-              onClick={() => reconcile(a.id)}
-              className="rounded-lg bg-zinc-900 px-3.5 py-1.5 text-sm font-medium text-white transition hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200"
-            >
+            <button onClick={() => reconcile(a.id)} className="btn-ink px-4 py-2 text-[15px]">
               Reconcile
             </button>
           </div>
           {result[a.id] && (
-            <div className="mt-3 rounded-xl bg-zinc-50 p-3.5 text-sm dark:bg-zinc-800/60">
+            <div className="mt-3 rounded-[var(--r-md)] bg-[var(--bg-sunken)] p-4 text-[15px]">
               {result[a.id]!.balanced ? (
-                <span className="font-medium text-emerald-600 dark:text-emerald-400">Balanced. Nice.</span>
+                <span className="font-serif-d text-[17px] italic">Balanced. Nice.</span>
               ) : (
                 <>
-                  <div>Difference: <strong className="tabular-nums">{money(result[a.id]!.differenceCents)}</strong></div>
+                  <div>Difference: <strong className="t-nums">{money(result[a.id]!.differenceCents)}</strong></div>
                   <ul className="mt-2 space-y-1.5">
                     {result[a.id]!.uncleared!.map((t) => (
-                      <li key={t.id} className="flex items-center justify-between gap-2 text-xs">
-                        <span className="truncate">{t.description} <span className="text-zinc-500 tabular-nums">{money(t.amount_cents)}</span></span>
+                      <li key={t.id} className="flex items-center justify-between gap-2 text-[13px]">
+                        <span className="truncate">{t.description} <span className="t-nums text-[var(--muted)]">{money(t.amount_cents)}</span></span>
                         <button onClick={() => clearTxn(a.id, t.id)}
-                          className={`shrink-0 rounded-full px-2.5 py-1 font-medium ${result[a.id]!.suggestedClearId === t.id ? "bg-blue-600 text-white" : "bg-zinc-200 dark:bg-zinc-700"}`}>
-                          {result[a.id]!.suggestedClearId === t.id ? "This one posted — clear it" : "Clear"}
+                          className={`shrink-0 rounded-full px-3 py-1 font-medium transition active:scale-95 ${result[a.id]!.suggestedClearId === t.id ? "bg-[var(--accent)] text-[var(--on-accent)]" : "border border-[var(--hairline-strong)]"}`}>
+                          {result[a.id]!.suggestedClearId === t.id ? "This one posted" : "Clear"}
                         </button>
                       </li>
                     ))}
@@ -572,7 +578,7 @@ function AccountsView() {
               )}
             </div>
           )}
-        </Card>
+        </div>
       ))}
     </div>
   );
@@ -586,20 +592,33 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("overview");
   const [refreshKey, setRefreshKey] = useState(0);
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    fetch("/api/review").then((r) => r.json()).then((d) => setPendingCount(d.transactions.length));
+  }, [refreshKey, tab]);
 
   return (
-    <div className="min-h-screen bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">
-      <div className="mx-auto max-w-2xl px-4 py-8">
-        <header className="mb-6 flex items-center justify-between">
-          <h1 className="text-lg font-semibold tracking-tight">agentic-budget</h1>
-          <nav className="flex gap-0.5 rounded-full border border-zinc-200/80 bg-white p-1 text-sm shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="min-h-screen">
+      <div className="mx-auto max-w-2xl px-5 py-8">
+        <header className="mb-7 flex items-center justify-between gap-3">
+          <h1 className="shrink-0 whitespace-nowrap text-[17px] font-semibold tracking-tight">agentic-budget</h1>
+          <nav
+            className="flex shrink-0 gap-0.5 rounded-full border border-[var(--hairline)] bg-[var(--surface)] p-1 text-[13px]"
+            style={{ boxShadow: "var(--shadow-card)" }}
+          >
             {(["overview", "review", "accounts"] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
-                className={`rounded-full px-3.5 py-1.5 capitalize transition ${tab === t ? "bg-zinc-900 font-medium text-white dark:bg-white dark:text-zinc-900" : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"}`}
+                className={`relative rounded-full px-2.5 py-1.5 capitalize transition active:scale-95 ${tab === t ? "pill-active font-medium" : "text-[var(--muted)]"}`}
               >
                 {t}
+                {t === "review" && pendingCount > 0 && (
+                  <span className="t-nums absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--warning)] px-1 text-[11px] font-bold text-white">
+                    {pendingCount}
+                  </span>
+                )}
               </button>
             ))}
           </nav>
@@ -613,16 +632,21 @@ export default function App() {
         )}
 
         {tab === "review" && (
-          <Card>
-            <SectionLabel>Pending review</SectionLabel>
-            <p className="mb-4 text-sm text-zinc-500">
+          <div>
+            <div className="mb-1 font-serif-d text-[24px] font-medium">Review</div>
+            <p className="mb-5 text-[15px] text-[var(--muted)]">
               Only the entries the agent wasn't sure about. One tap to confirm.
             </p>
             <ReviewQueue onChange={() => setRefreshKey((k) => k + 1)} />
-          </Card>
+          </div>
         )}
 
-        {tab === "accounts" && <AccountsView />}
+        {tab === "accounts" && (
+          <div>
+            <div className="mb-5 font-serif-d text-[24px] font-medium">Accounts</div>
+            <AccountsView />
+          </div>
+        )}
       </div>
     </div>
   );
