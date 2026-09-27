@@ -31,6 +31,28 @@ export function openDb(path: string = DB_PATH): Database {
   if (!potCols.some((c) => c.name === "hidden")) {
     fresh.exec("ALTER TABLE pots ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0");
   }
+  // Income-group pots receive money; dollars are never assigned to them.
+  if (!potCols.some((c) => c.name === "is_assignable")) {
+    fresh.exec("ALTER TABLE pots ADD COLUMN is_assignable INTEGER NOT NULL DEFAULT 1");
+  }
+  fresh.exec("UPDATE pots SET is_assignable = 0 WHERE pot_group = 'Income'");
+  // Month assignments ledger.
+  fresh.exec(`CREATE TABLE IF NOT EXISTS assignments (
+    month    TEXT NOT NULL,
+    pot_id   INTEGER NOT NULL REFERENCES pots(id),
+    cents    INTEGER NOT NULL,
+    PRIMARY KEY (month, pot_id)
+  )`);
+  // Statement-import idempotency key. (ALTER TABLE cannot add a UNIQUE
+  // constraint, so existing DBs get a unique index instead.)
+  if (!cols.some((c) => c.name === "external_id")) {
+    fresh.exec("ALTER TABLE transactions ADD COLUMN external_id TEXT");
+  }
+  fresh.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_external_id ON transactions(external_id)");
+  // Soft-void flag.
+  if (!cols.some((c) => c.name === "voided")) {
+    fresh.exec("ALTER TABLE transactions ADD COLUMN voided INTEGER NOT NULL DEFAULT 0");
+  }
   // Backfill splits: pre-split transactions were 100% the user's.
   const unsplit = fresh.query(
     "SELECT id, pot_id, amount_cents FROM transactions WHERE id NOT IN (SELECT transaction_id FROM splits)"

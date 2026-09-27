@@ -1,4 +1,4 @@
--- agentic-budget schema (DRAFT — pending scoping session)
+-- agentic-budget schema
 -- Every money-moving row carries its provenance: who entered it and where it came from.
 
 CREATE TABLE IF NOT EXISTS accounts (
@@ -16,7 +16,10 @@ CREATE TABLE IF NOT EXISTS pots (
   pot_group    TEXT NOT NULL,
   target_type  TEXT NOT NULL CHECK (target_type IN ('fixed','average_3mo','savings')),
   target_cents INTEGER NOT NULL DEFAULT 0,
-  hidden        INTEGER NOT NULL DEFAULT 0
+  hidden        INTEGER NOT NULL DEFAULT 0,
+  -- Income-group pots (paychecks, interest, windfalls) receive money;
+  -- dollars are never assigned *to* them, so assign flows reject them.
+  is_assignable INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS transactions (
@@ -40,7 +43,21 @@ CREATE TABLE IF NOT EXISTS transactions (
   -- Movements between the user's own accounts (holding-account loop, savings
   -- contributions). Real money for reconciliation, never spending.
   is_transfer  INTEGER NOT NULL DEFAULT 0,
+  -- Idempotency key for statement imports: re-reading the same statement
+  -- never records a duplicate.
+  external_id  TEXT UNIQUE,
+  -- Soft void: excluded from spend, inflow, and RTA math, kept for audit.
+  voided       INTEGER NOT NULL DEFAULT 0,
   created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
+-- Month assignments: the agent assigns every dollar of income to a pot.
+-- Upserted per (month, pot); RTA = inflows - SUM(assignments) for the month.
+CREATE TABLE IF NOT EXISTS assignments (
+  month    TEXT NOT NULL,                    -- YYYY-MM
+  pot_id   INTEGER NOT NULL REFERENCES pots(id),
+  cents    INTEGER NOT NULL,
+  PRIMARY KEY (month, pot_id)
 );
 
 -- One row per applied month-end close. The close itself is a pure function
