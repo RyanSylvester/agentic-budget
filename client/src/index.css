@@ -103,8 +103,9 @@
     box-shadow: var(--shadow-card);
   }
   .pill-active {
-    background: var(--ink);
-    color: var(--bg);
+    /* Always a black pill, in both color schemes. */
+    background: #161513;
+    color: #faf9f5;
   }
   .btn-ink {
     background: var(--ink);
@@ -135,6 +136,35 @@
     outline: 2px solid var(--accent);
     outline-offset: 1px;
     border-color: transparent;
+  }
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    background: var(--bg-sunken);
+    border-radius: var(--r-md);
+  }
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(130, 130, 130, 0.14), transparent);
+    animation: shimmer 1.5s infinite;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
   }
 }
 
