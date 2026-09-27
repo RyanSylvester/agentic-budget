@@ -22,6 +22,8 @@ interface Overview {
   pendingCount: number;
   recent: Txn[];
   partnerName: string;
+  rtaCents?: number;
+  assignedCents?: number;
 }
 
 interface ClosePreviewData {
@@ -29,6 +31,7 @@ interface ClosePreviewData {
   nextMonth: string;
   inflowsCents: number;
   spentCents: number;
+  assignedCents?: number;
   rtaBeforeCents: number;
   movedToSavingsCents: number;
   partnerOwedCents: number;
@@ -51,6 +54,7 @@ interface Pot {
   targetCents: number;
   spentCents: number;
   partnerCents: number;
+  assignedCents?: number;
 }
 
 interface PartnerInfo {
@@ -64,6 +68,14 @@ interface PartnerInfo {
 interface TrendPoint {
   month: string;
   spent: number;
+}
+
+interface Attention {
+  month: string;
+  pendingReviewCount: number;
+  unreconciledAccounts: Array<string | { name: string }>;
+  rtaCents: number;
+  unsettledPartnerCents: number;
 }
 
 /* ---------- helpers ---------- */
@@ -87,10 +99,77 @@ function shiftMonth(ym: string, delta: number) {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+// "2026-09-28" -> "Today" / "Yesterday" / "Sep 26". No raw ISO dates in the UI.
+function fmtDate(iso: string): string {
+  const d = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((startOf(new Date()) - startOf(d)) / 86400000);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  return `${MONTHS[d.getMonth()].slice(0, 3)} ${d.getDate()}`;
+}
+
+// "2026-09" -> "Sep '26" for chart axes.
+function trendLabel(ym: string): string {
+  const [y, m] = ym.split("-").map(Number);
+  if (!y || !m) return ym;
+  return `${MONTHS[m - 1].slice(0, 3)} '${String(y).slice(2)}`;
+}
+
+/* ---------- data ---------- */
+
+// Small fetch hook with loading + error states. A failed fetch surfaces a
+// retryable error instead of hanging on a skeleton forever.
+function useApi<T>(url: string | null): { data: T | null; error: boolean; loading: boolean; retry: () => void } {
+  const [data, setData] = useState<T | null>(null);
+  const [error, setError] = useState(false);
+  const [nonce, setNonce] = useState(0);
+
+  useEffect(() => {
+    if (!url) return;
+    let live = true;
+    setError(false);
+    fetch(url)
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const ct = r.headers.get("content-type") ?? "";
+        if (!ct.includes("json")) throw new Error("not JSON");
+        return (await r.json()) as T;
+      })
+      .then((d) => {
+        if (live) setData(d);
+      })
+      .catch(() => {
+        if (live) setError(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [url, nonce]);
+
+  return { data, error, loading: data === null && !error, retry: () => setNonce((n) => n + 1) };
+}
+
 /* ---------- primitives ---------- */
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return <div className="eyebrow">{children}</div>;
+}
+
+function Skeleton({ className = "" }: { className?: string }) {
+  return <div aria-hidden className={`skeleton ${className}`} />;
+}
+
+function FetchError({ onRetry, label = "Couldn't load this." }: { onRetry: () => void; label?: string }) {
+  return (
+    <div className="card p-5 text-center">
+      <p className="text-[15px] text-[var(--muted)]">{label}</p>
+      <button onClick={onRetry} className="btn-ink mt-3 px-4 py-2 text-[15px]">
+        Try again
+      </button>
+    </div>
+  );
 }
 
 /* ---------- overview pieces ---------- */
@@ -197,7 +276,7 @@ function PotsGrid({ pots, partnerName }: { pots: Pot[]; partnerName: string }) {
               </span>
             </button>
             {isOpen && (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-2">
                 {g.pots.map((p) => <PotCard key={p.id} p={p} partnerName={partnerName} />)}
               </div>
             )}
@@ -208,19 +287,38 @@ function PotsGrid({ pots, partnerName }: { pots: Pot[]; partnerName: string }) {
   );
 }
 
-function RecentActivity({ txns, partnerName }: { txns: Txn[]; partnerName: string }) {
-  if (txns.length === 0) return null;
+function RecentActivity({ txns, partnerName, loading }: { txns: Txn[]; partnerName: string; loading?: boolean }) {
+  // Transfer pairs (e.g. +$891.82 / -$891.82 between own accounts) are net-zero
+  // noise, not spending: keep them out of the activity feed.
+  const visible = txns.filter((t) => !t.is_transfer);
+  if (loading) {
+    return (
+      <div>
+        <div className="mb-2"><Eyebrow>Recent activity</Eyebrow></div>
+        <div className="space-y-2.5">
+          {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-[54px]" />)}
+        </div>
+      </div>
+    );
+  }
+  if (visible.length === 0) {
+    return (
+      <div>
+        <div className="mb-2"><Eyebrow>Recent activity</Eyebrow></div>
+        <p className="font-serif-d text-[17px] italic text-[var(--muted)]">Nothing here yet.</p>
+      </div>
+    );
+  }
   return (
     <div>
       <div className="mb-2"><Eyebrow>Recent activity</Eyebrow></div>
       <ul>
-        {txns.slice(0, 8).map((t) => (
+        {visible.slice(0, 8).map((t) => (
           <li key={t.id} className="flex items-center justify-between gap-3 border-b border-[var(--hairline)] py-2.5 last:border-0">
             <div className="min-w-0">
               <div className="truncate text-[15px]">{t.description}</div>
               <div className="mt-0.5 text-[13px] text-[var(--muted)]">
-                {t.date}
-                {t.is_transfer ? " · transfer" : ""}
+                {fmtDate(t.date)}
                 {t.split_with_partner ? ` · split with ${partnerName}` : ""}
               </div>
             </div>
@@ -271,7 +369,7 @@ function Trend({ data }: { data: TrendPoint[] }) {
                 background: i === data.length - 1 ? "var(--accent)" : "var(--hairline-strong)",
               }}
             />
-            <span className="t-nums text-[11px] text-[var(--faint)]">{d.month.slice(5)}</span>
+            <span className="t-nums text-[11px] text-[var(--faint)]">{trendLabel(d.month)}</span>
           </div>
         ))}
       </div>
@@ -283,7 +381,7 @@ function MonthNav({ month, onChange }: { month: string; onChange: (m: string) =>
   const current = new Date().toISOString().slice(0, 7);
   const atCurrent = month >= current;
   const btn =
-    "flex h-9 w-9 items-center justify-center rounded-full border border-[var(--hairline-strong)] text-[17px] text-[var(--ink-2)] transition active:scale-95 disabled:opacity-40";
+    "flex h-11 w-11 items-center justify-center rounded-full border border-[var(--hairline-strong)] text-[17px] text-[var(--ink-2)] transition active:scale-95 disabled:opacity-40";
   return (
     <div className="mb-5 flex items-center justify-between">
       <button aria-label="Previous month" onClick={() => onChange(shiftMonth(month, -1))} className={btn}>
@@ -414,8 +512,8 @@ function PartnerCard() {
       )}
       <div className="mt-4 flex gap-2">
         <input
-          type="number"
-          step="0.01"
+          type="text"
+          inputMode="decimal"
           placeholder="Lump sum received"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
@@ -448,17 +546,25 @@ function PartnerCard() {
 /* ---------- review ---------- */
 
 function ReviewQueue({ onChange }: { onChange: () => void }) {
-  const [txns, setTxns] = useState<Txn[]>([]);
-  useEffect(() => {
-    fetch("/api/review").then((r) => r.json()).then((d) => setTxns(d.transactions));
-  }, []);
+  const { data, error, loading, retry } = useApi<{ transactions: Txn[] }>("/api/review");
+  const [doneIds, setDoneIds] = useState<Set<number>>(new Set());
 
   const confirm = async (id: number) => {
     await fetch(`/api/review/${id}/confirm`, { method: "POST" });
-    setTxns((t) => t.filter((x) => x.id !== id));
+    setDoneIds((s) => new Set(s).add(id));
     onChange();
   };
 
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        {[0, 1, 2].map((i) => <Skeleton key={i} className="h-[76px]" />)}
+      </div>
+    );
+  }
+  if (error) return <FetchError onRetry={retry} label="Couldn't load the review queue." />;
+
+  const txns = (data?.transactions ?? []).filter((t) => !doneIds.has(t.id));
   if (txns.length === 0)
     return <p className="font-serif-d py-6 text-center text-[19px] italic text-[var(--muted)]">All clear.</p>;
 
@@ -469,7 +575,7 @@ function ReviewQueue({ onChange }: { onChange: () => void }) {
           <div className="w-1 self-stretch bg-[var(--warning)]" />
           <div className="min-w-0 flex-1 py-3.5">
             <div className="truncate text-[15px] font-semibold">{t.description}</div>
-            <div className="mt-0.5 text-[13px] text-[var(--muted)]">{t.date} · via {t.source}</div>
+            <div className="mt-0.5 text-[13px] text-[var(--muted)]">{fmtDate(t.date)} · via {t.source}</div>
             {t.review_reason && (
               <div className="mt-1 text-[13px] font-medium text-[var(--warning)]">Agent wasn't sure: {t.review_reason}</div>
             )}
@@ -548,8 +654,8 @@ function AccountsView() {
           </div>
           <div className="mt-4 flex gap-2">
             <input
-              type="number"
-              step="0.01"
+              type="text"
+              inputMode="decimal"
               placeholder="Actual balance"
               value={actual[a.id] ?? ""}
               onChange={(e) => setActual((p) => ({ ...p, [a.id]: e.target.value }))}
@@ -605,20 +711,20 @@ export default function App() {
     <div className="min-h-screen">
       <div className="mx-auto max-w-2xl px-5 py-8">
         <header className="mb-7 flex items-center justify-between gap-3">
-          <h1 className="shrink-0 whitespace-nowrap text-[17px] font-semibold tracking-tight">agentic-budget</h1>
+          <h1 className="font-serif-d shrink-0 whitespace-nowrap text-[19px] font-medium tracking-tight">Daybook</h1>
           <nav
-            className="flex shrink-0 gap-0.5 rounded-full border border-[var(--hairline)] bg-[var(--surface)] p-1 text-[13px]"
+            className="no-scrollbar flex min-w-0 gap-0.5 overflow-x-auto rounded-full border border-[var(--hairline)] bg-[var(--surface)] p-1 text-[13px]"
             style={{ boxShadow: "var(--shadow-card)" }}
           >
             {(["overview", "review", "accounts"] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
-                className={`relative rounded-full px-2.5 py-1.5 capitalize transition active:scale-95 ${tab === t ? "pill-active font-medium" : "text-[var(--muted)]"}`}
+                className={`relative shrink-0 rounded-full px-2.5 py-1.5 capitalize transition active:scale-95 ${tab === t ? "pill-active font-medium" : "text-[var(--muted)]"}`}
               >
                 {t}
                 {t === "review" && pendingCount > 0 && (
-                  <span className="t-nums absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--warning)] px-1 text-[11px] font-bold text-white">
+                  <span className="t-nums absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-[#161513] px-1 text-[11px] font-bold text-[#faf9f5]">
                     {pendingCount}
                   </span>
                 )}
