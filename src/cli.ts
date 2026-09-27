@@ -6,12 +6,13 @@
  *    bun src/cli.ts settle --account 1 --amount 2000 --note "Lilly e-transfer"   # her lump sum fills her buckets, oldest first
  *    bun src/cli.ts review            # list pending_review transactions
  *    bun src/cli.ts reconcile --account 1 --balance 1234.56
- *    bun src/cli.ts close --month 2026-09   # preview the month-end close
+ *    bun src/cli.ts close --month 2026-09 [--apply]   # preview (or apply) the month-end close
  *    bun src/cli.ts serve             # start the dashboard
  */
 import { openDb } from "./db";
 import { reconcile, suggestClear } from "./reconcile";
 import { applySettlement, lillyOwed } from "./settle";
+import { closePreview, applyClose } from "./close";
 
 function usage(): never {
   console.error("usage: budget <record|settle|review|reconcile|close|serve> [options]");
@@ -88,8 +89,32 @@ if (cmd === "record") {
   if (rows.length === 0) console.log("nothing pending review");
   else for (const r of rows as any[]) console.log(`${r.id}  ${r.date}  ${(r.amount_cents / 100).toFixed(2)}  ${r.description}  [${r.source}]`);
 } else if (cmd === "close") {
+  const db = openDb();
   const month = flag("month") ?? new Date().toISOString().slice(0, 7);
-  console.log(`month-end close preview for ${month}: not yet wired to live data (see src/close.ts)`);
+  const p = closePreview(db, month);
+  const $ = (c: number) => (c / 100).toFixed(2);
+  console.log(`close preview: ${p.month}  (applies wireframe for ${p.nextMonth})`);
+  console.log(`  inflows (Ryan)     $${$(p.inflowsCents)}`);
+  console.log(`  assigned to pots   $${$(p.assignedCents)}`);
+  console.log(`  spent (Ryan)       $${$(p.spentCents)}`);
+  console.log(`  RTA before close   $${$(p.rtaBeforeCents)}`);
+  console.log(`  -> moves to savings $${$(p.movedToSavingsCents)}, RTA ends $0.00`);
+  console.log(`  Lilly owes total    $${$(p.lillyOwedCents)}`);
+  console.log(`  per-pot wireframe:`);
+  for (const l of p.pots) {
+    console.log(`    ${l.name} (${l.targetType}): spent $${$(l.spentCents)} / target $${$(l.targetCents)} -> next $${$(l.wireframeCents)}`);
+  }
+  if (rest.includes("--apply")) {
+    try {
+      applyClose(db, p);
+      console.log(`applied: close recorded for ${p.month}, ${p.nextMonth} targets wireframed.`);
+    } catch (e) {
+      console.error(`cannot apply: ${(e as Error).message}`);
+      process.exit(1);
+    }
+  } else {
+    console.log(`preview only; add --apply to record the close and wireframe ${p.nextMonth}.`);
+  }
 } else if (cmd === "serve") {
   await import("./server");
 } else {

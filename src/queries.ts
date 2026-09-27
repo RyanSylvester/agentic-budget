@@ -53,3 +53,22 @@ export function recentTransactions(db: Database, limit = 10) {
      GROUP BY t.id ORDER BY t.id DESC LIMIT ?`
   ).all(limit);
 }
+
+/** Ryan's confirmed inflows for a month, in cents (positive).
+ *  Transfers between his own accounts are never income. */
+export function monthInflows(db: Database, month: string): number {
+  const r = db.query(
+    `SELECT COALESCE(SUM(s.amount_cents), 0) AS inflow
+     FROM splits s JOIN transactions t ON t.id = s.transaction_id
+     WHERE substr(t.date, 1, 7) = ? AND t.status = 'confirmed'
+       AND t.is_transfer = 0
+       AND s.owner = 'ryan' AND s.amount_cents > 0`
+  ).get(month) as { inflow: number };
+  return r.inflow;
+}
+
+/** Sum of current pot targets: what is assigned for the month, in cents. */
+export function assignedTotal(db: Database): number {
+  const r = db.query(`SELECT COALESCE(SUM(target_cents), 0) AS a FROM pots`).get() as { a: number };
+  return r.a;
+}
