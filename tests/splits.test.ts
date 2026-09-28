@@ -26,11 +26,11 @@ describe("splits", () => {
     const db = await seed();
     // $3,340 rent, split evenly, housing pot
     await addTxn(db, "2026-09-01", -334000, -167000, 167000, 1);
-    expect(await monthSpend(db, "2026-09")).toBe(167000);
-    expect(await potSpend(db, 1, "2026-09")).toEqual({ userCents: 167000, sharedCents: 167000 });
+    expect(await monthSpend(db, 1, "2026-09")).toBe(167000);
+    expect(await potSpend(db, 1, 1, "2026-09")).toEqual({ userCents: 167000, sharedCents: 167000 });
     // unsplit grocery run still counts fully
     await addTxn(db, "2026-09-02", -8000, -8000, 0, 2);
-    expect(await monthSpend(db, "2026-09")).toBe(175000);
+    expect(await monthSpend(db, 1, "2026-09")).toBe(175000);
   });
 
   test("pending_review transactions don't count", async () => {
@@ -38,7 +38,7 @@ describe("splits", () => {
     await db.exec(`INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared) VALUES (1, '2026-09-03', 1, -50000, 't', 'manual', 'agent', 'pending_review', 'uncleared')`);
     const t = (await db.get<{ id: number }>("SELECT id FROM transactions"))!;
     await db.run("INSERT INTO splits (user_id, transaction_id, pot_id, owner, amount_cents) VALUES (1, ?, 1, 'user', -50000)", t.id);
-    expect(await monthSpend(db, "2026-09")).toBe(0);
+    expect(await monthSpend(db, 1, "2026-09")).toBe(0);
   });
 });
 
@@ -67,19 +67,19 @@ describe("settlements", () => {
     const db = await seed();
     await addTxn(db, "2026-09-01", -334000, -167000, 167000, 1); // rent split
     await addTxn(db, "2026-09-05", -9000, -4500, 4500, 2);       // groceries split
-    expect((await contactOwed(db, 1)).reduce((a, o) => a + o.owedCents, 0)).toBe(171500);
+    expect((await contactOwed(db, 1, 1)).reduce((a, o) => a + o.owedCents, 0)).toBe(171500);
 
     const summary = await applySettlement(db, 1, { contactId: 1, accountId: 1, amountCents: 200000, note: "Alex e-transfer" });
     expect(summary.allocations.map((a) => a.amountCents)).toEqual([167000, 4500]);
     expect(summary.leftoverCents).toBe(28500);
 
     // Buckets filled, credit recorded
-    expect(await contactOwed(db, 1)).toEqual([]);
-    expect(await contactCredit(db, 1)).toBe(28500);
+    expect(await contactOwed(db, 1, 1)).toEqual([]);
+    expect(await contactCredit(db, 1, 1)).toBe(28500);
 
     // The user's spend unchanged: the settlement is real money (reconcile sees it)
     // but invisible to their views.
-    expect(await monthSpend(db, "2026-09")).toBe(171500);
+    expect(await monthSpend(db, 1, "2026-09")).toBe(171500);
     const acct = (await db.get<{ t: number }>("SELECT COALESCE(SUM(amount_cents),0) AS t FROM transactions WHERE account_id = 1"))!;
     expect(acct.t).toBe(-334000 - 9000 + 200000);
   });
@@ -92,7 +92,7 @@ describe("uncertain review + transfers", () => {
     const t = (await db.get<{ id: number }>("SELECT id FROM transactions"))!;
     await db.run("INSERT INTO splits (user_id, transaction_id, owner, amount_cents) VALUES (1, ?, 'user', -190000)", t.id);
     await addTxn(db, "2026-09-02", -8000, -8000, 0, 2);
-    expect(await monthSpend(db, "2026-09")).toBe(8000);
+    expect(await monthSpend(db, 1, "2026-09")).toBe(8000);
     // ...but the money really moved, so the account balance includes it
     const acct = (await db.get<{ t: number }>("SELECT COALESCE(SUM(amount_cents),0) AS t FROM transactions WHERE account_id = 1"))!;
     expect(acct.t).toBe(-198000);
@@ -104,7 +104,7 @@ describe("uncertain review + transfers", () => {
     const t = (await db.get<{ id: number }>("SELECT id FROM transactions"))!;
     await db.run("INSERT INTO splits (user_id, transaction_id, owner, amount_cents) VALUES (1, ?, 'user', -2500)", t.id);
     // pending_review never counts toward spend
-    expect(await monthSpend(db, "2026-09")).toBe(0);
+    expect(await monthSpend(db, 1, "2026-09")).toBe(0);
     const row = (await db.get<{ review_reason: string }>("SELECT review_reason FROM transactions WHERE id = ?", t.id))!;
     expect(row.review_reason).toBe("unsure which pot");
   });

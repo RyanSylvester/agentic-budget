@@ -2,8 +2,9 @@
  *  (Bun: local CLI, local serve, tests) today, D1 (Cloudflare Worker) later.
  *  Async by construction and D1-shaped on purpose: `get`/`all`/`run` mirror
  *  D1's `first`/`all`/`run`, and there are deliberately no interactive
- *  transactions. With a single writer (one user, one agent), every write path
- *  runs as sequential awaits and the read-then-write logic is unchanged.
+ *  transactions. With a single writer per user (one agent plus the human
+ *  behind it), every write path runs as sequential awaits and the
+ *  read-then-write logic is unchanged.
  *
  *  This file is portable: it imports nothing, so the Worker entry can import
  *  the contract without pulling in bun:sqlite. */

@@ -17,8 +17,8 @@ export async function assignToPot(
 ): Promise<{ potId: number; month: string; cents: number }> {
   if (!validMonth(month)) throw new Error(`bad month "${month}"; expected YYYY-MM`);
   if (!Number.isInteger(cents) || cents < 0) throw new Error(`bad amount "${cents}"; expected a non-negative integer of cents`);
-  const potId = await resolvePotId(db, String(potIdOrName));
-  const pot = await db.get<{ hidden: number; name: string }>("SELECT hidden, name FROM pots WHERE id = ?", potId);
+  const potId = await resolvePotId(db, userId, String(potIdOrName));
+  const pot = await db.get<{ hidden: number; name: string }>("SELECT hidden, name FROM pots WHERE id = ? AND user_id = ?", potId, userId);
   if (pot!.hidden) throw new Error(`pot "${pot!.name}" is retired`);
   await db.run(
     `INSERT INTO assignments (user_id, month, pot_id, cents) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, month, pot_id) DO UPDATE SET cents = excluded.cents`,
@@ -31,7 +31,7 @@ export async function assignToPot(
 }
 
 /** What was assigned to one pot for a month (0 when nothing). */
-export async function assignedToPot(db: Db, month: string, potId: number): Promise<number> {
-  const r = await db.get<{ cents: number }>("SELECT cents FROM assignments WHERE month = ? AND pot_id = ?", month, potId);
+export async function assignedToPot(db: Db, userId: number, month: string, potId: number): Promise<number> {
+  const r = await db.get<{ cents: number }>("SELECT cents FROM assignments WHERE month = ? AND pot_id = ? AND user_id = ?", month, potId, userId);
   return r?.cents ?? 0;
 }

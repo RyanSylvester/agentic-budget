@@ -36,8 +36,8 @@ async function readJson(c: any): Promise<{ ok: boolean; body: any }> {
   }
 }
 
-async function txnExists(db: Db, id: number): Promise<boolean> {
-  return !!(await db.get("SELECT 1 FROM transactions WHERE id = ?", id));
+async function txnExists(db: Db, userId: number, id: number): Promise<boolean> {
+  return !!(await db.get("SELECT 1 FROM transactions WHERE id = ? AND user_id = ?", id, userId));
 }
 
 /** The acting identity's kind, for entered_by derivation: "agent" for the
@@ -59,6 +59,18 @@ async function requestUserId(c: any, db: Db, authed: boolean): Promise<number> {
   return row.id;
 }
 
+/** The acting user's id for read-only handlers. Same as requestUserId, but
+ *  returns 0 instead of throwing when no local user exists yet: every read
+ *  is user_id-scoped, so 0 matches nothing and a fresh local database
+ *  renders empty instead of 500ing. */
+async function requestReaderId(c: any, db: Db, authed: boolean): Promise<number> {
+  try {
+    return await requestUserId(c, db, authed);
+  } catch {
+    return 0;
+  }
+}
+
 /** Build the API app. getDb supplies the database per request; the Bun entry
  *  passes openDb, the Worker entry passes a D1-backed Db. opts.auth wires
  *  the session middleware and the /api/auth/* routes (Worker only); without
@@ -77,27 +89,33 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
 
   app.get("/api/overview", async (c) => {
     const db = await getDb();
+    const userId = await requestReaderId(c, db, authed);
     const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
-    const pending = (await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM transactions WHERE status = 'pending_review' AND voided = 0"))!;
+    const pending = (await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM transactions WHERE status = 'pending_review' AND voided = 0 AND user_id = ?", userId))!;
     return c.json({
       month,
-      confirmedSpendCents: await monthSpend(db, month),
+      confirmedSpendCents: await monthSpend(db, userId, month),
       pendingCount: pending.n,
-      recent: await recentTransactions(db, 10, month),
-      rtaCents: await rtaCents(db, month),
-      assignedCents: await assignedTotal(db, month),
+      recent: await recentTransactions(db, userId, 10, month),
+      rtaCents: await rtaCents(db, userId, month),
+      assignedCents: await assignedTotal(db, userId, month),
     });
   });
 
   app.get("/api/review", async (c) => {
     const db = await getDb();
+    const userId = await requestReaderId(c, db, authed);
     const transactions = await db.all(
       `SELECT t.id, t.date, t.description, t.amount_cents, t.source, t.status, t.review_reason,
               COALESCE((SELECT SUM(-s.amount_cents) FROM splits s
-                        WHERE s.transaction_id = t.id AND s.owner = 'contact' AND s.amount_cents < 0), 0) AS shared_cents,
+                        WHERE s.transaction_id = t.id AND s.owner = 'contact' AND s.amount_cents < 0 AND s.user_id = ?), 0) AS shared_cents,
               (SELECT c.name FROM splits s JOIN contacts c ON c.id = s.contact_id
-               WHERE s.transaction_id = t.id AND s.owner = 'contact' LIMIT 1) AS split_contact_name
-       FROM transactions t WHERE t.status = 'pending_review' AND t.voided = 0 ORDER BY t.id`
+               WHERE s.transaction_id = t.id AND s.owner = 'contact' AND s.user_id = ? AND c.user_id = ? LIMIT 1) AS split_contact_name
+       FROM transactions t WHERE t.status = 'pending_review' AND t.voided = 0 AND t.user_id = ? ORDER BY t.id`,
+      userId,
+      userId,
+      userId,
+      userId
     );
     return c.json({ transactions });
   });
@@ -105,57 +123,62 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
   /** Confirm a review item. Body may carry { potId } to recategorize at the same time. */
   app.post("/api/review/:id/confirm", async (c) => {
     const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
     const id = badId(c, "id");
     if (id === null) return c.json({ error: "bad transaction id" }, 400);
-    if (!(await txnExists(db, id))) return c.json({ error: `no transaction ${id}` }, 404);
+    if (!(await txnExists(db, userId, id))) return c.json({ error: `no transaction ${id}` }, 404);
     const { ok, body } = await readJson(c);
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
-    // Sequential awaits, not a transaction: the single writer is the only
-    // writer, so the read-then-write sequence cannot interleave.
+    // Sequential awaits, not a transaction: one writer per user (a single
+    // agent plus the human behind it), and every statement carries that
+    // user's user_id, so two users' sequences never touch the same rows.
     if (body?.potId !== undefined && body?.potId !== null) {
       const potId = Number(body.potId);
       if (!Number.isInteger(potId) || potId <= 0) throw new Error("bad potId");
-      if (!(await db.get("SELECT 1 FROM pots WHERE id = ?", potId))) throw new Error(`no pot ${potId}`);
-      await db.run("UPDATE splits SET pot_id = ? WHERE transaction_id = ?", potId, id);
+      if (!(await db.get("SELECT 1 FROM pots WHERE id = ? AND user_id = ?", potId, userId))) throw new Error(`no pot ${potId}`);
+      await db.run("UPDATE splits SET pot_id = ? WHERE transaction_id = ? AND user_id = ?", potId, id, userId);
     }
-    await db.run("UPDATE transactions SET status = 'confirmed' WHERE id = ?", id);
+    await db.run("UPDATE transactions SET status = 'confirmed' WHERE id = ? AND user_id = ?", id, userId);
     return c.json({ ok: true });
   });
 
   /** Recategorize a transaction to another pot. */
   app.post("/api/transactions/:id/recategorize", async (c) => {
     const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
     const id = badId(c, "id");
     if (id === null) return c.json({ error: "bad transaction id" }, 400);
-    if (!(await txnExists(db, id))) return c.json({ error: `no transaction ${id}` }, 404);
+    if (!(await txnExists(db, userId, id))) return c.json({ error: `no transaction ${id}` }, 404);
     const { ok, body } = await readJson(c);
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     const potId = Number(body?.potId);
     if (!Number.isInteger(potId) || potId <= 0) return c.json({ error: "potId required" }, 400);
-    if (!(await db.get("SELECT 1 FROM pots WHERE id = ?", potId))) return c.json({ error: `no pot ${potId}` }, 404);
-    await db.run("UPDATE splits SET pot_id = ? WHERE transaction_id = ?", potId, id);
+    if (!(await db.get("SELECT 1 FROM pots WHERE id = ? AND user_id = ?", potId, userId))) return c.json({ error: `no pot ${potId}` }, 404);
+    await db.run("UPDATE splits SET pot_id = ? WHERE transaction_id = ? AND user_id = ?", potId, id, userId);
     return c.json({ ok: true });
   });
 
   /** Soft-void a transaction: excluded from spend, inflows, and RTA, kept for audit. */
   app.post("/api/transactions/:id/void", async (c) => {
     const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
     const id = badId(c, "id");
     if (id === null) return c.json({ error: "bad transaction id" }, 400);
-    const row = await db.get<{ voided: number }>("SELECT voided FROM transactions WHERE id = ?", id);
+    const row = await db.get<{ voided: number }>("SELECT voided FROM transactions WHERE id = ? AND user_id = ?", id, userId);
     if (!row) return c.json({ error: `no transaction ${id}` }, 404);
-    await db.run("UPDATE transactions SET voided = 1 WHERE id = ?", id);
+    await db.run("UPDATE transactions SET voided = 1 WHERE id = ? AND user_id = ?", id, userId);
     return c.json({ ok: true, alreadyVoided: row.voided === 1 });
   });
 
   /** Assign dollars to a pot for a month. Body: { month: "YYYY-MM", potId, cents }. */
   app.post("/api/assign", async (c) => {
     const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
     const { ok, body } = await readJson(c);
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     const { month, potId, cents } = body ?? {};
     try {
-      const r = await assignToPot(db, await requestUserId(c, db, authed), month, potId, cents);
+      const r = await assignToPot(db, userId, month, potId, cents);
       return c.json({ ok: true, ...r });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
@@ -167,11 +190,12 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
    *  With dryRun the computed lines are returned without writing anything. */
   app.post("/api/assign/scaffold", async (c) => {
     const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
     const { ok, body } = await readJson(c);
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     const { month, strategy, dryRun } = body ?? {};
     try {
-      const lines = await scaffoldMonth(db, await requestUserId(c, db, authed), month, strategy as ScaffoldStrategy, dryRun === true);
+      const lines = await scaffoldMonth(db, userId, month, strategy as ScaffoldStrategy, dryRun === true);
       return c.json({ ok: true, month, strategy, lines });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
@@ -182,10 +206,11 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
    *  selects the month the contributions are derived for. */
   app.get("/api/sinking", async (c) => {
     const db = await getDb();
+    const userId = await requestReaderId(c, db, authed);
     const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
     if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
     const schedules = [];
-    for (const s of await listSchedules(db)) schedules.push((await sinkingStatus(db, s.potId, month))!);
+    for (const s of await listSchedules(db, userId)) schedules.push((await sinkingStatus(db, userId, s.potId, month))!);
     return c.json({ month, schedules });
   });
 
@@ -210,12 +235,13 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
   /** Mark the bill paid: roll the due month forward one cadence period. */
   app.post("/api/sinking/:id/paid", async (c) => {
     const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
     const id = badId(c, "id");
     if (id === null) return c.json({ error: "bad schedule id" }, 400);
-    const s = await getScheduleById(db, id);
+    const s = await getScheduleById(db, userId, id);
     if (!s) return c.json({ error: `no sinking schedule ${id}` }, 404);
     try {
-      const next = await markPaid(db, s.potId);
+      const next = await markPaid(db, userId, s.potId);
       return c.json({ ok: true, dueMonth: next.dueMonth });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
@@ -225,12 +251,13 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
   /** Delete a schedule. The pot and its history are untouched. */
   app.delete("/api/sinking/:id", async (c) => {
     const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
     const id = badId(c, "id");
     if (id === null) return c.json({ error: "bad schedule id" }, 400);
-    const s = await getScheduleById(db, id);
+    const s = await getScheduleById(db, userId, id);
     if (!s) return c.json({ error: `no sinking schedule ${id}` }, 404);
     try {
-      await removeSchedule(db, s.potId);
+      await removeSchedule(db, userId, s.potId);
       return c.json({ ok: true });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
@@ -240,24 +267,27 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
   /** Machine-readable ritual summary for the agent's weekly run. */
   app.get("/api/attention", async (c) => {
     const db = await getDb();
+    const userId = await requestReaderId(c, db, authed);
     const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
     if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
-    const pending = (await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM transactions WHERE status = 'pending_review' AND voided = 0"))!;
-    const accounts = await db.all<{ id: number; name: string }>("SELECT id, name FROM accounts ORDER BY id");
+    const pending = (await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM transactions WHERE status = 'pending_review' AND voided = 0 AND user_id = ?", userId))!;
+    const accounts = await db.all<{ id: number; name: string }>("SELECT id, name FROM accounts WHERE user_id = ? ORDER BY id", userId);
     const unreconciledAccounts = [];
     for (const a of accounts) {
       const last = await db.get<{ actual_balance_cents: number }>(
-        "SELECT actual_balance_cents FROM reconciliations WHERE account_id = ? ORDER BY id DESC LIMIT 1",
-        a.id
+        "SELECT actual_balance_cents FROM reconciliations WHERE account_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1",
+        a.id,
+        userId
       );
       const cleared = (await db.get<{ total: number }>(
-        "SELECT COALESCE(SUM(amount_cents), 0) AS total FROM transactions WHERE account_id = ? AND cleared IN ('cleared','reconciled') AND voided = 0",
-        a.id
+        "SELECT COALESCE(SUM(amount_cents), 0) AS total FROM transactions WHERE account_id = ? AND cleared IN ('cleared','reconciled') AND voided = 0 AND user_id = ?",
+        a.id,
+        userId
       ))!;
       const diffCents = cleared.total - (last?.actual_balance_cents ?? 0);
       if (diffCents !== 0) unreconciledAccounts.push({ id: a.id, name: a.name, diffCents });
     }
-    const owed = await contactOwed(db);
+    const owed = await contactOwed(db, userId);
     const byContact = new Map<number, { name: string; cents: number }>();
     for (const o of owed) {
       const e = byContact.get(o.contactId) ?? { name: o.contactName, cents: 0 };
@@ -272,33 +302,36 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
       month,
       pendingReviewCount: pending.n,
       unreconciledAccounts,
-      rtaCents: await rtaCents(db, month),
-      unsettledSharedCents: Math.max(0, sharedOwedCents - (await contactCredit(db))),
+      rtaCents: await rtaCents(db, userId, month),
+      unsettledSharedCents: Math.max(0, sharedOwedCents - (await contactCredit(db, userId))),
       sharedOwedBy,
     });
   });
 
-  const balanceOf = async (db: Db, accountId: number, clearedOnly: boolean): Promise<number> => {
+  const balanceOf = async (db: Db, userId: number, accountId: number, clearedOnly: boolean): Promise<number> => {
     const row = (await db.get<{ total: number }>(
-      `SELECT COALESCE(SUM(amount_cents), 0) AS total FROM transactions WHERE account_id = ? AND voided = 0${clearedOnly ? " AND cleared IN ('cleared','reconciled')" : ""}`,
-      accountId
+      `SELECT COALESCE(SUM(amount_cents), 0) AS total FROM transactions WHERE account_id = ? AND voided = 0 AND user_id = ?${clearedOnly ? " AND cleared IN ('cleared','reconciled')" : ""}`,
+      accountId,
+      userId
     ))!;
     return row.total;
   };
 
   app.get("/api/accounts", async (c) => {
     const db = await getDb();
-    const accounts = await db.all<any>("SELECT id, name, type, last4 FROM accounts ORDER BY id");
+    const userId = await requestReaderId(c, db, authed);
+    const accounts = await db.all<any>("SELECT id, name, type, last4 FROM accounts WHERE user_id = ? ORDER BY id", userId);
     const out = [];
     for (const a of accounts) {
       const last = await db.get<{ created_at: string }>(
-        "SELECT created_at FROM reconciliations WHERE account_id = ? ORDER BY id DESC LIMIT 1",
-        a.id
+        "SELECT created_at FROM reconciliations WHERE account_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1",
+        a.id,
+        userId
       );
       out.push({
         ...a,
-        workingBalanceCents: await balanceOf(db, a.id, false),
-        clearedBalanceCents: await balanceOf(db, a.id, true),
+        workingBalanceCents: await balanceOf(db, userId, a.id, false),
+        clearedBalanceCents: await balanceOf(db, userId, a.id, true),
         lastReconciledAt: last?.created_at ?? null,
       });
     }
@@ -310,21 +343,22 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
    *  Not balanced → returns the difference plus uncleared transactions to investigate. */
   app.post("/api/accounts/:id/reconcile", async (c) => {
     const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
     const accountId = badId(c, "id");
     if (accountId === null) return c.json({ error: "bad account id" }, 400);
-    if (!(await db.get("SELECT 1 FROM accounts WHERE id = ?", accountId))) return c.json({ error: `no account ${accountId}` }, 404);
+    if (!(await db.get("SELECT 1 FROM accounts WHERE id = ? AND user_id = ?", accountId, userId))) return c.json({ error: `no account ${accountId}` }, 404);
     const { ok, body } = await readJson(c);
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     const actualBalanceCents = Math.round(Number(body?.actualBalanceCents));
     if (!Number.isFinite(actualBalanceCents)) return c.json({ error: "actualBalanceCents required" }, 400);
-    const cleared = await balanceOf(db, accountId, true);
+    const cleared = await balanceOf(db, userId, accountId, true);
     const result = reconcile({ clearedBalanceCents: cleared, actualBalanceCents });
 
     if (result.balanced) {
-      await db.run("UPDATE transactions SET cleared = 'reconciled' WHERE account_id = ? AND cleared = 'cleared'", accountId);
+      await db.run("UPDATE transactions SET cleared = 'reconciled' WHERE account_id = ? AND cleared = 'cleared' AND user_id = ?", accountId, userId);
       await db.run(
         `INSERT INTO reconciliations (user_id, account_id, actual_balance_cents, budget_balance_cents, difference_cents) VALUES (?, ?, ?, ?, 0)`,
-        await requestUserId(c, db, authed),
+        userId,
         accountId,
         actualBalanceCents,
         cleared
@@ -333,8 +367,9 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     }
 
     const uncleared = await db.all<{ id: number; amount_cents: number }>(
-      "SELECT id, date, description, amount_cents FROM transactions WHERE account_id = ? AND cleared = 'uncleared' AND voided = 0 ORDER BY id",
-      accountId
+      "SELECT id, date, description, amount_cents FROM transactions WHERE account_id = ? AND cleared = 'uncleared' AND voided = 0 AND user_id = ? ORDER BY id",
+      accountId,
+      userId
     );
     return c.json({
       ...result,
@@ -347,9 +382,10 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
 
   app.post("/api/transactions/:id/clear", async (c) => {
     const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
     const id = badId(c, "id");
     if (id === null) return c.json({ error: "bad transaction id" }, 400);
-    await db.run("UPDATE transactions SET cleared = 'cleared' WHERE id = ? AND cleared = 'uncleared'", id);
+    await db.run("UPDATE transactions SET cleared = 'cleared' WHERE id = ? AND cleared = 'uncleared' AND user_id = ?", id, userId);
     return c.json({ ok: true });
   });
 
@@ -357,9 +393,10 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
    *  contact-share detail. Powers the Transactions page. */
   app.get("/api/transactions", async (c) => {
     const db = await getDb();
+    const userId = await requestReaderId(c, db, authed);
     const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
     if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
-    return c.json({ month, transactions: await listTransactions(db, month) });
+    return c.json({ month, transactions: await listTransactions(db, userId, month) });
   });
 
   /** Record a manually entered transaction. Body: { date, accountId, potId,
@@ -368,15 +405,16 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
    *  returns the existing id with duplicate: true (idempotent record). */
   app.post("/api/transactions", async (c) => {
     const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
     const { ok, body } = await readJson(c);
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     try {
       const b = body ?? {};
       if (b.externalId) {
-        const dup = await db.get<{ id: number }>("SELECT id FROM transactions WHERE external_id = ?", b.externalId);
+        const dup = await db.get<{ id: number }>("SELECT id FROM transactions WHERE external_id = ? AND user_id = ?", b.externalId, userId);
         if (dup) return c.json({ ok: true, id: dup.id, duplicate: true });
       }
-      const id = await createTransaction(db, await requestUserId(c, db, authed), { ...b, enteredBy: requestKind(c) });
+      const id = await createTransaction(db, userId, { ...b, enteredBy: requestKind(c) });
       return c.json({ ok: true, id });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
@@ -386,13 +424,14 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
   /** Replace a transaction's fields and splits. Same body shape as POST. */
   app.put("/api/transactions/:id", async (c) => {
     const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
     const id = badId(c, "id");
     if (id === null) return c.json({ error: "bad transaction id" }, 400);
-    if (!(await txnExists(db, id))) return c.json({ error: `no transaction ${id}` }, 404);
+    if (!(await txnExists(db, userId, id))) return c.json({ error: `no transaction ${id}` }, 404);
     const { ok, body } = await readJson(c);
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     try {
-      await updateTransaction(db, id, body ?? {});
+      await updateTransaction(db, userId, id, body ?? {});
       return c.json({ ok: true });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
@@ -403,34 +442,37 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
    *  and RTA math, kept for audit. Same semantics as the existing void route. */
   app.delete("/api/transactions/:id", async (c) => {
     const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
     const id = badId(c, "id");
     if (id === null) return c.json({ error: "bad transaction id" }, 400);
-    if (!(await txnExists(db, id))) return c.json({ error: `no transaction ${id}` }, 404);
-    await db.run("UPDATE transactions SET voided = 1 WHERE id = ?", id);
+    if (!(await txnExists(db, userId, id))) return c.json({ error: `no transaction ${id}` }, 404);
+    await db.run("UPDATE transactions SET voided = 1 WHERE id = ? AND user_id = ?", id, userId);
     return c.json({ ok: true });
   });
 
   app.get("/api/pots", async (c) => {
     const db = await getDb();
+    const userId = await requestReaderId(c, db, authed);
     const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
     // includeHidden=1 lets the CLI resolve retired pots by name (unhide).
     const includeHidden = c.req.query("includeHidden") === "1";
     const pots = await db.all<any>(
       `SELECT p.id, p.name, p.pot_group, p.target_type, p.target_cents, p.is_assignable, p.contact_id, p.share_pct,
               c.name AS contact_name
-       FROM pots p LEFT JOIN contacts c ON c.id = p.contact_id
-       ${includeHidden ? "" : "WHERE p.hidden = 0 "}ORDER BY p.id`
+       FROM pots p LEFT JOIN contacts c ON c.id = p.contact_id AND c.user_id = p.user_id
+       WHERE p.user_id = ? ${includeHidden ? "" : "AND p.hidden = 0 "}ORDER BY p.id`,
+      userId
     );
     const out = [];
     for (const p of pots) {
-      const { userCents, sharedCents } = await potSpend(db, p.id, month);
-      const sched = await sinkingStatus(db, p.id, month);
+      const { userCents, sharedCents } = await potSpend(db, userId, p.id, month);
+      const sched = await sinkingStatus(db, userId, p.id, month);
       out.push({
         id: p.id, name: p.name, group: p.pot_group, targetType: p.target_type, targetCents: p.target_cents,
         spentCents: userCents, sharedCents,
         contactId: p.contact_id, contactName: p.contact_name, sharePct: p.share_pct,
-        assignable: p.is_assignable === 1, assignedCents: await assignedToPot(db, month, p.id),
-        receivedCents: await potInflow(db, p.id, month),
+        assignable: p.is_assignable === 1, assignedCents: await assignedToPot(db, userId, month, p.id),
+        receivedCents: await potInflow(db, userId, p.id, month),
         sinking: sched ? {
           expectedCents: sched.expectedCents, dueMonth: sched.dueMonth, cadenceMonths: sched.cadenceMonths,
           contributionCents: sched.contributionCents, balanceCents: sched.balanceCents, state: sched.state,
@@ -439,7 +481,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     }
     return c.json({
       month,
-      rtaCents: await rtaCents(db, month),
+      rtaCents: await rtaCents(db, userId, month),
       pots: out,
     });
   });
@@ -447,10 +489,11 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
   /** Create a pot. Body: { name, group?, targetCents?, targetType?, contactId?, sharePct? }. */
   app.post("/api/pots", async (c) => {
     const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
     const { ok, body } = await readJson(c);
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     try {
-      const id = await createPot(db, await requestUserId(c, db, authed), body ?? {});
+      const id = await createPot(db, userId, body ?? {});
       return c.json({ ok: true, id });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
@@ -460,13 +503,14 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
   /** Update a pot's name, group, target, or share config. */
   app.put("/api/pots/:id", async (c) => {
     const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
     const id = badId(c, "id");
     if (id === null) return c.json({ error: "bad pot id" }, 400);
-    if (!(await potExists(db, id))) return c.json({ error: `no pot ${id}` }, 404);
+    if (!(await potExists(db, userId, id))) return c.json({ error: `no pot ${id}` }, 404);
     const { ok, body } = await readJson(c);
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     try {
-      await updatePot(db, id, body ?? {});
+      await updatePot(db, userId, id, body ?? {});
       return c.json({ ok: true });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
@@ -477,11 +521,12 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
    *  Uncategorized pot; nothing is destroyed. */
   app.delete("/api/pots/:id", async (c) => {
     const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
     const id = badId(c, "id");
     if (id === null) return c.json({ error: "bad pot id" }, 400);
-    if (!(await potExists(db, id))) return c.json({ error: `no pot ${id}` }, 404);
+    if (!(await potExists(db, userId, id))) return c.json({ error: `no pot ${id}` }, 404);
     try {
-      const summary = await deletePot(db, await requestUserId(c, db, authed), id);
+      const summary = await deletePot(db, userId, id);
       return c.json({ ok: true, ...summary });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
@@ -491,16 +536,18 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
   /** Every contact with what they owe, grouped by pot. Powers Sharing. */
   app.get("/api/contacts", async (c) => {
     const db = await getDb();
-    return c.json({ contacts: await contactBalances(db) });
+    const userId = await requestReaderId(c, db, authed);
+    return c.json({ contacts: await contactBalances(db, userId) });
   });
 
   /** Add a contact. Body: { name }. */
   app.post("/api/contacts", async (c) => {
     const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
     const { ok, body } = await readJson(c);
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     try {
-      const id = await createContact(db, await requestUserId(c, db, authed), body?.name);
+      const id = await createContact(db, userId, body?.name);
       return c.json({ ok: true, id });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
@@ -510,12 +557,13 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
   /** Rename a contact. Body: { name }. */
   app.put("/api/contacts/:id", async (c) => {
     const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
     const id = badId(c, "id");
     if (id === null) return c.json({ error: "bad contact id" }, 400);
     const { ok, body } = await readJson(c);
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     try {
-      await renameContact(db, id, body?.name);
+      await renameContact(db, userId, id, body?.name);
       return c.json({ ok: true });
     } catch (e) {
       const msg = (e as Error).message;
@@ -526,10 +574,11 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
   /** Delete a contact. Blocked while pots or splits reference them. */
   app.delete("/api/contacts/:id", async (c) => {
     const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
     const id = badId(c, "id");
     if (id === null) return c.json({ error: "bad contact id" }, 400);
     try {
-      await deleteContact(db, id);
+      await deleteContact(db, userId, id);
       return c.json({ ok: true });
     } catch (e) {
       const msg = (e as Error).message;
@@ -539,26 +588,29 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
 
   app.get("/api/trend", async (c) => {
     const db = await getDb();
-    return c.json({ trend: await spendTrend(db) });
+    const userId = await requestReaderId(c, db, authed);
+    return c.json({ trend: await spendTrend(db, userId) });
   });
 
   /** One pot's spend per month, oldest first. Drives the per-pot history chart. */
   app.get("/api/pot-history", async (c) => {
     const db = await getDb();
+    const userId = await requestReaderId(c, db, authed);
     const parsed = parseHistoryQuery({ potId: c.req.query("potId"), months: c.req.query("months") });
     if ("error" in parsed) return c.json({ error: parsed.error }, 400);
-    const pot = await db.get("SELECT id FROM pots WHERE id = ? AND hidden = 0", parsed.potId);
+    const pot = await db.get("SELECT id FROM pots WHERE id = ? AND hidden = 0 AND user_id = ?", parsed.potId, userId);
     if (!pot) return c.json({ error: `no pot ${parsed.potId}` }, 404);
-    return c.json({ potId: parsed.potId, history: await potHistory(db, parsed.potId, parsed.months) });
+    return c.json({ potId: parsed.potId, history: await potHistory(db, userId, parsed.potId, parsed.months) });
   });
 
   /** Read-only month-end close preview. The agent applies the close after
    *  the user's review; this endpoint never writes. */
   app.get("/api/close-preview", async (c) => {
     const db = await getDb();
+    const userId = await requestReaderId(c, db, authed);
     const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
     if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
-    return c.json(await closePreview(db, month));
+    return c.json(await closePreview(db, userId, month));
   });
 
   /** Apply the month-end close. Body: { month: "YYYY-MM" }. The $0 rule binds
@@ -566,12 +618,13 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
    *  be closed. Human review happens before the agent runs this. */
   app.post("/api/close", async (c) => {
     const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
     const { ok, body } = await readJson(c);
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     const month = body?.month ?? new Date().toISOString().slice(0, 7);
     if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
     try {
-      await applyClose(db, await requestUserId(c, db, authed), await closePreview(db, month));
+      await applyClose(db, userId, await closePreview(db, userId, month));
       return c.json({ ok: true, month });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
@@ -582,6 +635,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
   // Body: { contactId, accountId, amountCents, note? }.
   app.post("/api/settle", async (c) => {
     const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
     const { ok, body } = await readJson(c);
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     const amountCents = Math.round(Number(body?.amountCents));
@@ -589,9 +643,9 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const contactId = Number(body?.contactId);
     if (!accountId || !amountCents || amountCents <= 0) return c.json({ error: "accountId and positive amountCents required" }, 400);
     if (!contactId) return c.json({ error: "contactId required" }, 400);
-    if (!(await db.get("SELECT 1 FROM accounts WHERE id = ?", accountId))) return c.json({ error: `no account ${accountId}` }, 404);
+    if (!(await db.get("SELECT 1 FROM accounts WHERE id = ? AND user_id = ?", accountId, userId))) return c.json({ error: `no account ${accountId}` }, 404);
     try {
-      const summary = await applySettlement(db, await requestUserId(c, db, authed), { contactId, accountId, amountCents, note: body?.note, enteredBy: requestKind(c) });
+      const summary = await applySettlement(db, userId, { contactId, accountId, amountCents, note: body?.note, enteredBy: requestKind(c) });
       return c.json(summary);
     } catch (e) {
       const msg = (e as Error).message;

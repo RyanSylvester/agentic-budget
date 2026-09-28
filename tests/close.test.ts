@@ -68,13 +68,13 @@ describe("closePreview / applyClose (live data)", () => {
     const db = await seedClose();
     await assignToPot(db, 1, "2026-09", 1, 300000); // Housing
     await assignToPot(db, 1, "2026-09", 2, 120000); // Groceries
-    const p = await closePreview(db, "2026-09");
+    const p = await closePreview(db, 1, "2026-09");
     expect(p.inflowsCents).toBe(500000);
     expect(p.spentCents).toBe(440000);
     expect(p.assignedCents).toBe(420000);
-    expect(await assignedTotal(db, "2026-09")).toBe(420000);
+    expect(await assignedTotal(db, 1, "2026-09")).toBe(420000);
     expect(p.rtaBeforeCents).toBe(80000);
-    expect(await rtaCents(db, "2026-09")).toBe(80000);
+    expect(await rtaCents(db, 1, "2026-09")).toBe(80000);
     expect(p.movedToSavingsCents).toBe(80000);
     const housing = p.pots.find((l) => l.name === "Housing")!;
     expect(housing.historyCents).toEqual([300000, 300000, 300000]);
@@ -90,9 +90,9 @@ describe("closePreview / applyClose (live data)", () => {
   test("assign upserts idempotently and rejects bad input", async () => {
     const db = await seedClose();
     await assignToPot(db, 1, "2026-09", 1, 300000);
-    expect(await assignedTotal(db, "2026-09")).toBe(300000);
+    expect(await assignedTotal(db, 1, "2026-09")).toBe(300000);
     await assignToPot(db, 1, "2026-09", "Housing", 250000); // by name, overwrite
-    expect(await assignedTotal(db, "2026-09")).toBe(250000);
+    expect(await assignedTotal(db, 1, "2026-09")).toBe(250000);
     await expect(assignToPot(db, 1, "2026-9", 1, 100)).rejects.toThrow("bad month");
     await expect(assignToPot(db, 1, "2026-09", 1, -100)).rejects.toThrow("bad amount");
     await expect(assignToPot(db, 1, "2026-09", 999, 100)).rejects.toThrow("no pot");
@@ -101,7 +101,7 @@ describe("closePreview / applyClose (live data)", () => {
   test("apply refuses when RTA is not zero", async () => {
     const db = await seedClose();
     await assignToPot(db, 1, "2026-09", 1, 300000); // partial: RTA = 200000
-    const p = await closePreview(db, "2026-09");
+    const p = await closePreview(db, 1, "2026-09");
     expect(p.rtaBeforeCents).toBe(200000);
     await expect(applyClose(db, 1, p)).rejects.toThrow("RTA is $2000.00; the close applies at month-end once every dollar is assigned");
     // nothing was written: the close is all-or-nothing
@@ -113,7 +113,7 @@ describe("closePreview / applyClose (live data)", () => {
     await assignToPot(db, 1, "2026-09", 1, 300000); // Housing
     await assignToPot(db, 1, "2026-09", 2, 120000); // Groceries
     await assignToPot(db, 1, "2026-09", 3, 80000);  // TFSA: every dollar assigned, RTA = 0
-    const p = await closePreview(db, "2026-09");
+    const p = await closePreview(db, 1, "2026-09");
     expect(p.rtaBeforeCents).toBe(0);
     await applyClose(db, 1, p);
     const row = await db.get(`SELECT rta_start_cents, rta_end_cents, moved_to_savings_cents FROM month_closes WHERE month = '2026-09'`) as any;
@@ -133,7 +133,7 @@ describe("closePreview / applyClose (live data)", () => {
     await db.exec(`INSERT INTO pots (user_id, name, pot_group, target_type, is_assignable) VALUES (1, 'Payroll','Income','fixed',0)`);
     const r = await assignToPot(db, 1, "2026-09", "Payroll", 500000);
     expect(r.cents).toBe(500000);
-    const p = await closePreview(db, "2026-09");
+    const p = await closePreview(db, 1, "2026-09");
     const payroll = p.pots.find((l) => l.name === "Payroll")!;
     expect(payroll.assignable).toBe(false);
     expect(payroll.wireframeCents).toBe(0);
@@ -163,11 +163,11 @@ describe("close card equation", () => {
       "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared) VALUES (1, '2026-09-01', 1, 500000, 't', 'manual', 'agent', 'confirmed', 'cleared') RETURNING id"
     ))!;
     await db.run("INSERT INTO splits (user_id, transaction_id, pot_id, owner, amount_cents) VALUES (1, ?, 1, 'user', 500000)", t.id);
-    expect((await closePreview(db, "2026-09")).closed).toBe(false);
+    expect((await closePreview(db, 1, "2026-09")).closed).toBe(false);
     await assignToPot(db, 1, "2026-09", 1, 500000); // every dollar assigned: RTA = 0
-    await applyClose(db, 1, await closePreview(db, "2026-09"));
-    expect((await closePreview(db, "2026-09")).closed).toBe(true);
+    await applyClose(db, 1, await closePreview(db, 1, "2026-09"));
+    expect((await closePreview(db, 1, "2026-09")).closed).toBe(true);
     // other months stay open
-    expect((await closePreview(db, "2026-08")).closed).toBe(false);
+    expect((await closePreview(db, 1, "2026-08")).closed).toBe(false);
   });
 });

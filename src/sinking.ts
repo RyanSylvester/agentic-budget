@@ -41,27 +41,28 @@ const ROW = `SELECT s.id, s.pot_id AS potId, p.name AS potName,
 
 /** The schedule for one pot, or null. Null when the table does not exist yet
  *  (hand-built test databases that never ran migrations behave as unscheduled). */
-export async function getSchedule(db: Db, potId: number): Promise<SinkingSchedule | null> {
+export async function getSchedule(db: Db, userId: number, potId: number): Promise<SinkingSchedule | null> {
   if (!(await tableExists(db, "sinking_schedules"))) return null;
-  return db.get<SinkingSchedule>(`${ROW} WHERE s.pot_id = ?`, potId);
+  return db.get<SinkingSchedule>(`${ROW} WHERE s.pot_id = ? AND s.user_id = ? AND p.user_id = ?`, potId, userId, userId);
 }
 
 /** The schedule by its own id, or null. */
-export async function getScheduleById(db: Db, id: number): Promise<SinkingSchedule | null> {
-  return db.get<SinkingSchedule>(`${ROW} WHERE s.id = ?`, id);
+export async function getScheduleById(db: Db, userId: number, id: number): Promise<SinkingSchedule | null> {
+  return db.get<SinkingSchedule>(`${ROW} WHERE s.id = ? AND s.user_id = ? AND p.user_id = ?`, id, userId, userId);
 }
 
 /** Every schedule, ordered by due month. */
-export async function listSchedules(db: Db): Promise<SinkingSchedule[]> {
+export async function listSchedules(db: Db, userId: number): Promise<SinkingSchedule[]> {
   if (!(await tableExists(db, "sinking_schedules"))) return [];
-  return db.all<SinkingSchedule>(`${ROW} ORDER BY s.due_month, p.name`);
+  return db.all<SinkingSchedule>(`${ROW} WHERE s.user_id = ? AND p.user_id = ? ORDER BY s.due_month, p.name`, userId, userId);
 }
 
-async function needScheduleTarget(db: Db, potRef: string | number): Promise<{ potId: number; name: string }> {
-  const potId = await resolvePotId(db, String(potRef));
+async function needScheduleTarget(db: Db, userId: number, potRef: string | number): Promise<{ potId: number; name: string }> {
+  const potId = await resolvePotId(db, userId, String(potRef));
   const pot = (await db.get<{ name: string; hidden: number; is_assignable: number }>(
-    "SELECT name, hidden, is_assignable FROM pots WHERE id = ?",
-    potId
+    "SELECT name, hidden, is_assignable FROM pots WHERE id = ? AND user_id = ?",
+    potId,
+    userId
   ))!;
   if (pot.hidden) throw new Error(`pot "${pot.name}" is retired`);
   if (!pot.is_assignable) throw new Error(`"${pot.name}" is an income pot; sinking schedules are for spending pots`);
@@ -78,7 +79,7 @@ export async function createSchedule(
   dueMonth: string,
   cadenceMonths = 12
 ): Promise<SinkingSchedule> {
-  const { potId, name } = await needScheduleTarget(db, potRef);
+  const { potId, name } = await needScheduleTarget(db, userId, potRef);
   if (!Number.isInteger(expectedCents) || expectedCents <= 0) {
     throw new Error(`bad expected amount "${expectedCents}"; expected a positive integer of cents`);
   }
@@ -86,7 +87,7 @@ export async function createSchedule(
   if (!Number.isInteger(cadenceMonths) || cadenceMonths <= 0) {
     throw new Error(`bad cadence "${cadenceMonths}"; expected a positive integer of months`);
   }
-  if (await getSchedule(db, potId)) throw new Error(`"${name}" already has a sinking schedule (remove it first to replace it)`);
+  if (await getSchedule(db, userId, potId)) throw new Error(`"${name}" already has a sinking schedule (remove it first to replace it)`);
   await db.get<{ id: number }>(
     `INSERT INTO sinking_schedules (user_id, pot_id, expected_cents, due_month, cadence_months) VALUES (?, ?, ?, ?, ?) RETURNING id`,
     userId,
@@ -95,44 +96,48 @@ export async function createSchedule(
     dueMonth,
     cadenceMonths
   );
-  return (await getSchedule(db, potId))!;
+  return (await getSchedule(db, userId, potId))!;
 }
 
 /** Delete a pot's schedule. The pot and its history are untouched. */
-export async function removeSchedule(db: Db, potRef: string | number): Promise<void> {
-  const { potId, name } = await needScheduleTarget(db, potRef);
-  const r = await db.run("DELETE FROM sinking_schedules WHERE pot_id = ?", potId);
+export async function removeSchedule(db: Db, userId: number, potRef: string | number): Promise<void> {
+  const { potId, name } = await needScheduleTarget(db, userId, potRef);
+  const r = await db.run("DELETE FROM sinking_schedules WHERE pot_id = ? AND user_id = ?", potId, userId);
   if (r.changes === 0) throw new Error(`"${name}" has no sinking schedule`);
 }
 
 /** Mark the bill paid: roll the due month forward one cadence period.
  *  The payment drained the balance, so contributions rebuild toward the
  *  next bill automatically. */
-export async function markPaid(db: Db, potRef: string | number): Promise<SinkingSchedule> {
-  const { potId, name } = await needScheduleTarget(db, potRef);
-  const s = await getSchedule(db, potId);
+export async function markPaid(db: Db, userId: number, potRef: string | number): Promise<SinkingSchedule> {
+  const { potId, name } = await needScheduleTarget(db, userId, potRef);
+  const s = await getSchedule(db, userId, potId);
   if (!s) throw new Error(`"${name}" has no sinking schedule`);
   const next = shiftMonth(s.dueMonth, s.cadenceMonths);
-  await db.run("UPDATE sinking_schedules SET due_month = ? WHERE pot_id = ?", next, potId);
-  return (await getSchedule(db, potId))!;
+  await db.run("UPDATE sinking_schedules SET due_month = ? WHERE pot_id = ? AND user_id = ?", next, potId, userId);
+  return (await getSchedule(db, userId, potId))!;
 }
 
 /** Saved so far for a pot as of a month: everything assigned up to and
  *  including `month`, minus the user's confirmed spend up to `month`. */
-export async function potBalance(db: Db, potId: number, month: string): Promise<number> {
+export async function potBalance(db: Db, userId: number, potId: number, month: string): Promise<number> {
   const a = (await db.get<{ t: number }>(
-    "SELECT COALESCE(SUM(cents), 0) AS t FROM assignments WHERE pot_id = ? AND month <= ?",
+    "SELECT COALESCE(SUM(cents), 0) AS t FROM assignments WHERE pot_id = ? AND month <= ? AND user_id = ?",
     potId,
-    month
+    month,
+    userId
   ))!;
   const s = (await db.get<{ t: number }>(
     `SELECT COALESCE(SUM(-s.amount_cents), 0) AS t
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
      WHERE s.pot_id = ? AND substr(t.date, 1, 7) <= ?
        AND t.status = 'confirmed' AND t.is_transfer = 0 AND t.voided = 0
-       AND s.owner = 'user' AND s.amount_cents < 0`,
+       AND s.owner = 'user' AND s.amount_cents < 0
+       AND s.user_id = ? AND t.user_id = ?`,
     potId,
-    month
+    month,
+    userId,
+    userId
   ))!;
   return a.t - s.t;
 }
@@ -147,11 +152,11 @@ export function monthsUntil(from: string, due: string): number {
 
 /** The derived schedule state for a pot in a month. Null when the pot has
  *  no schedule. */
-export async function sinkingStatus(db: Db, potId: number, month: string): Promise<SinkingStatus | null> {
-  const s = await getSchedule(db, potId);
+export async function sinkingStatus(db: Db, userId: number, potId: number, month: string): Promise<SinkingStatus | null> {
+  const s = await getSchedule(db, userId, potId);
   if (!s) return null;
   if (!validMonth(month)) throw new Error(`bad month "${month}"; expected YYYY-MM`);
-  const balanceCents = await potBalance(db, potId, month);
+  const balanceCents = await potBalance(db, userId, potId, month);
   const remainingCents = Math.max(0, s.expectedCents - balanceCents);
   const monthsLeft = monthsUntil(month, s.dueMonth);
   const contributionCents = remainingCents === 0 ? 0 : Math.ceil(remainingCents / monthsLeft);

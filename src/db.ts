@@ -74,8 +74,8 @@ export async function openDb(path: string = DB_PATH): Promise<Db> {
   return db;
 }
 
-/** Read an app setting. Returns null when unset. */
-export async function getSetting(db: Db, key: string): Promise<string | null> {
-  const r = await db.get<{ value: string }>("SELECT value FROM settings WHERE key = ?", key);
+/** Read a user's app setting. Returns null when unset. */
+export async function getSetting(db: Db, userId: number, key: string): Promise<string | null> {
+  const r = await db.get<{ value: string }>("SELECT value FROM settings WHERE user_id = ? AND key = ?", userId, key);
   return r?.value ?? null;
 }

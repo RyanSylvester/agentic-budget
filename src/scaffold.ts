@@ -26,7 +26,8 @@ export interface ScaffoldLine {
 
 /** Compute (and, unless dryRun, write) one month's scaffolded assignments for
  *  a user. Throws on a bad month or an unknown strategy. Sequential awaits,
- *  not a transaction: the single writer is the only writer. */
+ *  not a transaction: one writer per user (a single agent plus the human
+ *  behind it), and every statement carries that user's user_id. */
 export async function scaffoldMonth(
   db: Db,
   userId: number,
@@ -39,7 +40,8 @@ export async function scaffoldMonth(
     throw new Error(`bad strategy "${strategy}"; expected one of ${SCAFFOLD_STRATEGIES.join(", ")}`);
   }
   const pots = await db.all<{ id: number; name: string; is_assignable: number }>(
-    `SELECT id, name, is_assignable FROM pots WHERE hidden = 0 ORDER BY id`
+    `SELECT id, name, is_assignable FROM pots WHERE hidden = 0 AND user_id = ? ORDER BY id`,
+    userId
   );
 
   const lines: ScaffoldLine[] = [];
@@ -49,18 +51,18 @@ export async function scaffoldMonth(
     let scheduled = false;
     if (income) {
       // Income pots hold planned income: carry last month's plan forward.
-      cents = await assignedToPot(db, shiftMonth(month, -1), p.id);
+      cents = await assignedToPot(db, userId, shiftMonth(month, -1), p.id);
     } else {
       // A sinking schedule takes precedence over the history strategies.
-      const sched = await sinkingStatus(db, p.id, month);
+      const sched = await sinkingStatus(db, userId, p.id, month);
       if (sched) {
         cents = sched.contributionCents;
         scheduled = true;
       } else if (strategy === "last_month") {
-        cents = await assignedToPot(db, shiftMonth(month, -1), p.id);
+        cents = await assignedToPot(db, userId, shiftMonth(month, -1), p.id);
       } else {
         const hist: number[] = [];
-        for (const i of [1, 2, 3]) hist.push(await assignedToPot(db, shiftMonth(month, -i), p.id));
+        for (const i of [1, 2, 3]) hist.push(await assignedToPot(db, userId, shiftMonth(month, -i), p.id));
         cents = Math.round(hist.reduce((a, b) => a + b, 0) / hist.length);
       }
     }

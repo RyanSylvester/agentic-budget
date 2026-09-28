@@ -20,7 +20,7 @@ describe("planned income on income pots", () => {
     const db = await seed();
     const r = await assignToPot(db, 1, "2026-09", "Paycheck", 500000);
     expect(r.cents).toBe(500000);
-    expect(await assignedToPot(db, "2026-09", r.potId)).toBe(500000);
+    expect(await assignedToPot(db, 1, "2026-09", r.potId)).toBe(500000);
   });
 
   test("planned income is excluded from assignedTotal", async () => {
@@ -28,7 +28,7 @@ describe("planned income on income pots", () => {
     await assignToPot(db, 1, "2026-09", "Groceries", 60000);
     await assignToPot(db, 1, "2026-09", "Paycheck", 500000);
     await assignToPot(db, 1, "2026-09", "Interest", 1200);
-    expect(await assignedTotal(db, "2026-09")).toBe(60000);
+    expect(await assignedTotal(db, 1, "2026-09")).toBe(60000);
   });
 
   test("planned income does not change RTA; only actual inflows and spending assignments do", async () => {
@@ -37,17 +37,17 @@ describe("planned income on income pots", () => {
     await assignToPot(db, 1, "2026-09", "Groceries", 60000);
     await createTransaction(db, 1, { date: "2026-09-15", accountId: 1, potId: 2, amountCents: 500000, description: "Pay" });
     // RTA = actual inflows - spending-pot assignments; the 520000 planned is ignored.
-    expect(await rtaCents(db, "2026-09")).toBe(500000 - 60000);
+    expect(await rtaCents(db, 1, "2026-09")).toBe(500000 - 60000);
   });
 
   test("potInflow reports what actually landed per income pot", async () => {
     const db = await seed();
     await createTransaction(db, 1, { date: "2026-09-15", accountId: 1, potId: 2, amountCents: 500000, description: "Pay" });
     await createTransaction(db, 1, { date: "2026-09-20", accountId: 1, potId: 3, amountCents: 1200, description: "Interest" });
-    expect(await potInflow(db, 2, "2026-09")).toBe(500000);
-    expect(await potInflow(db, 3, "2026-09")).toBe(1200);
-    expect(await potInflow(db, 1, "2026-09")).toBe(0);
-    expect(await potInflow(db, 2, "2026-08")).toBe(0);
+    expect(await potInflow(db, 1, 2, "2026-09")).toBe(500000);
+    expect(await potInflow(db, 1, 3, "2026-09")).toBe(1200);
+    expect(await potInflow(db, 1, 1, "2026-09")).toBe(0);
+    expect(await potInflow(db, 1, 2, "2026-08")).toBe(0);
   });
 
   test("hidden pots are still rejected", async () => {

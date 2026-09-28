@@ -50,6 +50,7 @@ function needTargetCents(c: unknown): number {
 
 async function needShare(
   db: Db,
+  userId: number,
   contactId: unknown,
   sharePct: unknown
 ): Promise<{ contactId: number | null; sharePct: number | null }> {
@@ -59,15 +60,15 @@ async function needShare(
   }
   const cid = Number(contactId);
   if (!Number.isInteger(cid) || cid <= 0) throw new Error("bad contactId");
-  if (!(await db.get("SELECT 1 FROM contacts WHERE id = ?", cid))) throw new Error(`no contact ${cid}`);
+  if (!(await db.get("SELECT 1 FROM contacts WHERE id = ? AND user_id = ?", cid, userId))) throw new Error(`no contact ${cid}`);
   if (sharePct == null) return { contactId: cid, sharePct: 50 };
   const pct = Number(sharePct);
   if (!Number.isInteger(pct) || pct < 0 || pct > 100) throw new Error("sharePct must be an integer from 0 to 100");
   return { contactId: cid, sharePct: pct };
 }
 
-export async function potExists(db: Db, id: number): Promise<boolean> {
-  return !!(await db.get("SELECT 1 FROM pots WHERE id = ?", id));
+export async function potExists(db: Db, userId: number, id: number): Promise<boolean> {
+  return !!(await db.get("SELECT 1 FROM pots WHERE id = ? AND user_id = ?", id, userId));
 }
 
 /** Income-group pots receive money; assignments to them mean planned income
@@ -82,7 +83,7 @@ export async function createPot(db: Db, userId: number, input: PotInput): Promis
   const group = needGroup(input.group ?? "Life");
   const targetType = needTargetType(input.targetType);
   const targetCents = needTargetCents(input.targetCents);
-  const share = await needShare(db, input.contactId, input.sharePct);
+  const share = await needShare(db, userId, input.contactId, input.sharePct);
   const row = await db.get<{ id: number }>(
     `INSERT INTO pots (user_id, name, pot_group, target_type, target_cents, is_assignable, contact_id, share_pct) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
     userId,
@@ -98,8 +99,8 @@ export async function createPot(db: Db, userId: number, input: PotInput): Promis
 }
 
 /** Update a pot's name, group, target, or share config. */
-export async function updatePot(db: Db, id: number, input: PotInput): Promise<void> {
-  if (!(await potExists(db, id))) throw new Error(`no pot ${id}`);
+export async function updatePot(db: Db, userId: number, id: number, input: PotInput): Promise<void> {
+  if (!(await potExists(db, userId, id))) throw new Error(`no pot ${id}`);
   const sets: string[] = [];
   const params: DbValue[] = [];
   if (input.name !== undefined) {
@@ -130,14 +131,16 @@ export async function updatePot(db: Db, id: number, input: PotInput): Promise<vo
   }
   if (input.contactId !== undefined || input.sharePct !== undefined) {
     const cur = (await db.get<{ contact_id: number | null; share_pct: number | null }>(
-      "SELECT contact_id, share_pct FROM pots WHERE id = ?",
-      id
+      "SELECT contact_id, share_pct FROM pots WHERE id = ? AND user_id = ?",
+      id,
+      userId
     ))!;
     // Explicitly unsharing (contactId: null) clears the old percent too;
     // otherwise the carried-over share_pct would fail validation.
     const pct = input.sharePct !== undefined ? input.sharePct : input.contactId === null ? null : cur.share_pct;
     const share = await needShare(
       db,
+      userId,
       input.contactId !== undefined ? input.contactId : cur.contact_id,
       pct
     );
@@ -145,7 +148,7 @@ export async function updatePot(db: Db, id: number, input: PotInput): Promise<vo
     params.push(share.contactId, share.sharePct);
   }
   if (sets.length === 0) return;
-  await db.run(`UPDATE pots SET ${sets.join(", ")} WHERE id = ?`, ...params, id);
+  await db.run(`UPDATE pots SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`, ...params, id, userId);
 }
 
 export interface PotDeleteSummary {
@@ -166,16 +169,19 @@ export async function uncategorizedPotId(db: Db, userId: number): Promise<number
 }
 
 /** Delete a pot, moving its history to the user's Uncategorized pot. Never destroys data.
- *  Sequential awaits, not a transaction: the single writer is the only
- *  writer, so the read-then-write sequence cannot interleave. */
+ *  Sequential awaits, not a transaction: one writer per user (a single agent
+ *  plus the human behind it), and every statement is scoped to that user's
+ *  user_id, so two users' sequences never touch the same rows. D1 serializes
+ *  concurrent writes on its primary; a second tab of the same user could
+ *  already interleave before multi-user, and that has not changed. */
 export async function deletePot(db: Db, userId: number, id: number): Promise<PotDeleteSummary> {
-  const pot = await db.get<{ id: number; name: string }>("SELECT id, name FROM pots WHERE id = ?", id);
+  const pot = await db.get<{ id: number; name: string }>("SELECT id, name FROM pots WHERE id = ? AND user_id = ?", id, userId);
   if (!pot) throw new Error(`no pot ${id}`);
   const uncat = await uncategorizedPotId(db, userId);
   if (uncat === id) throw new Error("the Uncategorized pot cannot be deleted");
-  const txns = await db.run("UPDATE transactions SET pot_id = ? WHERE pot_id = ?", uncat, id);
-  await db.run("UPDATE splits SET pot_id = ? WHERE pot_id = ?", uncat, id);
-  const rows = await db.all<{ month: string; cents: number }>("SELECT month, cents FROM assignments WHERE pot_id = ?", id);
+  const txns = await db.run("UPDATE transactions SET pot_id = ? WHERE pot_id = ? AND user_id = ?", uncat, id, userId);
+  await db.run("UPDATE splits SET pot_id = ? WHERE pot_id = ? AND user_id = ?", uncat, id, userId);
+  const rows = await db.all<{ month: string; cents: number }>("SELECT month, cents FROM assignments WHERE pot_id = ? AND user_id = ?", id, userId);
   for (const r of rows) {
     await db.run(
       `INSERT INTO assignments (user_id, month, pot_id, cents) VALUES (?, ?, ?, ?)
@@ -186,12 +192,12 @@ export async function deletePot(db: Db, userId: number, id: number): Promise<Pot
       r.cents
     );
   }
-  await db.run("DELETE FROM assignments WHERE pot_id = ?", id);
+  await db.run("DELETE FROM assignments WHERE pot_id = ? AND user_id = ?", id, userId);
   // A sinking schedule is configuration, not history: it goes with the pot.
   // (Guarded for hand-built databases that never ran migrations.)
   if (await tableExists(db, "sinking_schedules")) {
-    await db.run("DELETE FROM sinking_schedules WHERE pot_id = ?", id);
+    await db.run("DELETE FROM sinking_schedules WHERE pot_id = ? AND user_id = ?", id, userId);
   }
-  await db.run("DELETE FROM pots WHERE id = ?", id);
+  await db.run("DELETE FROM pots WHERE id = ? AND user_id = ?", id, userId);
   return { uncategorizedPotId: uncat, movedTransactions: txns.changes, movedAssignments: rows.length };
 }

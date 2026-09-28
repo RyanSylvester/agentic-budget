@@ -28,17 +28,17 @@ export interface TransactionInput {
   enteredBy?: "agent" | "user";
 }
 
-async function needAccount(db: Db, accountId: unknown): Promise<number> {
+async function needAccount(db: Db, userId: number, accountId: unknown): Promise<number> {
   const n = Number(accountId);
   if (!Number.isInteger(n) || n <= 0) throw new Error("accountId required");
-  if (!(await db.get("SELECT 1 FROM accounts WHERE id = ?", n))) throw new Error(`no account ${n}`);
+  if (!(await db.get("SELECT 1 FROM accounts WHERE id = ? AND user_id = ?", n, userId))) throw new Error(`no account ${n}`);
   return n;
 }
 
-async function needPot(db: Db, potId: unknown): Promise<number> {
+async function needPot(db: Db, userId: number, potId: unknown): Promise<number> {
   const n = Number(potId);
   if (!Number.isInteger(n) || n <= 0) throw new Error("potId required");
-  if (!(await db.get("SELECT 1 FROM pots WHERE id = ? AND hidden = 0", n))) throw new Error(`no pot ${n}`);
+  if (!(await db.get("SELECT 1 FROM pots WHERE id = ? AND hidden = 0 AND user_id = ?", n, userId))) throw new Error(`no pot ${n}`);
   return n;
 }
 
@@ -57,16 +57,16 @@ function checkShareCents(amountCents: number, shareCents: number): void {
     throw new Error("shareCents must be smaller than the transaction amount");
 }
 
-async function needContact(db: Db, contactId: unknown): Promise<number> {
+async function needContact(db: Db, userId: number, contactId: unknown): Promise<number> {
   const n = Number(contactId);
   if (!Number.isInteger(n) || n <= 0) throw new Error("contactId required");
-  if (!(await db.get("SELECT 1 FROM contacts WHERE id = ?", n))) throw new Error(`no contact ${n}`);
+  if (!(await db.get("SELECT 1 FROM contacts WHERE id = ? AND user_id = ?", n, userId))) throw new Error(`no contact ${n}`);
   return n;
 }
 
 /** Validate the shared shape of a create/replace payload. Returns the
  *  normalized fields (throws on the first problem found). */
-async function normalizeInput(db: Db, input: TransactionInput): Promise<{
+async function normalizeInput(db: Db, userId: number, input: TransactionInput): Promise<{
   date: string;
   accountId: number;
   potId: number | null;
@@ -82,24 +82,24 @@ async function normalizeInput(db: Db, input: TransactionInput): Promise<{
 }> {
   if (!input || typeof input !== "object") throw new Error("transaction body required");
   if (!validDate(input.date ?? "")) throw new Error(`bad date "${input.date}"; expected YYYY-MM-DD`);
-  const accountId = await needAccount(db, input.accountId);
+  const accountId = await needAccount(db, userId, input.accountId);
   const amountCents = needAmount(input.amountCents);
   const description = (input.description ?? "").trim();
   if (!description) throw new Error("description required");
   const isTransfer = input.isTransfer === true;
   let potId: number | null = null;
   if (!isTransfer) {
-    potId = await needPot(db, input.potId);
+    potId = await needPot(db, userId, input.potId);
   } else if (input.potId != null) {
-    potId = await needPot(db, input.potId);
+    potId = await needPot(db, userId, input.potId);
   }
   const shareCents = Math.round(Number(input.shareCents ?? 0));
   let contactId: number | null = null;
   if (shareCents !== 0) {
     if (isTransfer) throw new Error("transfers cannot be split with a contact");
-    contactId = await needContact(db, input.contactId);
+    contactId = await needContact(db, userId, input.contactId);
   } else if (input.contactId != null) {
-    contactId = await needContact(db, input.contactId);
+    contactId = await needContact(db, userId, input.contactId);
   }
   checkShareCents(amountCents, shareCents);
   const source = input.source ?? "manual";
@@ -132,10 +132,11 @@ async function insertSplits(
 }
 
 /** Record a manually entered transaction for a user. Returns the new id.
- *  Sequential awaits, not a transaction: the single writer is the only
- *  writer, so the read-then-write sequence cannot interleave. */
+ *  Sequential awaits, not a transaction: one writer per user (a single agent
+ *  plus the human behind it), and every statement carries that user's
+ *  user_id, so two users' sequences never touch the same rows. */
 export async function createTransaction(db: Db, userId: number, input: TransactionInput): Promise<number> {
-  const f = await normalizeInput(db, input);
+  const f = await normalizeInput(db, userId, input);
   const status = f.reviewReason ? "pending_review" : "confirmed";
   const enteredBy = input.enteredBy ?? "user";
   if (enteredBy !== "agent" && enteredBy !== "user") throw new Error("bad enteredBy");
@@ -156,24 +157,26 @@ export async function createTransaction(db: Db, userId: number, input: Transacti
     f.externalId
   );
   await insertSplits(db, userId, t!.id, f.potId, f.amountCents, f.contactId, f.shareCents);
-  await assertSplitsSum(db, t!.id);
+  await assertSplitsSum(db, userId, t!.id);
   return t!.id;
 }
 
 /** Why a transaction's money fields are frozen, or null when they can change.
  *  Editing amounts on cleared/reconciled rows would silently corrupt
  *  reconciliation; settled rows are append-only by design. */
-export async function moneyLockReason(db: Db, id: number): Promise<string | null> {
-  const t = await db.get<{ cleared: string }>("SELECT cleared FROM transactions WHERE id = ?", id);
+export async function moneyLockReason(db: Db, userId: number, id: number): Promise<string | null> {
+  const t = await db.get<{ cleared: string }>("SELECT cleared FROM transactions WHERE id = ? AND user_id = ?", id, userId);
   if (!t) return null;
   if (t.cleared !== "uncleared") return `already ${t.cleared}; amounts cannot change`;
   const alloc = await db.get(
     `SELECT 1 FROM settlement_allocations a JOIN splits s ON s.id = a.split_id
-     WHERE s.transaction_id = ? LIMIT 1`,
-    id
+     WHERE s.transaction_id = ? AND a.user_id = ? AND s.user_id = ? LIMIT 1`,
+    id,
+    userId,
+    userId
   );
   if (alloc) return "linked to a contact settlement; amounts cannot change";
-  const st = await db.get("SELECT 1 FROM settlements WHERE transaction_id = ? LIMIT 1", id);
+  const st = await db.get("SELECT 1 FROM settlements WHERE transaction_id = ? AND user_id = ? LIMIT 1", id, userId);
   if (st) return "this is a settlement record; amounts cannot change";
   return null;
 }
@@ -185,21 +188,23 @@ interface SplitRow {
   amountCents: number;
 }
 
-async function currentSplits(db: Db, id: number): Promise<SplitRow[]> {
+async function currentSplits(db: Db, userId: number, id: number): Promise<SplitRow[]> {
   return db.all<SplitRow>(
-    "SELECT pot_id AS potId, owner, contact_id AS contactId, amount_cents AS amountCents FROM splits WHERE transaction_id = ? ORDER BY id",
-    id
+    "SELECT pot_id AS potId, owner, contact_id AS contactId, amount_cents AS amountCents FROM splits WHERE transaction_id = ? AND user_id = ? ORDER BY id",
+    id,
+    userId
   );
 }
 
 /** Replace a transaction's fields and rebuild its splits from the payload.
  *  Throws when the id is unknown, the payload is invalid, or the money
  *  fields changed on a locked transaction. Sequential awaits, not a
- *  transaction: the single writer is the only writer. */
-export async function updateTransaction(db: Db, id: number, input: TransactionInput): Promise<void> {
-  const cur = (await db.get("SELECT * FROM transactions WHERE id = ?", id)) as any;
+ *  transaction: one writer per user (a single agent plus the human behind
+ *  it), and every statement carries that user's user_id. */
+export async function updateTransaction(db: Db, userId: number, id: number, input: TransactionInput): Promise<void> {
+  const cur = (await db.get("SELECT * FROM transactions WHERE id = ? AND user_id = ?", id, userId)) as any;
   if (!cur) throw new Error(`no transaction ${id}`);
-  const f = await normalizeInput(db, input);
+  const f = await normalizeInput(db, userId, input);
 
   const want: SplitRow[] =
     f.shareCents !== 0 && f.contactId !== null
@@ -208,19 +213,19 @@ export async function updateTransaction(db: Db, id: number, input: TransactionIn
           { potId: f.potId, owner: "contact", contactId: f.contactId, amountCents: f.shareCents },
         ]
       : [{ potId: f.potId, owner: "user", contactId: null, amountCents: f.amountCents }];
-  const have = await currentSplits(db, id);
+  const have = await currentSplits(db, userId, id);
   const splitsChanged =
     have.length !== want.length ||
     have.some((s, i) => s.potId !== want[i].potId || s.owner !== want[i].owner || s.contactId !== want[i].contactId || s.amountCents !== want[i].amountCents);
   const moneyChanged =
     f.amountCents !== cur.amount_cents || (f.isTransfer ? 1 : 0) !== cur.is_transfer || splitsChanged;
   if (moneyChanged) {
-    const lock = await moneyLockReason(db, id);
+    const lock = await moneyLockReason(db, userId, id);
     if (lock) throw new Error(lock);
   }
 
-  await db.run("UPDATE transactions SET date = ?, account_id = ?, amount_cents = ?, description = ?, is_transfer = ? WHERE id = ?", f.date, f.accountId, f.amountCents, f.description, f.isTransfer ? 1 : 0, id);
-  await db.run("DELETE FROM splits WHERE transaction_id = ?", id);
+  await db.run("UPDATE transactions SET date = ?, account_id = ?, amount_cents = ?, description = ?, is_transfer = ? WHERE id = ? AND user_id = ?", f.date, f.accountId, f.amountCents, f.description, f.isTransfer ? 1 : 0, id, userId);
+  await db.run("DELETE FROM splits WHERE transaction_id = ? AND user_id = ?", id, userId);
   await insertSplits(db, cur.user_id, id, f.potId, f.amountCents, f.contactId, f.shareCents);
-  await assertSplitsSum(db, id);
+  await assertSplitsSum(db, userId, id);
 }

@@ -42,15 +42,15 @@ describe("pot management", () => {
     const db = await seed();
     const cid = await createContact(db, 1, "Alex");
     const id = await createPot(db, 1, { name: "Rent", group: "Home", targetCents: 334000 });
-    await updatePot(db, id, { name: "Rent share", group: "Shared", targetCents: 340000, targetType: "average_3mo", contactId: cid, sharePct: 60 });
+    await updatePot(db, 1, id, { name: "Rent share", group: "Shared", targetCents: 340000, targetType: "average_3mo", contactId: cid, sharePct: 60 });
     const p = await db.get("SELECT name, pot_group, target_cents, target_type, contact_id, share_pct FROM pots WHERE id = ?", id) as any;
     expect(p).toEqual({ name: "Rent share", pot_group: "Shared", target_cents: 340000, target_type: "average_3mo", contact_id: cid, share_pct: 60 });
     // unshare
-    await updatePot(db, id, { contactId: null });
+    await updatePot(db, 1, id, { contactId: null });
     const q = await db.get("SELECT contact_id, share_pct FROM pots WHERE id = ?", id) as any;
     expect(q.contact_id).toBeNull();
     expect(q.share_pct).toBeNull();
-    await expect(updatePot(db, 4242, { name: "x" })).rejects.toThrow("no pot 4242");
+    await expect(updatePot(db, 1, 4242, { name: "x" })).rejects.toThrow("no pot 4242");
   });
 
   test("delete moves transactions, splits, and assignments to Uncategorized", async () => {

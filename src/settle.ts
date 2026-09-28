@@ -40,9 +40,12 @@ export function allocateSettlement(
 }
 
 /** What a contact still owes, oldest first. Omit contactId for everyone. */
-export async function contactOwed(db: Db, contactId?: number): Promise<OwedSplit[]> {
-  const params: DbValue[] = [];
-  let where = `s.owner = 'contact' AND s.amount_cents < 0 AND t.status = 'confirmed' AND t.voided = 0`;
+export async function contactOwed(db: Db, userId: number, contactId?: number): Promise<OwedSplit[]> {
+  // All user_id filters bind the same value; params are listed in the order
+  // their placeholders appear in the SQL text below.
+  const params: DbValue[] = [userId, userId, userId, userId, userId];
+  let where = `s.owner = 'contact' AND s.amount_cents < 0 AND t.status = 'confirmed' AND t.voided = 0
+               AND s.user_id = ? AND t.user_id = ? AND c.user_id = ?`;
   if (contactId !== undefined) {
     where += ` AND s.contact_id = ?`;
     params.push(contactId);
@@ -50,11 +53,11 @@ export async function contactOwed(db: Db, contactId?: number): Promise<OwedSplit
   const rows = await db.all<OwedSplit>(
     `SELECT s.id AS splitId, s.contact_id AS contactId, c.name AS contactName,
             p.name AS potName, t.date AS date,
-            -s.amount_cents - COALESCE((SELECT SUM(a.amount_cents) FROM settlement_allocations a WHERE a.split_id = s.id), 0) AS owedCents
+            -s.amount_cents - COALESCE((SELECT SUM(a.amount_cents) FROM settlement_allocations a WHERE a.split_id = s.id AND a.user_id = ?), 0) AS owedCents
      FROM splits s
      JOIN transactions t ON t.id = s.transaction_id
      JOIN contacts c ON c.id = s.contact_id
-     LEFT JOIN pots p ON p.id = s.pot_id
+     LEFT JOIN pots p ON p.id = s.pot_id AND p.user_id = ?
      WHERE ${where}
      ORDER BY t.date, s.id`,
     ...params
@@ -75,15 +78,16 @@ export interface SettlementSummary {
 /** Record a lump sum from a contact and allocate it against what they owe.
  *  Existing credit is consumed oldest-first (zero-cash allocations against
  *  the credit settlement), then the new money fills what is still owed.
- *  Sequential awaits, not a transaction: the single writer is the only
- *  writer, so the read-then-write sequence cannot interleave. */
+ *  Sequential awaits, not a transaction: one writer per user (a single agent
+ *  plus the human behind it), and every statement carries that user's
+ *  user_id, so two users' sequences never touch the same rows. */
 export async function applySettlement(
   db: Db,
   userId: number,
   opts: { contactId: number; accountId: number; amountCents: number; note?: string; enteredBy?: "agent" | "user" }
 ): Promise<SettlementSummary> {
   const enteredBy = opts.enteredBy ?? "agent";
-  const contact = await db.get<{ id: number; name: string }>("SELECT id, name FROM contacts WHERE id = ?", opts.contactId);
+  const contact = await db.get<{ id: number; name: string }>("SELECT id, name FROM contacts WHERE id = ? AND user_id = ?", opts.contactId, userId);
   if (!contact) throw new Error(`no contact ${opts.contactId}`);
 
   // 1. Consume existing credit oldest-first, zero cash.
@@ -93,18 +97,21 @@ export async function applySettlement(
     `SELECT st.id, st.leftover_cents FROM settlements st
      JOIN transactions t ON t.id = st.transaction_id
      JOIN splits s ON s.transaction_id = t.id AND s.owner = 'contact' AND s.contact_id = ?
-     WHERE st.leftover_cents > 0 ORDER BY st.date, st.id`,
-    opts.contactId
+     WHERE st.leftover_cents > 0 AND st.user_id = ? AND t.user_id = ? AND s.user_id = ? ORDER BY st.date, st.id`,
+    opts.contactId,
+    userId,
+    userId,
+    userId
   );
   if (credits.length > 0) {
-    for (const o of await contactOwed(db, opts.contactId)) {
+    for (const o of await contactOwed(db, userId, opts.contactId)) {
       let need = o.owedCents;
       for (const cr of credits) {
         if (need <= 0) break;
         if (cr.leftover_cents <= 0) continue;
         const take = Math.min(need, cr.leftover_cents);
         await db.run(`INSERT INTO settlement_allocations (user_id, settlement_id, split_id, amount_cents) VALUES (?, ?, ?, ?)`, userId, cr.id, o.splitId, take);
-        await db.run("UPDATE settlements SET leftover_cents = leftover_cents - ? WHERE id = ?", take, cr.id);
+        await db.run("UPDATE settlements SET leftover_cents = leftover_cents - ? WHERE id = ? AND user_id = ?", take, cr.id, userId);
         cr.leftover_cents -= take;
         need -= take;
         creditConsumedCents += take;
@@ -114,7 +121,7 @@ export async function applySettlement(
   }
 
   // 2. Allocate the new money against what is still owed.
-  const owed = await contactOwed(db, opts.contactId);
+  const owed = await contactOwed(db, userId, opts.contactId);
   const { allocations, leftoverCents } = allocateSettlement(owed, opts.amountCents);
 
   const txn = await db.get<{ id: number }>(
@@ -147,18 +154,18 @@ export async function applySettlement(
     await db.run(`INSERT INTO settlement_allocations (user_id, settlement_id, split_id, amount_cents) VALUES (?, ?, ?, ?)`, userId, st!.id, a.splitId, a.amountCents);
   }
 
-  await assertSplitsSum(db, txn!.id);
+  await assertSplitsSum(db, userId, txn!.id);
   return { contactId: contact.id, contactName: contact.name, allocations, creditAllocations, creditConsumedCents, leftoverCents };
 }
 
 /** Total credit from a contact's overpaid settlements not yet consumed.
  *  Omit contactId for everyone. */
-export async function contactCredit(db: Db, contactId?: number): Promise<number> {
-  const params: DbValue[] = [];
-  let where = "";
+export async function contactCredit(db: Db, userId: number, contactId?: number): Promise<number> {
+  const params: DbValue[] = [userId];
+  let where = `WHERE st.user_id = ?`;
   if (contactId !== undefined) {
-    where = `WHERE EXISTS (SELECT 1 FROM splits s WHERE s.transaction_id = st.transaction_id AND s.owner = 'contact' AND s.contact_id = ?)`;
-    params.push(contactId);
+    where += ` AND EXISTS (SELECT 1 FROM splits s WHERE s.transaction_id = st.transaction_id AND s.owner = 'contact' AND s.contact_id = ? AND s.user_id = ?)`;
+    params.push(contactId, userId);
   }
   const r = await db.get<{ total: number }>(
     `SELECT COALESCE(SUM(st.leftover_cents), 0) AS total FROM settlements st ${where}`,

@@ -28,8 +28,8 @@ describe("scaffoldMonth", () => {
       Pay: 0,
     });
     // written through
-    expect(await assignedToPot(db, "2026-10", 1)).toBe(300000);
-    expect(await assignedToPot(db, "2026-10", 2)).toBe(95000);
+    expect(await assignedToPot(db, 1, "2026-10", 1)).toBe(300000);
+    expect(await assignedToPot(db, 1, "2026-10", 2)).toBe(95000);
   });
 
   test("average_3mo averages the last three months of assignments", async () => {
@@ -57,7 +57,7 @@ describe("scaffoldMonth", () => {
     await assignToPot(db, 1, "2026-09", "Rent", 300000);
     const lines = await scaffoldMonth(db, 1, "2026-10", "last_month", true);
     expect(lines.find((l) => l.name === "Rent")!.cents).toBe(300000);
-    expect(await assignedToPot(db, "2026-10", 1)).toBe(0);
+    expect(await assignedToPot(db, 1, "2026-10", 1)).toBe(0);
   });
 
   test("bad month and bad strategy throw", async () => {

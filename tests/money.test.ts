@@ -28,7 +28,7 @@ describe("assertSplitsSum", () => {
   test("balanced splits pass", async () => {
     const db = await seed();
     const id = await addTxn(db, "2026-09-01", -10000, -6000, 4000, 1);
-    await expect(assertSplitsSum(db, id)).resolves.toBeUndefined();
+    await expect(assertSplitsSum(db, 1, id)).resolves.toBeUndefined();
   });
 
   test("unbalanced splits throw", async () => {
@@ -37,12 +37,12 @@ describe("assertSplitsSum", () => {
       "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared) VALUES (1, '2026-09-01', 1, -10000, 't', 'manual', 'agent', 'confirmed', 'cleared') RETURNING id"
     ))!;
     await db.run("INSERT INTO splits (user_id, transaction_id, owner, amount_cents) VALUES (1, ?, 'user', -6000)", t.id);
-    await expect(assertSplitsSum(db, t.id)).rejects.toThrow("sum to -6000, expected -10000");
+    await expect(assertSplitsSum(db, 1, t.id)).rejects.toThrow("sum to -6000, expected -10000");
   });
 
   test("unknown transaction throws", async () => {
     const db = await seed();
-    await expect(assertSplitsSum(db, 999)).rejects.toThrow("does not exist");
+    await expect(assertSplitsSum(db, 1, 999)).rejects.toThrow("does not exist");
   });
 });
 
@@ -52,10 +52,10 @@ describe("void", () => {
     await addTxn(db, "2026-09-01", 500000, 500000, 0, null);   // paycheck
     await addTxn(db, "2026-09-02", -8000, -8000, 0, 2);        // groceries
     const dup = await addTxn(db, "2026-09-03", -8000, -8000, 0, 2, 1); // voided duplicate
-    expect(await monthSpend(db, "2026-09")).toBe(8000);
-    expect(await monthInflows(db, "2026-09")).toBe(500000);
+    expect(await monthSpend(db, 1, "2026-09")).toBe(8000);
+    expect(await monthInflows(db, 1, "2026-09")).toBe(500000);
     await assignToPot(db, 1, "2026-09", 2, 120000);
-    expect(await rtaCents(db, "2026-09")).toBe(380000);
+    expect(await rtaCents(db, 1, "2026-09")).toBe(380000);
     // the voided row is still in the DB for audit
     expect(await db.get("SELECT voided FROM transactions WHERE id = ?", dup)).toEqual({ voided: 1 });
   });
@@ -63,7 +63,7 @@ describe("void", () => {
   test("voided contact splits are not owed", async () => {
     const db = await seed();
     await addTxn(db, "2026-09-01", -334000, -167000, 167000, 1, 1); // voided rent split
-    expect(await contactOwed(db, 1)).toEqual([]);
+    expect(await contactOwed(db, 1, 1)).toEqual([]);
   });
 });
 
@@ -82,8 +82,8 @@ describe("contact credit consumption", () => {
     await addTxn(db, "2026-09-01", -334000, -167000, 167000, 1); // Alex owes 167000
     const first = await applySettlement(db, 1, { contactId: 1, accountId: 1, amountCents: 200000 });
     expect(first.leftoverCents).toBe(33000);
-    expect(await contactCredit(db, 1)).toBe(33000);
-    expect(await contactOwed(db, 1)).toEqual([]);
+    expect(await contactCredit(db, 1, 1)).toBe(33000);
+    expect(await contactOwed(db, 1, 1)).toEqual([]);
 
     await addTxn(db, "2026-09-10", -100000, -50000, 50000, 2); // Alex owes 50000 more
     const second = await applySettlement(db, 1, { contactId: 1, accountId: 1, amountCents: 10000 });
@@ -92,9 +92,9 @@ describe("contact credit consumption", () => {
     expect(second.creditAllocations.map((a) => a.amountCents)).toEqual([33000]);
     expect(second.allocations.map((a) => a.amountCents)).toEqual([10000]);
     expect(second.leftoverCents).toBe(0);
-    expect(await contactCredit(db, 1)).toBe(0);
+    expect(await contactCredit(db, 1, 1)).toBe(0);
     // 50000 - 33000 - 10000 = 7000 still owed
-    expect((await contactOwed(db, 1)).reduce((a, o) => a + o.owedCents, 0)).toBe(7000);
+    expect((await contactOwed(db, 1, 1)).reduce((a, o) => a + o.owedCents, 0)).toBe(7000);
   });
 
   test("credit older than the new settlement is consumed first", async () => {
@@ -103,14 +103,14 @@ describe("contact credit consumption", () => {
     await applySettlement(db, 1, { contactId: 1, accountId: 1, amountCents: 80000 }); // 30000 credit
     await addTxn(db, "2026-09-05", -60000, -30000, 30000, 2);
     await applySettlement(db, 1, { contactId: 1, accountId: 1, amountCents: 40000 }); // credit covers the 30000 owed; 40000 leftover becomes credit
-    expect(await contactCredit(db, 1)).toBe(40000);
+    expect(await contactCredit(db, 1, 1)).toBe(40000);
     await addTxn(db, "2026-09-10", -80000, -40000, 40000, 1);
     const s = await applySettlement(db, 1, { contactId: 1, accountId: 1, amountCents: 5000 });
     expect(s.creditConsumedCents).toBe(40000);
     expect(s.leftoverCents).toBe(5000);
     // 40000 credit + 5000 cash covers the 40000 owed; the 5000 leftover is new credit
-    expect(await contactCredit(db, 1)).toBe(5000);
-    expect((await contactOwed(db, 1)).reduce((a, o) => a + o.owedCents, 0)).toBe(0);
+    expect(await contactCredit(db, 1, 1)).toBe(5000);
+    expect((await contactOwed(db, 1, 1)).reduce((a, o) => a + o.owedCents, 0)).toBe(0);
   });
 
   test("credit is tracked per contact, not shared across contacts", async () => {
@@ -120,10 +120,10 @@ describe("contact credit consumption", () => {
     const t2 = await addTxn(db, "2026-09-02", -40000, -20000, 20000, 2);
     await db.run("UPDATE splits SET contact_id = 2 WHERE transaction_id = ? AND owner = 'contact'", t2);
     await applySettlement(db, 1, { contactId: 1, accountId: 1, amountCents: 80000 }); // 30000 credit for Alex
-    expect(await contactCredit(db, 1)).toBe(30000);
-    expect(await contactCredit(db, 2)).toBe(0);
+    expect(await contactCredit(db, 1, 1)).toBe(30000);
+    expect(await contactCredit(db, 1, 2)).toBe(0);
     // Alex's credit only offsets Alex's owed, never Sam's
-    expect(await contactOwed(db, 1)).toEqual([]);
-    expect((await contactOwed(db, 2)).reduce((a, o) => a + o.owedCents, 0)).toBe(20000);
+    expect(await contactOwed(db, 1, 1)).toEqual([]);
+    expect((await contactOwed(db, 1, 2)).reduce((a, o) => a + o.owedCents, 0)).toBe(20000);
   });
 });
