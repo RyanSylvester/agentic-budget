@@ -1,0 +1,31 @@
+# Daybook on Cloudflare Workers. One Worker serves the JSON API and the Vite
+# client as static assets, same-origin (no CORS). No secrets in this file:
+# database_id and binding names are not secret. Worker secrets (Phase 5:
+# AGENT_TOKEN) are set with `wrangler secret put` and never committed.
+
+name = "daybook"
+main = "src/worker.ts"
+compatibility_date = "2026-09-01"
+
+# The Vite client build. Explicit routing: /api/* always runs the Worker;
+# everything else is served as static assets, with unknown paths rewritten
+# to /index.html so the SPA router handles client-side routes.
+[assets]
+directory = "./client/dist"
+not_found_handling = "single-page-application"
+binding = "ASSETS"
+run_worker_first = ["/api/*"]
+
+# D1: the hosted SQLite database holding all budget data.
+[[d1_databases]]
+binding = "DB"
+database_name = "daybook"
+database_id = "23cf04d3-254c-4a02-88fb-caa430eaa202"
+
+# KV: session tokens + login rate-limit keys (Phase 5 auth). NOT YET WIRED:
+# creating the namespace needs Workers KV Storage:Edit on the deploy token
+# (it currently has Workers Scripts:Edit + D1:Edit only). Once the namespace
+# exists, uncomment:
+# [[kv_namespaces]]
+# binding = "SESSIONS"
+# id = "<from kv namespace create: title daybook-sessions>"
