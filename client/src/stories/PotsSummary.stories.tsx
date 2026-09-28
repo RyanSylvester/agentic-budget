@@ -39,6 +39,18 @@ export const NoTrend: Story = {
   },
 };
 
+export const SingleMonthTrend: Story = {
+  args: { trend: [{ month: "2026-09", spent: 272123 }] },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "One month of history is not a trend: the sparkline stays hidden instead of rendering a single black bar.",
+      },
+    },
+  },
+};
+
 export const SingleGroup: Story = {
   args: { pots: fixturePots.filter((p) => p.group === "Food") },
   parameters: {

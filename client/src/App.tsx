@@ -345,7 +345,7 @@ export function PotNameCell({ p, onEdit }: { p: Pot; onEdit?: () => void }) {
       <div className="flex items-baseline gap-2">
         <div className="truncate text-[15px] font-semibold">{p.name}</div>
         {onEdit && (
-          <button onClick={onEdit} className="shrink-0 cursor-pointer text-[12px] text-[var(--faint)] hover:text-[var(--ink)] hover:underline">
+          <button onClick={onEdit} className="-m-2 shrink-0 cursor-pointer p-2 text-[12px] text-[var(--faint)] hover:text-[var(--ink)] hover:underline">
             Edit
           </button>
         )}
@@ -1172,7 +1172,7 @@ export function PotsSummary({
           </ul>
         </div>
       )}
-      {trend.length > 0 && (
+      {trend.length > 1 && (
         <div className="mt-4 border-t border-[var(--hairline)] pt-3">
           <div className="mb-2 text-[12px] text-[var(--muted)]">Six-month spend</div>
           <TrendSpark trend={trend} />

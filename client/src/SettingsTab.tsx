@@ -84,7 +84,7 @@ function TokenRow({
         {!confirming ? (
           <button
             onClick={() => setConfirming(true)}
-            className="shrink-0 cursor-pointer text-[13px] text-[var(--muted)] hover:text-[var(--danger)]"
+            className="-m-2 shrink-0 cursor-pointer p-2 text-[13px] text-[var(--muted)] hover:text-[var(--danger)]"
           >
             Revoke…
           </button>

@@ -138,7 +138,7 @@ export function LoginScreen({ onAuthenticated, onSignup, deriveKey = deriveKdfKe
         </button>
       </form>
       {onSignup && (
-        <button onClick={onSignup} className="mt-4 w-full text-center text-[13px] text-[var(--ink-2)] underline underline-offset-2">
+        <button onClick={onSignup} className="-m-2 mt-4 w-full p-2 text-center text-[13px] text-[var(--ink-2)] underline underline-offset-2">
           Need an account? Sign up
         </button>
       )}
