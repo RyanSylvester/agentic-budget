@@ -52,7 +52,9 @@ function shiftBack(month: string, n: number): string {
 }
 
 /** One pot's user spend for the last N months, oldest first. Powers the
- *  per-pot history chart. */
+ *  per-pot history chart. A single GROUP BY query, not one per month: on D1
+ *  every round trip is an HTTPS request, so the N-1 saved here are real
+ *  latency. Months with no rows report zero, matching the old loop. */
 export async function potHistory(
   db: Db,
   userId: number,
@@ -61,10 +63,26 @@ export async function potHistory(
   endMonth?: string
 ): Promise<{ month: string; spentCents: number }[]> {
   const end = endMonth ?? new Date().toISOString().slice(0, 7);
+  const start = shiftBack(end, months - 1);
+  const rows = await db.all<{ month: string; user: number }>(
+    `SELECT substr(t.date, 1, 7) AS month,
+            COALESCE(SUM(CASE WHEN s.owner = 'user' THEN -s.amount_cents ELSE 0 END), 0) AS user
+     FROM splits s JOIN transactions t ON t.id = s.transaction_id
+     WHERE s.pot_id = ? AND t.is_transfer = 0 AND t.voided = 0 AND s.amount_cents < 0
+       AND s.user_id = ? AND t.user_id = ?
+       AND substr(t.date, 1, 7) >= ? AND substr(t.date, 1, 7) <= ?
+     GROUP BY month`,
+    potId,
+    userId,
+    userId,
+    start,
+    end
+  );
+  const byMonth = new Map(rows.map((r) => [r.month, r.user]));
   const out: { month: string; spentCents: number }[] = [];
   for (let i = months - 1; i >= 0; i--) {
     const m = shiftBack(end, i);
-    out.push({ month: m, spentCents: (await potSpend(db, userId, potId, m)).userCents });
+    out.push({ month: m, spentCents: byMonth.get(m) ?? 0 });
   }
   return out;
 }
