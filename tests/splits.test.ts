@@ -14,7 +14,7 @@ async function seed(): Promise<Db> {
 
 async function addTxn(db: Db, date: string, amountCents: number, userCents: number, contactCents: number, potId: number) {
   const t = (await db.get<{ id: number }>(
-    "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared) VALUES (1, ?, 1, ?, 't', 'manual', 'agent', 'confirmed', 'cleared') RETURNING id",
+    "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, cleared) VALUES (1, ?, 1, ?, 't', 'manual', 'agent', 'cleared') RETURNING id",
     date, amountCents
   ))!;
   await db.run("INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (1, ?, ?, ?, ?, ?)", t.id, potId, "user", null, userCents);
@@ -33,13 +33,6 @@ describe("splits", () => {
     expect(await monthSpend(db, 1, "2026-09")).toBe(175000);
   });
 
-  test("pending_review transactions don't count", async () => {
-    const db = await seed();
-    await db.exec(`INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared) VALUES (1, '2026-09-03', 1, -50000, 't', 'manual', 'agent', 'pending_review', 'uncleared')`);
-    const t = (await db.get<{ id: number }>("SELECT id FROM transactions"))!;
-    await db.run("INSERT INTO splits (user_id, transaction_id, pot_id, owner, amount_cents) VALUES (1, ?, 1, 'user', -50000)", t.id);
-    expect(await monthSpend(db, 1, "2026-09")).toBe(0);
-  });
 });
 
 describe("settlements", () => {
@@ -85,10 +78,10 @@ describe("settlements", () => {
   });
 });
 
-describe("uncertain review + transfers", () => {
+describe("transfers", () => {
   test("transfers are excluded from spend but count for reconciliation", async () => {
     const db = await seed();
-    await db.exec(`INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared, is_transfer) VALUES (1, '2026-09-01', 1, -190000, 'Payday holding loop', 'manual', 'agent', 'confirmed', 'cleared', 1)`);
+    await db.exec(`INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, cleared, is_transfer) VALUES (1, '2026-09-01', 1, -190000, 'Payday holding loop', 'manual', 'agent', 'cleared', 1)`);
     const t = (await db.get<{ id: number }>("SELECT id FROM transactions"))!;
     await db.run("INSERT INTO splits (user_id, transaction_id, owner, amount_cents) VALUES (1, ?, 'user', -190000)", t.id);
     await addTxn(db, "2026-09-02", -8000, -8000, 0, 2);
@@ -98,14 +91,4 @@ describe("uncertain review + transfers", () => {
     expect(acct.t).toBe(-198000);
   });
 
-  test("uncertain entries queue with a reason; confident ones confirm directly", async () => {
-    const db = await seed();
-    await db.exec(`INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared, review_reason) VALUES (1, '2026-09-03', 1, -2500, 'Mystery charge', 'gmail', 'agent', 'pending_review', 'uncleared', 'unsure which pot')`);
-    const t = (await db.get<{ id: number }>("SELECT id FROM transactions"))!;
-    await db.run("INSERT INTO splits (user_id, transaction_id, owner, amount_cents) VALUES (1, ?, 'user', -2500)", t.id);
-    // pending_review never counts toward spend
-    expect(await monthSpend(db, 1, "2026-09")).toBe(0);
-    const row = (await db.get<{ review_reason: string }>("SELECT review_reason FROM transactions WHERE id = ?", t.id))!;
-    expect(row.review_reason).toBe("unsure which pot");
-  });
 });

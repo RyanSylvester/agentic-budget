@@ -63,7 +63,7 @@ export const List: Story = {
     docs: {
       description: {
         story:
-          "A typical month: outflows, an inflow, a transfer, two contact splits, a pending-review item, and an uncategorized import.",
+          "A typical month: outflows, an inflow, a transfer, two contact splits, and an uncategorized import.",
       },
     },
   },

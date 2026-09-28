@@ -6,7 +6,6 @@ import {
   fixtureContacts,
   fixtureListedTxns,
   fixturePots,
-  fixtureReviewTxns,
   fixtureTrend,
   makeAttention,
   makeClosePreview,
@@ -21,7 +20,6 @@ const CUR = new Date().toISOString().slice(0, 7);
 const fullApi = {
   get: {
     "/api/attention": makeAttention({ unsettledSharedCents: 42180, sharedOwedBy: [{ contactId: 1, name: "Alex", cents: 42180 }] }),
-    "/api/review": { transactions: fixtureReviewTxns },
     [`/api/overview?month=${CUR}`]: makeOverview({ month: CUR }),
     [`/api/pots?month=${CUR}`]: { pots: fixturePots, rtaCents: 8633 },
     "/api/trend": { trend: fixtureTrend },
@@ -52,7 +50,6 @@ type Story = StoryObj<typeof AppShell>;
 
 async function goToTab(canvasElement: HTMLElement, label: string) {
   const aside = within(canvasElement).getByRole("complementary");
-  // the Review button carries a count badge, so match the label as a prefix
   await userEvent.click(within(aside).getByRole("button", { name: new RegExp(`^${label}`) }));
 }
 
@@ -89,16 +86,6 @@ export const Sharing: Story = {
   play: async ({ canvasElement }) => {
     await goToTab(canvasElement, "Sharing");
     await within(canvasElement).findByText("Alex");
-  },
-};
-
-export const Review: Story = {
-  parameters: {
-    docs: { description: { story: "Navigating to the Review tab. (Interaction test.)" } },
-  },
-  play: async ({ canvasElement }) => {
-    await goToTab(canvasElement, "Review");
-    await within(canvasElement).findByText("Mock ambiguous charge");
   },
 };
 

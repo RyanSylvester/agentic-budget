@@ -61,7 +61,7 @@ describe("versioned migrations", () => {
 
   test("pre-migration databases are baselined without re-applying history", async () => {
     const db = oldPathDb();
-    await migrateDb(db);
+    await migrateOldDb(db);
 
     // baseline marker recorded, then the real migrations applied on top
     const vs = await versions(db);
@@ -71,6 +71,8 @@ describe("versioned migrations", () => {
     // the new tables arrived via migration, not the old chain
     const t = await db.get("SELECT name FROM sqlite_master WHERE name = 'sinking_schedules'");
     expect(t).not.toBeNull();
+    expect(await db.get("SELECT name FROM sqlite_master WHERE name = 'invite_codes'")).not.toBeNull();
+    expect(await db.get("SELECT name FROM sqlite_master WHERE name = 'agent_tokens'")).not.toBeNull();
 
     // not a byte of user data lost
     expect(await db.get("SELECT COUNT(*) AS n FROM pots")).toEqual({ n: 2 });
@@ -80,6 +82,19 @@ describe("versioned migrations", () => {
     });
     const total = (await db.get<{ s: number }>("SELECT SUM(amount_cents) AS s FROM splits"))!;
     expect(total.s).toBe(-172000);
+
+    // every row backfilled to the first user; the new tables exist
+    for (const tbl of [
+      "accounts", "pots", "contacts", "transactions", "splits",
+      "assignments", "month_closes", "reconciliations", "settlements",
+      "settlement_allocations", "sinking_schedules", "settings",
+    ]) {
+      const bad = await db.get<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM ${tbl} WHERE user_id IS NULL OR user_id != 1`
+      );
+      expect(bad).toEqual({ n: 0 });
+    }
+    expect(await db.get<{ role: string }>("SELECT role FROM users WHERE id = 1")).toEqual({ role: "user" });
   });
 
   test("migrateDb is idempotent on fresh and baselined databases", async () => {
@@ -89,7 +104,7 @@ describe("versioned migrations", () => {
     expect(await versions(freshDb)).toEqual(listMigrations().map((m) => m.version));
 
     const oldDb = oldPathDb();
-    await migrateDb(oldDb);
+    await migrateOldDb(oldDb);
     const once = await versions(oldDb);
     const countsBefore = await dbCounts(oldDb);
     await migrateDb(oldDb);
@@ -123,7 +138,66 @@ describe("versioned migrations", () => {
     writeFileSync(join(dir, "not-a-migration.sql"), "SELECT 1;");
     expect(listMigrations(dir).map((m) => m.version)).toEqual(["20260927090000", "20260927120000"]);
   });
+
+  test("remove_review_queue converts parked rows and drops the review columns", async () => {
+    const target = listMigrations().find((m) => m.name === "remove review queue")!;
+    // Stage a database at the migration just before the new one.
+    const db = wrapDb(new Database(":memory:"));
+    await db.exec(schemaSql);
+    await db.exec(
+      `CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')))`
+    );
+    for (const m of listMigrations()) {
+      if (m.version >= target.version) break;
+      await db.exec(m.sql);
+      await db.run("INSERT INTO schema_migrations (version) VALUES (?)", m.version);
+    }
+    await db.run("INSERT INTO users (username, salt, verifier, kdf_params) VALUES ('test', 'x', 'x', 'm=19456,t=2,p=1')");
+    await db.run("INSERT INTO accounts (user_id, name, type) VALUES (1, 'Chequing', 'chequing')");
+    await db.run(
+      `INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared, review_reason)
+       VALUES (1, '2026-09-01', 1, -5000, 'mystery charge', 'manual', 'agent', 'pending_review', 'uncleared', 'unsure which pot')`
+    );
+    const before = (await db.all<{ name: string }>("PRAGMA table_info(transactions)")).map((c) => c.name);
+    expect(before).toContain("status");
+    expect(before).toContain("review_reason");
+
+    // The real runner picks up only the new migration.
+    await runMigrations(db);
+    expect(await versions(db)).toContain(target.version);
+
+    const after = (await db.all<{ name: string }>("PRAGMA table_info(transactions)")).map((c) => c.name);
+    expect(after).not.toContain("status");
+    expect(after).not.toContain("review_reason");
+    // The parked row survived the rebuild, converted to confirmed.
+    const t = (await db.get<any>("SELECT * FROM transactions"))!;
+    expect(t.description).toBe("mystery charge");
+    expect(t.amount_cents).toBe(-5000);
+    expect(t.entered_by).toBe("agent");
+    // The per-user external-id uniqueness survived the rebuild.
+    const idx = (await db.get<{ sql: string }>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'transactions'"))!;
+    expect(idx.sql).toContain("UNIQUE (user_id, external_id)");
+  });
 });
+
+/** The M1 version (multi-user backfill), found by name so the test does not
+ *  depend on it being the latest migration. */
+function m1Version(): string {
+  return listMigrations().find((m) => m.name === "multi user")!.version;
+}
+
+/** A pre-migration database can only finish migrating once a user exists:
+ *  the first attempt fails the M1 backfill guard with a clear error, the
+ *  operator creates the user, the retry backfills every row to them. */
+async function migrateOldDb(db: Db): Promise<void> {
+  await expect(migrateDb(db)).rejects.toThrow("budget user create");
+  expect(await versions(db)).toContain("20260928023841"); // add_users ran before the guard
+  expect(await versions(db)).not.toContain(m1Version()); // M1 did not
+  await db.run(
+    "INSERT INTO users (username, salt, verifier, kdf_params) VALUES ('test', 'x', 'x', 'm=19456,t=2,p=1')"
+  );
+  await migrateDb(db);
+}
 
 /** Row counts of the user-data tables, for the idempotency comparison. */
 async function dbCounts(db: Db): Promise<Record<string, number>> {

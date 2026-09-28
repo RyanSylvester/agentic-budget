@@ -19,8 +19,6 @@ export interface TransactionInput {
   source?: string;
   /** "cleared" | "uncleared" (default). */
   cleared?: string;
-  /** When set, the transaction is created pending_review with this reason. */
-  reviewReason?: string | null;
   /** Idempotency key: the record route no-ops on a repeat external id. */
   externalId?: string | null;
   /** Who made the entry: "agent" or "user". The API route derives this from
@@ -77,7 +75,6 @@ async function normalizeInput(db: Db, userId: number, input: TransactionInput): 
   shareCents: number;
   source: string;
   cleared: string;
-  reviewReason: string | null;
   externalId: string | null;
 }> {
   if (!input || typeof input !== "object") throw new Error("transaction body required");
@@ -110,7 +107,7 @@ async function normalizeInput(db: Db, userId: number, input: TransactionInput): 
   if (!["cleared", "uncleared"].includes(cleared)) {
     throw new Error(`bad cleared "${input.cleared}"; expected cleared or uncleared`);
   }
-  return { date: input.date as string, accountId, potId, amountCents, description, isTransfer, contactId, shareCents, source, cleared, reviewReason: input.reviewReason ?? null, externalId: input.externalId ?? null };
+  return { date: input.date as string, accountId, potId, amountCents, description, isTransfer, contactId, shareCents, source, cleared, externalId: input.externalId ?? null };
 }
 
 /** Insert the user (+ optional contact) splits for a transaction. */
@@ -137,12 +134,11 @@ async function insertSplits(
  *  user_id, so two users' sequences never touch the same rows. */
 export async function createTransaction(db: Db, userId: number, input: TransactionInput): Promise<number> {
   const f = await normalizeInput(db, userId, input);
-  const status = f.reviewReason ? "pending_review" : "confirmed";
   const enteredBy = input.enteredBy ?? "user";
   if (enteredBy !== "agent" && enteredBy !== "user") throw new Error("bad enteredBy");
   const t = await db.get<{ id: number }>(
-    `INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared, review_reason, is_transfer, external_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+    `INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, cleared, is_transfer, external_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
     userId,
     f.date,
     f.accountId,
@@ -150,9 +146,7 @@ export async function createTransaction(db: Db, userId: number, input: Transacti
     f.description,
     f.source,
     enteredBy,
-    status,
     f.cleared,
-    f.reviewReason,
     f.isTransfer ? 1 : 0,
     f.externalId
   );

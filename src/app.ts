@@ -91,55 +91,13 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const db = await getDb();
     const userId = await requestReaderId(c, db, authed);
     const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
-    const pending = (await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM transactions WHERE status = 'pending_review' AND voided = 0 AND user_id = ?", userId))!;
     return c.json({
       month,
       confirmedSpendCents: await monthSpend(db, userId, month),
-      pendingCount: pending.n,
       recent: await recentTransactions(db, userId, 10, month),
       rtaCents: await rtaCents(db, userId, month),
       assignedCents: await assignedTotal(db, userId, month),
     });
-  });
-
-  app.get("/api/review", async (c) => {
-    const db = await getDb();
-    const userId = await requestReaderId(c, db, authed);
-    const transactions = await db.all(
-      `SELECT t.id, t.date, t.description, t.amount_cents, t.source, t.status, t.review_reason,
-              COALESCE((SELECT SUM(-s.amount_cents) FROM splits s
-                        WHERE s.transaction_id = t.id AND s.owner = 'contact' AND s.amount_cents < 0 AND s.user_id = ?), 0) AS shared_cents,
-              (SELECT c.name FROM splits s JOIN contacts c ON c.id = s.contact_id
-               WHERE s.transaction_id = t.id AND s.owner = 'contact' AND s.user_id = ? AND c.user_id = ? LIMIT 1) AS split_contact_name
-       FROM transactions t WHERE t.status = 'pending_review' AND t.voided = 0 AND t.user_id = ? ORDER BY t.id`,
-      userId,
-      userId,
-      userId,
-      userId
-    );
-    return c.json({ transactions });
-  });
-
-  /** Confirm a review item. Body may carry { potId } to recategorize at the same time. */
-  app.post("/api/review/:id/confirm", async (c) => {
-    const db = await getDb();
-    const userId = await requestUserId(c, db, authed);
-    const id = badId(c, "id");
-    if (id === null) return c.json({ error: "bad transaction id" }, 400);
-    if (!(await txnExists(db, userId, id))) return c.json({ error: `no transaction ${id}` }, 404);
-    const { ok, body } = await readJson(c);
-    if (!ok) return c.json({ error: "malformed JSON" }, 400);
-    // Sequential awaits, not a transaction: one writer per user (a single
-    // agent plus the human behind it), and every statement carries that
-    // user's user_id, so two users' sequences never touch the same rows.
-    if (body?.potId !== undefined && body?.potId !== null) {
-      const potId = Number(body.potId);
-      if (!Number.isInteger(potId) || potId <= 0) throw new Error("bad potId");
-      if (!(await db.get("SELECT 1 FROM pots WHERE id = ? AND user_id = ?", potId, userId))) throw new Error(`no pot ${potId}`);
-      await db.run("UPDATE splits SET pot_id = ? WHERE transaction_id = ? AND user_id = ?", potId, id, userId);
-    }
-    await db.run("UPDATE transactions SET status = 'confirmed' WHERE id = ? AND user_id = ?", id, userId);
-    return c.json({ ok: true });
   });
 
   /** Recategorize a transaction to another pot. */
@@ -270,7 +228,6 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const userId = await requestReaderId(c, db, authed);
     const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
     if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
-    const pending = (await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM transactions WHERE status = 'pending_review' AND voided = 0 AND user_id = ?", userId))!;
     const accounts = await db.all<{ id: number; name: string }>("SELECT id, name FROM accounts WHERE user_id = ? ORDER BY id", userId);
     const unreconciledAccounts = [];
     for (const a of accounts) {
@@ -300,7 +257,6 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const sharedOwedCents = sharedOwedBy.reduce((a, o) => a + o.cents, 0);
     return c.json({
       month,
-      pendingReviewCount: pending.n,
       unreconciledAccounts,
       rtaCents: await rtaCents(db, userId, month),
       unsettledSharedCents: Math.max(0, sharedOwedCents - (await contactCredit(db, userId))),
@@ -401,7 +357,8 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
 
   /** Record a manually entered transaction. Body: { date, accountId, potId,
    *  amountCents (signed, nonzero), description, isTransfer?, contactId?, shareCents?,
-   *  source?, cleared?, reviewReason?, externalId? }. A repeat externalId
+   *  source?, cleared?, externalId? }. Uncertainty is resolved in conversation,
+   *  never parked in the app: reviewReason is rejected. A repeat externalId
    *  returns the existing id with duplicate: true (idempotent record). */
   app.post("/api/transactions", async (c) => {
     const db = await getDb();
@@ -410,6 +367,8 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     try {
       const b = body ?? {};
+      if (b.reviewReason !== undefined && b.reviewReason !== null)
+        return c.json({ error: "reviewReason is not accepted; resolve uncertainty in conversation instead" }, 400);
       if (b.externalId) {
         const dup = await db.get<{ id: number }>("SELECT id FROM transactions WHERE external_id = ? AND user_id = ?", b.externalId, userId);
         if (dup) return c.json({ ok: true, id: dup.id, duplicate: true });

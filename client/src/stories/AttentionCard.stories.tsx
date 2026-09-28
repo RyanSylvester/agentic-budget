@@ -11,7 +11,7 @@ const meta: Meta<typeof AttentionCard> = {
     docs: {
       description: {
         component:
-          "The needs-attention card on the overview page. It surfaces the short list that matters right now: transactions waiting for review, accounts that do not reconcile, unassigned money, and outstanding shared balances.",
+          "The needs-attention card on the overview page. It surfaces the short list that matters right now: accounts that do not reconcile, unassigned money, and outstanding shared balances.",
       },
     },
   },
@@ -34,24 +34,9 @@ export const AllItems: Story = {
   parameters: {
     docs: {
       description: {
-        story: "Every attention item present at once: review queue, unreconciled accounts, unassigned money, shared balance.",
+        story: "Every attention item present at once: unreconciled accounts, unassigned money, shared balance.",
       },
     },
-  },
-};
-
-export const ReviewOnly: Story = {
-  args: {
-    ...base,
-    attention: makeAttention({
-      pendingReviewCount: 1,
-      unreconciledAccounts: [],
-      rtaCents: 0,
-      unsettledSharedCents: 0,
-    }),
-  },
-  parameters: {
-    docs: { description: { story: "Only the review queue needs work; everything else is clear." } },
   },
 };
 
@@ -59,7 +44,6 @@ export const SharedOwesOnly: Story = {
   args: {
     ...base,
     attention: makeAttention({
-      pendingReviewCount: 0,
       unreconciledAccounts: [],
       rtaCents: 0,
       unsettledSharedCents: 129900,
@@ -78,7 +62,6 @@ export const SingleContactOwes: Story = {
   args: {
     ...base,
     attention: makeAttention({
-      pendingReviewCount: 0,
       unreconciledAccounts: [],
       rtaCents: 0,
       unsettledSharedCents: 89900,
@@ -90,24 +73,10 @@ export const SingleContactOwes: Story = {
   },
 };
 
-export const LegacyFallback: Story = {
-  args: {
-    ...base,
-    attention: null,
-    overview: makeOverview({ pendingCount: 2 }),
-  },
-  parameters: {
-    docs: {
-      description: { story: "Fallback when the attention endpoint is unavailable: falls back to the pending review count." },
-    },
-  },
-};
-
 export const NothingToShow: Story = {
   args: {
     ...base,
     attention: makeAttention({
-      pendingReviewCount: 0,
       unreconciledAccounts: [],
       rtaCents: 0,
       unsettledSharedCents: 0,

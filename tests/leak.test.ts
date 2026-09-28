@@ -124,9 +124,6 @@ async function setupTwoUsers() {
     expect(r.status).toBe(200);
   }
 
-  // Alice confirms her own transaction; Bob's stays pending.
-  expect((await jsonCall(app, "POST", `/api/review/${txnA}/confirm`, { cookie: cookieA, body: {} })).status).toBe(200);
-
   return { app, db, cookieA, cookieB, potA, potB, contactA, contactB, txnA, txnB, schedA, schedB };
 }
 
@@ -137,9 +134,6 @@ describe("cross-user isolation", () => {
     const overview = (await (await call(app, "GET", "/api/overview?month=2026-09", { cookie: cookieA })).json()) as any;
     expect(overview.confirmedSpendCents).toBe(5000);
     expect(overview.recent.map((t: any) => t.description)).toEqual(["alice spend"]);
-
-    const review = (await (await call(app, "GET", "/api/review", { cookie: cookieA })).json()) as any;
-    expect(review.transactions).toEqual([]);
 
     const txns = (await (await call(app, "GET", "/api/transactions?month=2026-09", { cookie: cookieA })).json()) as any;
     expect(txns.transactions.map((t: any) => t.description)).toEqual(["alice spend"]);
@@ -163,7 +157,6 @@ describe("cross-user isolation", () => {
     expect(preview.spentCents).toBe(5000);
 
     const attention = (await (await call(app, "GET", "/api/attention?month=2026-09", { cookie: cookieA })).json()) as any;
-    expect(attention.pendingReviewCount).toBe(0);
     expect(attention.sharedOwedBy).toEqual([]);
 
     const sinking = (await (await call(app, "GET", "/api/sinking?month=2026-09", { cookie: cookieA })).json()) as any;
@@ -179,7 +172,6 @@ describe("cross-user isolation", () => {
 
     const attempt = (method: string, path: string, body?: unknown) => jsonCall(app, method, path, { cookie: cookieA, body });
 
-    expect((await attempt("POST", `/api/review/${txnB}/confirm`, {})).status).toBe(404);
     expect((await attempt("POST", `/api/transactions/${txnB}/recategorize`, { potId: 1 })).status).toBe(404);
     expect((await attempt("POST", `/api/transactions/${txnB}/void`)).status).toBe(404);
     expect((await attempt("PUT", `/api/transactions/${txnB}`, { description: "hacked" })).status).toBe(404);

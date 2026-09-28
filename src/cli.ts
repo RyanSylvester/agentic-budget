@@ -2,7 +2,7 @@
  *  runs instead of clicking through a UI.
  *
  *  Usage:
- *    bun src/cli.ts record --account 1 --amount -12.50 --description "Voila groceries" --source mention [--date 2026-09-26] [--cleared] [--pot 5] [--contact-id 1] [--share-cents 625] [--uncertain "unsure which pot"] [--transfer] [--external-id stmt-abc123]
+ *    bun src/cli.ts record --account 1 --amount -12.50 --description "Voila groceries" --source mention [--date 2026-09-26] [--cleared] [--pot 5] [--contact-id 1] [--share-cents 625] [--transfer] [--external-id stmt-abc123]
  *    bun src/cli.ts assign --month 2026-09 --pot Groceries --cents 60000
  *    bun src/cli.ts assign scaffold --month 2026-10 [--strategy average_3mo|last_month] [--dry-run]
  *    bun src/cli.ts recategorize --id 42 --pot Groceries
@@ -18,7 +18,6 @@
  *    bun src/cli.ts contact rename --contact 1 --name "Alex R."
  *    bun src/cli.ts contact delete --contact 1   # blocked while pots or splits reference them
  *    bun src/cli.ts settle --contact 1 --account 1 --amount 2000 --note "E-transfer"   # their lump sum fills the buckets they owe, oldest first
- *    bun src/cli.ts review            # list pending_review transactions
  *    bun src/cli.ts reconcile --account 1 --balance 1234.56
  *    bun src/cli.ts close --month 2026-09 [--apply]   # preview (or apply) the month-end close
  *    bun src/cli.ts sinking add --pot "Property tax" --expected 3483.59 --due 2027-07 [--cadence 12]
@@ -52,7 +51,7 @@ import { runRemote, printScaffold, printClosePreview } from "./cli-remote";
 import { randomBytes } from "node:crypto";
 
 function usage(): never {
-  console.error("usage: budget <record|assign|recategorize|void|pot|contact|settle|review|reconcile|close|sinking|user|invite|migration|migrate-remote|serve|login> [options]");
+  console.error("usage: budget <record|assign|recategorize|void|pot|contact|settle|reconcile|close|sinking|user|invite|migration|migrate-remote|serve|login> [options]");
   process.exit(2);
 }
 
@@ -146,7 +145,6 @@ async function main() {
     const source = (flag("source") ?? "manual") as "gmail" | "mention" | "manual";
     const cleared = rest.includes("--cleared") ? "cleared" : "uncleared";
     const potId = flag("pot") ? await mustResolvePot(db, userId, flag("pot")!) : null;
-    const uncertain = flag("uncertain") ?? null; // reason the agent wasn't sure
     const isTransfer = rest.includes("--transfer") ? 1 : 0;
     const date = flag("date") ?? new Date().toISOString().slice(0, 10);
     const externalId = flag("external-id") ?? null;
@@ -159,7 +157,6 @@ async function main() {
         process.exit(0);
       }
     }
-    const status = uncertain ? "pending_review" : "confirmed";
     const enteredBy = "agent"; // CLI is the agent's write path
     // Splits: the user's share counts in their views; the contact's share is
     // expected (owed). Defaults come from the pot's share config; flags override.
@@ -185,8 +182,8 @@ async function main() {
     // agent plus the human behind it), and every statement carries that
     // user's user_id, so two users' sequences never touch the same rows.
     const row = (await db.get<{ id: number }>(
-      `INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared, review_reason, is_transfer, external_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-      userId, date, accountId, amount, description, source, enteredBy, status, cleared, uncertain, isTransfer, externalId
+      `INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, cleared, is_transfer, external_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+      userId, date, accountId, amount, description, source, enteredBy, cleared, isTransfer, externalId
     ))!;
     if (share !== 0 && contactId !== null) {
       const userCents = amount + share; // amount negative outflow; contact's share positive dollars
@@ -197,11 +194,11 @@ async function main() {
     }
     await assertSplitsSum(db, userId, row.id);
     const txnId = row.id;
-    const tag = `${status}${isTransfer ? ", transfer" : ""}, ${cleared}`;
+    const tag = `confirmed${isTransfer ? ", transfer" : ""}, ${cleared}`;
     if (share !== 0) {
       console.log(`recorded transaction ${txnId} (${tag}) — split: user ${fmtCents(amount + share)}, contact owes ${fmtCents(share)}`);
     } else {
-      console.log(`recorded transaction ${txnId} (${tag})${uncertain ? ` — needs review: ${uncertain}` : ""}`);
+      console.log(`recorded transaction ${txnId} (${tag})`);
     }
   } else if (cmd === "assign") {
     const db = await openDb();
@@ -394,12 +391,6 @@ async function main() {
       if (suggestion) console.log(`transaction ${suggestion} exactly explains the difference — did it post?`);
       for (const t of uncleared) console.log(`  uncleared: ${t.id} $${fmtCents(t.amount_cents)} ${t.description}`);
     }
-  } else if (cmd === "review") {
-    const db = await openDb();
-    const userId = await localUserId(db);
-    const rows = await db.all<any>("SELECT id, date, amount_cents, description, source FROM transactions WHERE status = 'pending_review' AND voided = 0 AND user_id = ? ORDER BY id", userId);
-    if (rows.length === 0) console.log("nothing pending review");
-    else for (const r of rows) console.log(`${r.id}  ${r.date}  $${fmtCents(r.amount_cents)}  ${r.description}  [${r.source}]`);
   } else if (cmd === "close") {
     const db = await openDb();
     const userId = await localUserId(db);

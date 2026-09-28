@@ -16,7 +16,7 @@ export async function monthSpend(db: Db, userId: number, month: string): Promise
   const r = await db.get<{ spent: number }>(
     `SELECT COALESCE(SUM(-s.amount_cents), 0) AS spent
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
-     WHERE substr(t.date, 1, 7) = ? AND t.status = 'confirmed'
+     WHERE substr(t.date, 1, 7) = ?
        AND t.is_transfer = 0 AND t.voided = 0
        AND s.owner = 'user' AND s.amount_cents < 0
        AND s.user_id = ? AND t.user_id = ?`,
@@ -34,8 +34,7 @@ export async function potSpend(db: Db, userId: number, potId: number, month: str
        COALESCE(SUM(CASE WHEN s.owner = 'user' THEN -s.amount_cents ELSE 0 END), 0) AS user,
        COALESCE(SUM(CASE WHEN s.owner = 'contact' THEN -s.amount_cents ELSE 0 END), 0) AS shared
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
-     WHERE s.pot_id = ? AND substr(t.date, 1, 7) = ?
-       AND t.status = 'confirmed' AND t.is_transfer = 0 AND t.voided = 0 AND s.amount_cents < 0
+     WHERE s.pot_id = ? AND substr(t.date, 1, 7) = ? AND t.is_transfer = 0 AND t.voided = 0 AND s.amount_cents < 0
        AND s.user_id = ? AND t.user_id = ?`,
     potId,
     month,
@@ -76,7 +75,7 @@ export async function spendTrend(db: Db, userId: number, limit = 6): Promise<{ m
     `SELECT substr(t.date, 1, 7) AS month,
             COALESCE(SUM(CASE WHEN s.owner = 'user' AND s.amount_cents < 0 THEN -s.amount_cents ELSE 0 END), 0) AS spent
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
-     WHERE t.status = 'confirmed' AND t.is_transfer = 0 AND t.voided = 0
+     WHERE t.is_transfer = 0 AND t.voided = 0
        AND s.user_id = ? AND t.user_id = ?
      GROUP BY month ORDER BY month DESC LIMIT ?`,
     userId,
@@ -90,7 +89,7 @@ export async function spendTrend(db: Db, userId: number, limit = 6): Promise<{ m
  *  Voided transactions never appear. */
 export async function recentTransactions(db: Db, userId: number, limit = 10, month?: string) {
   const params: DbValue[] = [];
-  let where = `WHERE t.status = 'confirmed' AND t.voided = 0 AND t.user_id = ?`;
+  let where = `WHERE t.voided = 0 AND t.user_id = ?`;
   params.push(userId);
   if (month) {
     where += ` AND substr(t.date, 1, 7) = ?`;
@@ -120,7 +119,7 @@ export async function monthInflows(db: Db, userId: number, month: string): Promi
   const r = await db.get<{ inflow: number }>(
     `SELECT COALESCE(SUM(s.amount_cents), 0) AS inflow
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
-     WHERE substr(t.date, 1, 7) = ? AND t.status = 'confirmed'
+     WHERE substr(t.date, 1, 7) = ?
        AND t.is_transfer = 0 AND t.voided = 0
        AND s.owner = 'user' AND s.amount_cents > 0
        AND s.user_id = ? AND t.user_id = ?`,
@@ -138,8 +137,7 @@ export async function potInflow(db: Db, userId: number, potId: number, month: st
   const r = await db.get<{ inflow: number }>(
     `SELECT COALESCE(SUM(CASE WHEN s.owner = 'user' THEN s.amount_cents ELSE 0 END), 0) AS inflow
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
-     WHERE s.pot_id = ? AND substr(t.date, 1, 7) = ?
-       AND t.status = 'confirmed' AND t.voided = 0 AND s.amount_cents > 0
+     WHERE s.pot_id = ? AND substr(t.date, 1, 7) = ? AND t.voided = 0 AND s.amount_cents > 0
        AND s.user_id = ? AND t.user_id = ?`,
     potId,
     month,
@@ -180,7 +178,6 @@ export interface ListedTransaction {
   description: string;
   amountCents: number;
   isTransfer: number;
-  status: string;
   cleared: string;
   source: string;
   accountId: number;
@@ -198,7 +195,7 @@ export async function listTransactions(db: Db, userId: number, month: string): P
   return db.all<ListedTransaction>(
     `SELECT t.id, t.date, t.description,
             t.amount_cents AS amountCents, t.is_transfer AS isTransfer,
-            t.status, t.cleared, t.source,
+            t.cleared, t.source,
             t.account_id AS accountId, a.name AS accountName,
             (SELECT s2.pot_id FROM splits s2
              WHERE s2.transaction_id = t.id AND s2.owner = 'user' AND s2.user_id = ?

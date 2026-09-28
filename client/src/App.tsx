@@ -10,20 +10,16 @@ export interface Txn {
   date: string;
   description: string;
   user_cents: number;
-  amount_cents?: number; // present on /api/review items only
   is_transfer: number;
   split_with_contact: number;
   split_contact_name: string | null;
   source: string;
-  status: string;
   shared_cents: number;
-  review_reason: string | null;
 }
 
 export interface Overview {
   month: string;
   confirmedSpendCents: number;
-  pendingCount: number;
   recent: Txn[];
   rtaCents?: number;
   assignedCents?: number;
@@ -94,7 +90,6 @@ export interface TrendPoint {
 
 export interface Attention {
   month: string;
-  pendingReviewCount: number;
   unreconciledAccounts: Array<string | { name: string }>;
   rtaCents: number;
   unsettledSharedCents: number;
@@ -114,7 +109,6 @@ export interface ListedTxn {
   description: string;
   amountCents: number;
   isTransfer: number;
-  status: string;
   cleared: string;
   source: string;
   accountId: number;
@@ -729,11 +723,6 @@ export function AttentionCard({ attention, overview, accounts, onGo }: {
 }) {
   const items: { label: React.ReactNode; tab: Tab }[] = [];
   if (attention) {
-    if (attention.pendingReviewCount > 0)
-      items.push({
-        label: `${attention.pendingReviewCount} transaction${attention.pendingReviewCount === 1 ? "" : "s"} to review`,
-        tab: "review",
-      });
     for (const a of attention.unreconciledAccounts ?? []) {
       const name = typeof a === "string" ? a : a.name;
       items.push({ label: `${name} not reconciled yet`, tab: "accounts" });
@@ -757,11 +746,6 @@ export function AttentionCard({ attention, overview, accounts, onGo }: {
       });
   } else {
     // Legacy fallback while /api/attention is unavailable.
-    if (overview && overview.pendingCount > 0)
-      items.push({
-        label: `${overview.pendingCount} transaction${overview.pendingCount === 1 ? "" : "s"} to review`,
-        tab: "review",
-      });
     for (const a of accounts)
       if (!a.lastReconciledAt)
         items.push({ label: `${a.name} not reconciled yet`, tab: "accounts" });
@@ -1516,55 +1500,6 @@ export function SharingTab() {
   );
 }
 
-/* ---------- review ---------- */
-
-export function ReviewQueue({ onChange }: { onChange: () => void }) {
-  const { data, error, loading, retry } = useApi<{ transactions: Txn[] }>("/api/review");
-  const [doneIds, setDoneIds] = useState<Set<number>>(new Set());
-
-  const confirm = async (id: number) => {
-    await fetch(`/api/review/${id}/confirm`, { method: "POST" });
-    setDoneIds((s) => new Set(s).add(id));
-    onChange();
-  };
-
-  if (loading) {
-    return (
-      <div className="space-y-3">
-        {[0, 1, 2].map((i) => <Skeleton key={i} className="h-[76px]" />)}
-      </div>
-    );
-  }
-  if (error) return <FetchError onRetry={retry} label="Couldn't load the review queue." />;
-
-  const txns = (data?.transactions ?? []).filter((t) => !doneIds.has(t.id));
-  if (txns.length === 0)
-    return <p className="py-6 text-center text-[19px] italic text-[var(--muted)]">All clear.</p>;
-
-  return (
-    <ul className="space-y-3">
-      {txns.map((t) => (
-        <li key={t.id} className="card flex items-center justify-between gap-3 overflow-hidden">
-          <div className="w-1 self-stretch bg-[var(--warning)]" />
-          <div className="min-w-0 flex-1 py-3.5">
-            <div className="truncate text-[15px] font-semibold">{t.description}</div>
-            <div className="mt-0.5 text-[13px] text-[var(--muted)]">{fmtDate(t.date)} · via {t.source}</div>
-            {t.review_reason && (
-              <div className="mt-1 text-[13px] font-medium text-[var(--warning)]">Agent wasn't sure: {t.review_reason}</div>
-            )}
-          </div>
-          <div className="flex shrink-0 flex-col items-end gap-2 py-3.5 pr-4">
-            <span className="t-nums text-[15px]">{money(t.amount_cents ?? 0)}</span>
-            <button onClick={() => confirm(t.id)} className="btn-ink px-4 py-1.5 text-[13px]">
-              Confirm
-            </button>
-          </div>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 /* ---------- accounts + reconcile ---------- */
 
 interface ReconcileResponse {
@@ -2212,9 +2147,6 @@ export function TransactionsTab({ month }: { month: string }) {
                       <span className="truncate">{t.potName ?? "Uncategorized"}</span>
                       {t.isTransfer ? <TxnBadge>Transfer</TxnBadge> : null}
                       {t.splitWithContact ? <TxnBadge>{t.splitContactName ? `split · ${t.splitContactName}` : "split"}</TxnBadge> : null}
-                      {t.status === "pending_review" ? (
-                        <span className="font-medium text-[var(--warning)]">needs review</span>
-                      ) : null}
                     </div>
                   </div>
                   <span
@@ -2250,14 +2182,13 @@ export function TransactionsTab({ month }: { month: string }) {
 
 /* ---------- app ---------- */
 
-export type Tab = "overview" | "pots" | "transactions" | "sharing" | "review" | "accounts" | "settings";
+export type Tab = "overview" | "pots" | "transactions" | "sharing" | "accounts" | "settings";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "pots", label: "Pots" },
   { id: "transactions", label: "Transactions" },
   { id: "sharing", label: "Sharing" },
-  { id: "review", label: "Review" },
   { id: "accounts", label: "Accounts" },
   { id: "settings", label: "Settings" },
 ];
@@ -2268,7 +2199,7 @@ const MONTH_TABS: Tab[] = ["overview", "pots", "transactions"];
 
 // Mobile bottom bar: three tabs plus a "More" sheet for the rest.
 const MOBILE_TABS: Tab[] = ["overview", "pots", "transactions"];
-const SHEET_TABS: Tab[] = ["sharing", "review", "accounts", "settings"];
+const SHEET_TABS: Tab[] = ["sharing", "accounts", "settings"];
 
 /* Icon-only mobile tab bar: one clean inline SVG per tab, no icon library.
  * Selected renders in dark ink, inactive in muted grey. */
@@ -2327,15 +2258,7 @@ export function AppShell() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
-  const [pendingCount, setPendingCount] = useState(0);
   const { data: attention } = useApi<Attention>("/api/attention");
-
-  useEffect(() => {
-    fetch("/api/review")
-      .then((r) => r.json())
-      .then((d) => setPendingCount(d.transactions.length))
-      .catch(() => {});
-  }, [refreshKey, tab]);
 
   // Near month-end with money still unassigned, the Pots tab earns a dot:
   // the close card now lives there.
@@ -2350,7 +2273,6 @@ export function AppShell() {
   };
 
   const navBadge = (id: Tab) => {
-    if (id === "review" && pendingCount > 0) return <CountBadge n={pendingCount} className="ml-auto" />;
     if (id === "pots" && closeAlert) return <span className="ml-auto h-2 w-2 rounded-full bg-[var(--warning)]" />;
     return null;
   };
@@ -2398,16 +2320,6 @@ export function AppShell() {
           {tab === "transactions" && <TransactionsTab key={`t-${refreshKey}-${month}`} month={month} />}
 
           {tab === "sharing" && <SharingTab key={`s-${refreshKey}`} />}
-
-          {tab === "review" && (
-            <div>
-              <div className="mb-1 font-serif-d text-[24px] font-medium">Review</div>
-              <p className="mb-5 text-[15px] text-[var(--muted)]">
-                Only the entries that weren't clear. One tap to confirm.
-              </p>
-              <ReviewQueue onChange={() => setRefreshKey((k) => k + 1)} />
-            </div>
-          )}
 
           {tab === "accounts" && (
             <div>
@@ -2458,11 +2370,6 @@ export function AppShell() {
           >
             <span className={`h-1.5 w-1.5 rounded-full ${SHEET_TABS.includes(tab) ? "bg-[var(--ink)]" : "bg-transparent"}`} />
             <TabIcon id="more" />
-            {pendingCount > 0 && (
-              <span className="t-nums absolute right-3 top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--ink)] px-1 text-[10px] font-bold text-[var(--bg)]">
-                {pendingCount}
-              </span>
-            )}
           </button>
         </div>
       </nav>
@@ -2479,7 +2386,6 @@ export function AppShell() {
                 className="flex min-h-[52px] w-full items-center justify-between rounded-[var(--r-md)] px-3 text-left text-[16px] transition active:bg-[var(--bg-sunken)]"
               >
                 <span className={tab === id ? "font-medium" : undefined}>{tabLabel(id)}</span>
-                {id === "review" && pendingCount > 0 && <CountBadge n={pendingCount} />}
               </button>
             ))}
           </div>

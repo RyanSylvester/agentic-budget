@@ -43,7 +43,6 @@ export const Quiet: Story = {
       get: {
         [overviewUrl]: makeOverview(),
         "/api/attention": makeAttention({
-          pendingReviewCount: 0,
           unreconciledAccounts: [],
           rtaCents: 0,
           unsettledSharedCents: 0,

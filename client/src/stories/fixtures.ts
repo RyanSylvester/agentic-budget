@@ -61,9 +61,7 @@ export function makeTxn(over: Partial<Txn> = {}): Txn {
     split_with_contact: 0,
     split_contact_name: null,
     source: "mock-import",
-    status: "confirmed",
     shared_cents: 0,
-    review_reason: null,
     ...over,
   };
 }
@@ -81,7 +79,6 @@ export function makeOverview(over: Partial<Overview> = {}): Overview {
   return {
     month: MONTH,
     confirmedSpendCents: 272123,
-    pendingCount: 0,
     recent: fixtureTxns,
     rtaCents: 487250,
     assignedCents: 0,
@@ -92,7 +89,6 @@ export function makeOverview(over: Partial<Overview> = {}): Overview {
 export function makeAttention(over: Partial<Attention> = {}): Attention {
   return {
     month: MONTH,
-    pendingReviewCount: 3,
     unreconciledAccounts: [{ name: "Mock Chequing" }, { name: "Mock Credit Card" }],
     rtaCents: 487250,
     unsettledSharedCents: 0,
@@ -162,12 +158,6 @@ export const fixtureAccounts: Account[] = [
   }),
 ];
 
-export const fixtureReviewTxns: Txn[] = [
-  makeTxn({ id: 101, description: "Mock ambiguous charge", user_cents: -1299, amount_cents: -1299, review_reason: "Unusual merchant for this pot", status: "pending_review" }),
-  makeTxn({ id: 102, description: "Mock subscription renewal", user_cents: -1499, amount_cents: -1499, review_reason: null, status: "pending_review" }),
-  makeTxn({ id: 103, description: "Mock refund posted twice", user_cents: 4500, amount_cents: 4500, review_reason: "Possible duplicate of a cleared entry", status: "pending_review" }),
-];
-
 /* Six months of total spend, oldest first: backs the /api/trend mock and
    the Pots-page summary sparkline. Amounts are cents, like the API. */
 export const fixtureTrend: TrendPoint[] = [
@@ -179,8 +169,8 @@ export const fixtureTrend: TrendPoint[] = [
   { month: "2026-09", spent: 272123 },
 ];
 
-/* Transactions-page rows: outflows, an inflow, a transfer, splits, a
-   pending-review item, and an uncategorized one. */
+/* Transactions-page rows: outflows, an inflow, a transfer, splits,
+   and an uncategorized one. */
 
 const fixtureChequing = fixtureAccounts[0];
 const groceriesPot = fixturePots.find((p) => p.name === "Groceries")!;
@@ -196,7 +186,6 @@ export function makeListedTxn(over: Partial<ListedTxn> = {}): ListedTxn {
     description: "Mock purchase",
     amountCents: -2599,
     isTransfer: 0,
-    status: "confirmed",
     cleared: "uncleared",
     source: "manual",
     accountId: fixtureChequing.id,
@@ -219,6 +208,5 @@ export const fixtureListedTxns: ListedTxn[] = [
   makeListedTxn({ date: "2026-09-24", description: "Mock transfer between accounts", amountCents: -89182, isTransfer: 1, potId: null, potName: null, potGroup: null }),
   makeListedTxn({ date: "2026-09-23", description: "Mock dinner out", amountCents: -9650, splitWithContact: 1, sharedCents: 4825, splitContactId: 1, splitContactName: "Alex", potId: diningPot.id, potName: diningPot.name, potGroup: diningPot.group }),
   makeListedTxn({ date: "2026-09-22", description: "Mock coffee stop", amountCents: -485, potId: coffeePot.id, potName: coffeePot.name, potGroup: coffeePot.group }),
-  makeListedTxn({ date: "2026-09-21", description: "Mock ambiguous charge", amountCents: -1299, status: "pending_review" }),
   makeListedTxn({ date: "2026-09-20", description: "Mock uncategorized import", amountCents: -3200, potId: null, potName: null, potGroup: null }),
 ];

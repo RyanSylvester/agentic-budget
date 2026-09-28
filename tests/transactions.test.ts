@@ -33,7 +33,6 @@ describe("createTransaction", () => {
     expect(t.amount_cents).toBe(-2599);
     expect(t.source).toBe("manual");
     expect(t.entered_by).toBe("user");
-    expect(t.status).toBe("confirmed");
     const splits = await db.all("SELECT owner, amount_cents, pot_id FROM splits WHERE transaction_id = ?", id) as any[];
     expect(splits).toEqual([{ owner: "user", amount_cents: -2599, pot_id: 1 }]);
   });

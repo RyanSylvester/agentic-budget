@@ -44,7 +44,7 @@ export async function contactOwed(db: Db, userId: number, contactId?: number): P
   // All user_id filters bind the same value; params are listed in the order
   // their placeholders appear in the SQL text below.
   const params: DbValue[] = [userId, userId, userId, userId, userId];
-  let where = `s.owner = 'contact' AND s.amount_cents < 0 AND t.status = 'confirmed' AND t.voided = 0
+  let where = `s.owner = 'contact' AND s.amount_cents < 0 AND t.voided = 0
                AND s.user_id = ? AND t.user_id = ? AND c.user_id = ?`;
   if (contactId !== undefined) {
     where += ` AND s.contact_id = ?`;
@@ -125,8 +125,8 @@ export async function applySettlement(
   const { allocations, leftoverCents } = allocateSettlement(owed, opts.amountCents);
 
   const txn = await db.get<{ id: number }>(
-    `INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared)
-     VALUES (?, date('now'), ?, ?, ?, 'manual', ?, 'confirmed', 'cleared') RETURNING id`,
+    `INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, cleared)
+     VALUES (?, date('now'), ?, ?, ?, 'manual', ?, 'cleared') RETURNING id`,
     userId,
     opts.accountId,
     opts.amountCents,

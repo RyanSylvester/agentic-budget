@@ -131,7 +131,7 @@ export async function potBalance(db: Db, userId: number, potId: number, month: s
     `SELECT COALESCE(SUM(-s.amount_cents), 0) AS t
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
      WHERE s.pot_id = ? AND substr(t.date, 1, 7) <= ?
-       AND t.status = 'confirmed' AND t.is_transfer = 0 AND t.voided = 0
+       AND t.is_transfer = 0 AND t.voided = 0
        AND s.owner = 'user' AND s.amount_cents < 0
        AND s.user_id = ? AND t.user_id = ?`,
     potId,

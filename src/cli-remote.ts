@@ -16,7 +16,7 @@ function flag(rest: string[], name: string): string | undefined {
 }
 
 function usage(): never {
-  console.error("usage: budget <record|assign|recategorize|void|pot|contact|settle|review|reconcile|close|sinking|migration|migrate-remote|serve|login> [options]");
+  console.error("usage: budget <record|assign|recategorize|void|pot|contact|settle|review|reconcile|close|sinking|invite|migration|migrate-remote|serve|login> [options]");
   process.exit(2);
 }
 
@@ -115,7 +115,6 @@ async function remoteRecord(remote: RemoteConfig, rest: string[]): Promise<void>
   const source = flag(rest, "source") ?? "manual";
   const cleared = rest.includes("--cleared") ? "cleared" : "uncleared";
   const potRef = flag(rest, "pot");
-  const uncertain = flag(rest, "uncertain") ?? null;
   const isTransfer = rest.includes("--transfer");
   const date = flag(rest, "date") ?? new Date().toISOString().slice(0, 10);
   const externalId = flag(rest, "external-id") ?? null;
@@ -148,19 +147,18 @@ async function remoteRecord(remote: RemoteConfig, rest: string[]): Promise<void>
     body: {
       date, accountId, amountCents: amount, description, source, cleared,
       isTransfer, potId, contactId, shareCents: -share,
-      reviewReason: uncertain, externalId,
+      externalId,
     },
   });
   if (data.duplicate) {
     console.log(`already recorded (id ${data.id})`);
     return;
   }
-  const status = uncertain ? "pending_review" : "confirmed";
-  const tag = `${status}${isTransfer ? ", transfer" : ""}, ${cleared}`;
+  const tag = `confirmed${isTransfer ? ", transfer" : ""}, ${cleared}`;
   if (share !== 0) {
     console.log(`recorded transaction ${data.id} (${tag}) - split: user ${fmtCents(amount + share)}, contact owes ${fmtCents(share)}`);
   } else {
-    console.log(`recorded transaction ${data.id} (${tag})${uncertain ? ` - needs review: ${uncertain}` : ""}`);
+    console.log(`recorded transaction ${data.id} (${tag})`);
   }
 }
 
