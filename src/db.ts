@@ -4,7 +4,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import type { Db, DbValue, RunResult, BatchStatement, BatchResult } from "./db-interface";
-import { tableExists } from "./db-interface";
+import { tableExists, clearTableExistsCache } from "./db-interface";
 import { runMigrations } from "./migrations";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -81,6 +81,10 @@ export function wrapDb(raw: Database): Db {
  *  '000' baseline (its history is not re-applied); a fresh database gets
  *  schema.sql and then every migration in order. */
 export async function migrateDb(db: Db): Promise<void> {
+  // Schema may change here, so memoized table-existence answers are dropped
+  // before judging freshness. (Test databases are rebuilt per test; the
+  // production database migrates once at startup.)
+  clearTableExistsCache();
   const preMigrationDb = await tableExists(db, "pots");
   const schema = readFileSync(join(here, "schema.sql"), "utf8");
   await db.exec(schema);

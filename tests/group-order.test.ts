@@ -6,6 +6,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { wrapDb, migrateDb } from "../src/db";
 import type { Db } from "../src/db-interface";
+import { clearTableExistsCache } from "../src/db-interface";
 import { runMigrations, listMigrations } from "../src/migrations";
 import { createPot, updatePot, deletePot, setGroupOrder } from "../src/pots";
 import { createApp } from "../src/app";
@@ -26,6 +27,7 @@ async function seedUser(db: Db, id = 1): Promise<void> {
 /** A database at the pre-group-order schema: every migration applied
  *  except the group_order one, so the backfill path can be tested. */
 async function preGroupOrderDb(): Promise<Db> {
+  clearTableExistsCache(); // this database has no group_order table yet
   const db = wrapDb(new Database(":memory:"));
   await db.exec(readFileSync(join(here, "..", "src", "schema.sql"), "utf8"));
   await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (

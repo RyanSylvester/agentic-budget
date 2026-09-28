@@ -44,6 +44,38 @@ export async function potSpend(db: Db, userId: number, potId: number, month: str
   return { userCents: r!.user, sharedCents: r!.shared };
 }
 
+/** Batched spend for many pots at once: one GROUP BY query for the whole pot
+ *  list instead of one potSpend per pot. Filters match potSpend exactly;
+ *  pots with no rows are absent from the map, so callers zero-fill in JS.
+ *  On D1 every round trip is an HTTPS request, so this collapses the
+ *  /api/pots N+1 (22 pots x 3 queries) into 3 queries total. */
+export async function allPotSpend(
+  db: Db,
+  userId: number,
+  potIds: number[],
+  month: string
+): Promise<Map<number, { userCents: number; sharedCents: number }>> {
+  const out = new Map<number, { userCents: number; sharedCents: number }>();
+  if (potIds.length === 0) return out;
+  const placeholders = potIds.map(() => "?").join(",");
+  const rows = await db.all<{ potId: number; user: number; shared: number }>(
+    `SELECT s.pot_id AS potId,
+       COALESCE(SUM(CASE WHEN s.owner = 'user' THEN -s.amount_cents ELSE 0 END), 0) AS user,
+       COALESCE(SUM(CASE WHEN s.owner = 'contact' THEN -s.amount_cents ELSE 0 END), 0) AS shared
+     FROM splits s JOIN transactions t ON t.id = s.transaction_id
+     WHERE s.pot_id IN (${placeholders}) AND substr(t.date, 1, 7) = ?
+       AND t.is_transfer = 0 AND t.voided = 0 AND s.amount_cents < 0
+       AND s.user_id = ? AND t.user_id = ?
+     GROUP BY s.pot_id`,
+    ...potIds,
+    month,
+    userId,
+    userId
+  );
+  for (const r of rows) out.set(r.potId, { userCents: r.user, sharedCents: r.shared });
+  return out;
+}
+
 /** Shift a YYYY-MM month back by n months. */
 function shiftBack(month: string, n: number): string {
   const [y, m] = month.split("-").map(Number);
@@ -104,7 +136,9 @@ export async function spendTrend(db: Db, userId: number, limit = 6): Promise<{ m
 }
 
 /** Recent confirmed transactions with the user's share of each. Optional month filter (YYYY-MM).
- *  Voided transactions never appear. */
+ *  Voided transactions never appear. The contact name comes from a derived
+ *  table (one row per transaction) instead of a correlated subquery, so the
+ *  splits table is scanned once rather than once per transaction row. */
 export async function recentTransactions(db: Db, userId: number, limit = 10, month?: string) {
   const params: DbValue[] = [];
   let where = `WHERE t.voided = 0 AND t.user_id = ?`;
@@ -118,10 +152,15 @@ export async function recentTransactions(db: Db, userId: number, limit = 10, mon
     `SELECT t.id, t.date, t.description, t.is_transfer,
             COALESCE(SUM(CASE WHEN s.owner = 'user' THEN s.amount_cents ELSE 0 END), 0) AS user_cents,
             CASE WHEN SUM(CASE WHEN s.owner = 'contact' THEN 1 ELSE 0 END) > 0 THEN 1 ELSE 0 END AS split_with_contact,
-            (SELECT c.name FROM splits s2 JOIN contacts c ON c.id = s2.contact_id
-             WHERE s2.transaction_id = t.id AND s2.owner = 'contact'
-               AND s2.user_id = ? AND c.user_id = ? LIMIT 1) AS split_contact_name
-     FROM transactions t LEFT JOIN splits s ON s.transaction_id = t.id AND s.user_id = ?
+            cc.cname AS split_contact_name
+     FROM transactions t
+     LEFT JOIN splits s ON s.transaction_id = t.id AND s.user_id = ?
+     LEFT JOIN (
+       SELECT s2.transaction_id AS tid, MIN(c.name) AS cname
+       FROM splits s2 JOIN contacts c ON c.id = s2.contact_id
+       WHERE s2.owner = 'contact' AND s2.user_id = ? AND c.user_id = ?
+       GROUP BY s2.transaction_id
+     ) cc ON cc.tid = t.id
      ${where}
      GROUP BY t.id ORDER BY t.date DESC, t.id DESC LIMIT ?`,
     userId,
@@ -163,6 +202,33 @@ export async function potInflow(db: Db, userId: number, potId: number, month: st
     userId
   );
   return r!.inflow;
+}
+
+/** Batched inflows for many pots at once. Filters match potInflow exactly;
+ *  pots with no rows are absent from the map, so callers zero-fill in JS. */
+export async function allPotInflow(
+  db: Db,
+  userId: number,
+  potIds: number[],
+  month: string
+): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  if (potIds.length === 0) return out;
+  const placeholders = potIds.map(() => "?").join(",");
+  const rows = await db.all<{ potId: number; inflow: number }>(
+    `SELECT s.pot_id AS potId,
+       COALESCE(SUM(CASE WHEN s.owner = 'user' THEN s.amount_cents ELSE 0 END), 0) AS inflow
+     FROM splits s JOIN transactions t ON t.id = s.transaction_id
+     WHERE s.pot_id IN (${placeholders}) AND substr(t.date, 1, 7) = ? AND t.voided = 0 AND s.amount_cents > 0
+       AND s.user_id = ? AND t.user_id = ?
+     GROUP BY s.pot_id`,
+    ...potIds,
+    month,
+    userId,
+    userId
+  );
+  for (const r of rows) out.set(r.potId, r.inflow);
+  return out;
 }
 
 /** What the agent assigned to pots for a month, in cents.

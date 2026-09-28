@@ -9,13 +9,13 @@
 import { Hono } from "hono";
 import type { Db } from "./db-interface";
 import { registerAuth, authMiddleware, type AuthConfig, type Identity } from "./auth";
-import { monthSpend, potSpend, potInflow, recentTransactions, listTransactions, spendTrend, assignedTotal, rtaCents, potHistory } from "./queries";
+import { monthSpend, allPotSpend, allPotInflow, recentTransactions, listTransactions, spendTrend, assignedTotal, rtaCents, potHistory } from "./queries";
 import { applySettlement, contactCredit, contactOwed } from "./settle";
 import { contactBalances, createContact, renameContact, deleteContact } from "./contacts";
 import { createPot, updatePot, deletePot, potExists, setGroupOrder } from "./pots";
 import { reconcile, suggestClear } from "./reconcile";
 import { closePreview, applyClose } from "./close";
-import { assignToPot, assignedToPot } from "./assign";
+import { assignToPot, allPotAssigned } from "./assign";
 import { scaffoldMonth, type ScaffoldStrategy } from "./scaffold";
 import { createTransaction, updateTransaction } from "./transactions";
 import { createSchedule, getScheduleById, listSchedules, markPaid, removeSchedule, sinkingStatus } from "./sinking";
@@ -426,15 +426,24 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
       userId
     );
     const out = [];
+    const potIds = pots.map((p: any) => p.id);
+    // One GROUP BY query per metric for all pots, not one query per pot:
+    // on D1 every round trip is an HTTPS request. sinkingStatus stays
+    // per-pot (cheap config lookup; its table guard is memoized).
+    const [spendByPot, inflowByPot, assignedByPot] = await Promise.all([
+      allPotSpend(db, userId, potIds, month),
+      allPotInflow(db, userId, potIds, month),
+      allPotAssigned(db, userId, month, potIds),
+    ]);
     for (const p of pots) {
-      const { userCents, sharedCents } = await potSpend(db, userId, p.id, month);
+      const sp = spendByPot.get(p.id) ?? { userCents: 0, sharedCents: 0 };
       const sched = await sinkingStatus(db, userId, p.id, month);
       out.push({
         id: p.id, name: p.name, group: p.pot_group, targetType: p.target_type, targetCents: p.target_cents,
-        spentCents: userCents, sharedCents,
+        spentCents: sp.userCents, sharedCents: sp.sharedCents,
         contactId: p.contact_id, contactName: p.contact_name, sharePct: p.share_pct,
-        assignable: p.is_assignable === 1, assignedCents: await assignedToPot(db, userId, month, p.id),
-        receivedCents: await potInflow(db, userId, p.id, month),
+        assignable: p.is_assignable === 1, assignedCents: assignedByPot.get(p.id) ?? 0,
+        receivedCents: inflowByPot.get(p.id) ?? 0,
         sinking: sched ? {
           expectedCents: sched.expectedCents, dueMonth: sched.dueMonth, cadenceMonths: sched.cadenceMonths,
           contributionCents: sched.contributionCents, balanceCents: sched.balanceCents, state: sched.state,

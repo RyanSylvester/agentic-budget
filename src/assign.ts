@@ -35,3 +35,27 @@ export async function assignedToPot(db: Db, userId: number, month: string, potId
   const r = await db.get<{ cents: number }>("SELECT cents FROM assignments WHERE month = ? AND pot_id = ? AND user_id = ?", month, potId, userId);
   return r?.cents ?? 0;
 }
+
+/** Batched assignments for many pots at once: one GROUP BY query instead of
+ *  one assignedToPot per pot. Pots with no row are absent from the map, so
+ *  callers zero-fill in JS. */
+export async function allPotAssigned(
+  db: Db,
+  userId: number,
+  month: string,
+  potIds: number[]
+): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  if (potIds.length === 0) return out;
+  const placeholders = potIds.map(() => "?").join(",");
+  const rows = await db.all<{ potId: number; cents: number }>(
+    `SELECT pot_id AS potId, SUM(cents) AS cents FROM assignments
+     WHERE month = ? AND user_id = ? AND pot_id IN (${placeholders})
+     GROUP BY pot_id`,
+    month,
+    userId,
+    ...potIds
+  );
+  for (const r of rows) out.set(r.potId, r.cents);
+  return out;
+}

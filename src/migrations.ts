@@ -12,6 +12,7 @@
  *  version is recorded only on success, so a failed migration retries cleanly
  *  on the next startup. */
 import type { Db } from "./db-interface";
+import { clearTableExistsCache } from "./db-interface";
 import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -124,4 +125,7 @@ export async function runMigrations(db: Db, opts: { baseline?: boolean } = {}): 
     await db.exec(m.sql);
     await db.run("INSERT INTO schema_migrations (version) VALUES (?)", m.version);
   }
+  // Migrations change the schema, so memoized table-existence answers are
+  // dropped when they finish.
+  clearTableExistsCache();
 }

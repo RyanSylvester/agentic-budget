@@ -46,7 +46,26 @@ export interface Db {
 
 /** Portable schema-introspection helper: pure SQL over the Db interface, so
  *  domain modules can use it without pulling in the node:fs-based migration
- *  runner (which the Worker cannot import). */
+ *  runner (which the Worker cannot import).
+ *
+ *  Memoized per isolate: schema only changes under migrations, never at
+ *  request time, so one sqlite_master probe per table is enough. Every
+ *  runtime (Worker isolate, CLI process) talks to exactly one database, so
+ *  the cache is keyed by table name alone. Tests build databases with
+ *  different schemas in one process, so they call clearTableExistsCache()
+ *  in setup whenever they create a fresh database. */
+const tableExistsCache = new Map<string, boolean>();
+
+/** Drop all memoized table-existence results. Test setup calls this when
+ *  it creates a fresh database; production never needs it. */
+export function clearTableExistsCache(): void {
+  tableExistsCache.clear();
+}
+
 export async function tableExists(db: Db, name: string): Promise<boolean> {
-  return !!(await db.get("SELECT 1 FROM sqlite_master WHERE name = ?", name));
+  const hit = tableExistsCache.get(name);
+  if (hit !== undefined) return hit;
+  const exists = !!(await db.get("SELECT 1 FROM sqlite_master WHERE name = ?", name));
+  tableExistsCache.set(name, exists);
+  return exists;
 }
