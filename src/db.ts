@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Db, DbValue, RunResult } from "./db-interface";
-import { runMigrations, tableExists } from "./migrations";
+import { tableExists } from "./db-interface";
+import { runMigrations } from "./migrations";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const DB_PATH = process.env.BUDGET_DB ?? join(here, "..", "budget.db");

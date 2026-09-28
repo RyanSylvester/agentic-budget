@@ -24,3 +24,10 @@ export interface Db {
   /** One or more statements with no parameters (schema, PRAGMA). */
   exec(sql: string): Promise<void>;
 }
+
+/** Portable schema-introspection helper: pure SQL over the Db interface, so
+ *  domain modules can use it without pulling in the node:fs-based migration
+ *  runner (which the Worker cannot import). */
+export async function tableExists(db: Db, name: string): Promise<boolean> {
+  return !!(await db.get("SELECT 1 FROM sqlite_master WHERE name = ?", name));
+}

@@ -6,9 +6,9 @@
  *  one cadence period; no re-setup, ever. Agent-managed (CLI + API); the
  *  human UI only reads the derived line on the pot row. */
 import type { Db } from "./db-interface";
+import { tableExists } from "./db-interface";
 import { resolvePotId, validMonth } from "./money";
 import { shiftMonth } from "./close";
-import { tableExists } from "./migrations";
 
 export interface SinkingSchedule {
   id: number;

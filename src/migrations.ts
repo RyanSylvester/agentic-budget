@@ -55,10 +55,6 @@ export function createMigration(name: string, dir: string = DIR): string {
   return path;
 }
 
-export async function tableExists(db: Db, name: string): Promise<boolean> {
-  return !!(await db.get("SELECT 1 FROM sqlite_master WHERE name = ?", name));
-}
-
 async function appliedVersions(db: Db): Promise<Set<string>> {
   await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
     version    TEXT PRIMARY KEY,

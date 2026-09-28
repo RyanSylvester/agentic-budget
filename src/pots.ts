@@ -3,7 +3,7 @@
  *  month assignments move to an "Uncategorized" pot (created on demand).
  *  Pure DB functions that throw on bad input; routes translate to 400s/404s. */
 import type { Db, DbValue } from "./db-interface";
-import { tableExists } from "./migrations";
+import { tableExists } from "./db-interface";
 
 export type TargetType = "fixed" | "average_3mo" | "savings";
 
