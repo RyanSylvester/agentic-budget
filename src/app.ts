@@ -251,9 +251,13 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
       e.cents += o.owedCents;
       byContact.set(o.contactId, e);
     }
-    const sharedOwedBy = [...byContact.entries()]
-      .map(([contactId, v]) => ({ contactId, ...v }))
-      .sort((a, b) => b.cents - a.cents);
+    const sharedOwedBy: { contactId: number; name: string; cents: number; netCents: number }[] = [];
+    for (const [contactId, v] of [...byContact.entries()].sort((a, b) => b[1].cents - a[1].cents)) {
+      // Per-contact net: gross owed minus this contact's unsettled credit, so
+      // consumers never have to re-derive it (and never show gross as owed).
+      const credit = await contactCredit(db, userId, contactId);
+      sharedOwedBy.push({ contactId, ...v, netCents: Math.max(0, v.cents - credit) });
+    }
     const sharedOwedCents = sharedOwedBy.reduce((a, o) => a + o.cents, 0);
     return c.json({
       month,

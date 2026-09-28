@@ -73,6 +73,26 @@ export const SingleContactOwes: Story = {
   },
 };
 
+export const SingleContactPartialCredit: Story = {
+  args: {
+    ...base,
+    attention: makeAttention({
+      unreconciledAccounts: [],
+      rtaCents: 0,
+      unsettledSharedCents: 70000,
+      sharedOwedBy: [{ contactId: 1, name: "Casey", cents: 100000, netCents: 70000 }],
+    }),
+  },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "Gross owed partly offset by credit ($1000 gross, $300 credit): the banner line reads the net $700, matching the contact card headline convention.",
+      },
+    },
+  },
+};
+
 export const NothingToShow: Story = {
   args: {
     ...base,

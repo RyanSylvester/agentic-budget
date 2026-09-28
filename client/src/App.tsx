@@ -93,7 +93,7 @@ export interface Attention {
   unreconciledAccounts: Array<string | { name: string }>;
   rtaCents: number;
   unsettledSharedCents: number;
-  sharedOwedBy: { contactId: number; name: string; cents: number }[];
+  sharedOwedBy: { contactId: number; name: string; cents: number; netCents?: number }[];
 }
 
 export interface PotHistoryPoint {
@@ -732,7 +732,10 @@ export function AttentionCard({ attention, overview, accounts, onGo }: {
       items.push({
         label:
           names.length === 1 ? (
-            <>{names[0].name} owes <span className="t-nums font-medium">{money(names[0].cents)}</span></>
+            // The per-contact line is the NET owed (gross minus credit), same
+            // convention as the contact card headline. Falls back to gross for
+            // older servers that do not send netCents.
+            <>{names[0].name} owes <span className="t-nums font-medium">{money(names[0].netCents ?? names[0].cents)}</span></>
           ) : (
             <><span className="t-nums font-medium">{money(attention.unsettledSharedCents)}</span> in shared balances owed</>
           ),
