@@ -26,7 +26,7 @@ export const Typical: Story = {
 };
 
 export const NoSpending: Story = {
-  args: { pots: [], rtaCents: 503394, trend: [] },
+  args: { pots: [], rtaCents: 487250, trend: [] },
   parameters: {
     docs: { description: { story: "A fresh month with nothing spent yet: the summary collapses to a single line." } },
   },

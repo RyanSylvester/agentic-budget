@@ -52,7 +52,7 @@ export const Error: Story = {
 
 export const Empty: Story = {
   parameters: {
-    mockApi: { get: { [url]: { pots: [], rtaCents: 503394 }, ...trend, ...closePreview } } satisfies MockApiConfig,
+    mockApi: { get: { [url]: { pots: [], rtaCents: 487250 }, ...trend, ...closePreview } } satisfies MockApiConfig,
     docs: { description: { story: "No pots for the month." } },
   },
 };
