@@ -1,22 +1,24 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
+import { wrapDb } from "../src/db";
 import { potHistory } from "../src/queries";
 import { assignedToPot } from "../src/assign";
 import { parseHistoryQuery } from "../src/server";
+import type { Db } from "../src/db-interface";
 
-function seed(): Database {
-  const db = new Database(":memory:");
-  db.exec(readFileSync("src/schema.sql", "utf8"));
-  db.exec(`INSERT INTO accounts (name, type) VALUES ('Chequing','chequing')`);
-  db.exec(`INSERT INTO pots (name, pot_group, target_type, target_cents) VALUES
+function seed(): Db {
+  const raw = new Database(":memory:");
+  raw.exec(readFileSync("src/schema.sql", "utf8"));
+  raw.exec(`INSERT INTO accounts (name, type) VALUES ('Chequing','chequing')`);
+  raw.exec(`INSERT INTO pots (name, pot_group, target_type, target_cents) VALUES
     ('Housing','essentials','fixed',300000),
     ('Groceries','essentials','average_3mo',120000)`);
   const txn = (date: string, amount: number, pot: number | null) => {
-    const t = db.query(
+    const t = raw.query(
       "INSERT INTO transactions (date, account_id, amount_cents, description, source, entered_by, status, cleared) VALUES (?, 1, ?, 't', 'manual', 'agent', 'confirmed', 'cleared') RETURNING id"
     ).get(date, amount) as { id: number };
-    db.query("INSERT INTO splits (transaction_id, pot_id, owner, amount_cents) VALUES (?, ?, 'user', ?)").run(t.id, pot, amount);
+    raw.query("INSERT INTO splits (transaction_id, pot_id, owner, amount_cents) VALUES (?, ?, 'user', ?)").run(t.id, pot, amount);
   };
   // Jun-Sep 2026: housing 300k/mo, groceries 100k/mo (140k in Sep)
   for (const m of ["06", "07", "08"]) {
@@ -25,20 +27,20 @@ function seed(): Database {
   }
   txn("2026-09-02", -300000, 1);
   txn("2026-09-03", -140000, 2);
-  return db;
+  return wrapDb(raw);
 }
 
 describe("potHistory", () => {
-  test("returns N months oldest-first ending at the given month", () => {
+  test("returns N months oldest-first ending at the given month", async () => {
     const db = seed();
-    const h = potHistory(db, 2, 4, "2026-09");
+    const h = await potHistory(db, 2, 4, "2026-09");
     expect(h.map((x) => x.month)).toEqual(["2026-06", "2026-07", "2026-08", "2026-09"]);
     expect(h.map((x) => x.spentCents)).toEqual([100000, 100000, 100000, 140000]);
   });
 
-  test("months with no spend report zero", () => {
+  test("months with no spend report zero", async () => {
     const db = seed();
-    const h = potHistory(db, 1, 2, "2026-05");
+    const h = await potHistory(db, 1, 2, "2026-05");
     expect(h).toEqual([
       { month: "2026-04", spentCents: 0 },
       { month: "2026-05", spentCents: 0 },
@@ -47,12 +49,12 @@ describe("potHistory", () => {
 });
 
 describe("assignedToPot", () => {
-  test("defaults to 0 and reflects assignments", () => {
+  test("defaults to 0 and reflects assignments", async () => {
     const db = seed();
-    expect(assignedToPot(db, "2026-09", 1)).toBe(0);
-    db.query("INSERT INTO assignments (month, pot_id, cents) VALUES ('2026-09', 1, 300000)").run();
-    expect(assignedToPot(db, "2026-09", 1)).toBe(300000);
-    expect(assignedToPot(db, "2026-08", 1)).toBe(0);
+    expect(await assignedToPot(db, "2026-09", 1)).toBe(0);
+    await db.run("INSERT INTO assignments (month, pot_id, cents) VALUES ('2026-09', 1, 300000)");
+    expect(await assignedToPot(db, "2026-09", 1)).toBe(300000);
+    expect(await assignedToPot(db, "2026-08", 1)).toBe(0);
   });
 });
 

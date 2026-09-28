@@ -1,9 +1,14 @@
 /** Dashboard server: JSON API + serves the built React client.
- *  Start with `bun src/cli.ts serve` (or `bun src/server.ts`). API under /api/*, client at /. */
+ *  Start with `bun src/cli.ts serve` (or `bun src/server.ts`). API under /api/*, client at /.
+ *
+ *  The Hono app is built by createApp(getDb): every route takes its database
+ *  from the injected getter, so the same app serves the local bun:sqlite
+ *  database today and a D1-backed Db in the Cloudflare Worker tomorrow. */
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { existsSync } from "node:fs";
 import { openDb } from "./db";
+import type { Db } from "./db-interface";
 import { monthSpend, potSpend, potInflow, recentTransactions, listTransactions, spendTrend, assignedTotal, rtaCents, potHistory } from "./queries";
 import { applySettlement, contactCredit, contactOwed } from "./settle";
 import { contactBalances, createContact, renameContact, deleteContact } from "./contacts";
@@ -15,8 +20,6 @@ import { scaffoldMonth, type ScaffoldStrategy } from "./scaffold";
 import { createTransaction, updateTransaction } from "./transactions";
 import { createSchedule, getScheduleById, listSchedules, markPaid, removeSchedule, sinkingStatus } from "./sinking";
 import { validMonth } from "./money";
-
-const app = new Hono();
 
 /* Input validation helpers: 400 for bad input, 404 when the row is missing. */
 
@@ -33,452 +36,530 @@ async function readJson(c: any): Promise<{ ok: boolean; body: any }> {
   }
 }
 
-function txnExists(db: ReturnType<typeof openDb>, id: number): boolean {
-  return !!db.query("SELECT 1 FROM transactions WHERE id = ?").get(id);
+async function txnExists(db: Db, id: number): Promise<boolean> {
+  return !!(await db.get("SELECT 1 FROM transactions WHERE id = ?", id));
 }
 
-app.get("/api/overview", (c) => {
-  const db = openDb();
-  const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
-  const pending = db.query("SELECT COUNT(*) AS n FROM transactions WHERE status = 'pending_review' AND voided = 0").get() as { n: number };
-  return c.json({
-    month,
-    confirmedSpendCents: monthSpend(db, month),
-    pendingCount: pending.n,
-    recent: recentTransactions(db, 10, month),
-    rtaCents: rtaCents(db, month),
-    assignedCents: assignedTotal(db, month),
+/** Build the API app. getDb supplies the database per request; the Bun entry
+ *  passes openDb, the Worker entry will pass a D1-backed Db. */
+export function createApp(getDb: () => Promise<Db>): Hono {
+  const app = new Hono();
+
+  app.get("/api/overview", async (c) => {
+    const db = await getDb();
+    const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
+    const pending = (await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM transactions WHERE status = 'pending_review' AND voided = 0"))!;
+    return c.json({
+      month,
+      confirmedSpendCents: await monthSpend(db, month),
+      pendingCount: pending.n,
+      recent: await recentTransactions(db, 10, month),
+      rtaCents: await rtaCents(db, month),
+      assignedCents: await assignedTotal(db, month),
+    });
   });
-});
 
-app.get("/api/review", (c) => {
-  const db = openDb();
-  const transactions = db.query(
-    `SELECT t.id, t.date, t.description, t.amount_cents, t.source, t.status, t.review_reason,
-            COALESCE((SELECT SUM(-s.amount_cents) FROM splits s
-                      WHERE s.transaction_id = t.id AND s.owner = 'contact' AND s.amount_cents < 0), 0) AS shared_cents,
-            (SELECT c.name FROM splits s JOIN contacts c ON c.id = s.contact_id
-             WHERE s.transaction_id = t.id AND s.owner = 'contact' LIMIT 1) AS split_contact_name
-     FROM transactions t WHERE t.status = 'pending_review' AND t.voided = 0 ORDER BY t.id`
-  ).all();
-  return c.json({ transactions });
-});
+  app.get("/api/review", async (c) => {
+    const db = await getDb();
+    const transactions = await db.all(
+      `SELECT t.id, t.date, t.description, t.amount_cents, t.source, t.status, t.review_reason,
+              COALESCE((SELECT SUM(-s.amount_cents) FROM splits s
+                        WHERE s.transaction_id = t.id AND s.owner = 'contact' AND s.amount_cents < 0), 0) AS shared_cents,
+              (SELECT c.name FROM splits s JOIN contacts c ON c.id = s.contact_id
+               WHERE s.transaction_id = t.id AND s.owner = 'contact' LIMIT 1) AS split_contact_name
+       FROM transactions t WHERE t.status = 'pending_review' AND t.voided = 0 ORDER BY t.id`
+    );
+    return c.json({ transactions });
+  });
 
-/** Confirm a review item. Body may carry { potId } to recategorize at the same time. */
-app.post("/api/review/:id/confirm", async (c) => {
-  const db = openDb();
-  const id = badId(c, "id");
-  if (id === null) return c.json({ error: "bad transaction id" }, 400);
-  if (!txnExists(db, id)) return c.json({ error: `no transaction ${id}` }, 404);
-  const { ok, body } = await readJson(c);
-  if (!ok) return c.json({ error: "malformed JSON" }, 400);
-  db.transaction(() => {
+  /** Confirm a review item. Body may carry { potId } to recategorize at the same time. */
+  app.post("/api/review/:id/confirm", async (c) => {
+    const db = await getDb();
+    const id = badId(c, "id");
+    if (id === null) return c.json({ error: "bad transaction id" }, 400);
+    if (!(await txnExists(db, id))) return c.json({ error: `no transaction ${id}` }, 404);
+    const { ok, body } = await readJson(c);
+    if (!ok) return c.json({ error: "malformed JSON" }, 400);
+    // Sequential awaits, not a transaction: the single writer is the only
+    // writer, so the read-then-write sequence cannot interleave.
     if (body?.potId !== undefined && body?.potId !== null) {
       const potId = Number(body.potId);
       if (!Number.isInteger(potId) || potId <= 0) throw new Error("bad potId");
-      if (!db.query("SELECT 1 FROM pots WHERE id = ?").get(potId)) throw new Error(`no pot ${potId}`);
-      db.query("UPDATE splits SET pot_id = ? WHERE transaction_id = ?").run(potId, id);
+      if (!(await db.get("SELECT 1 FROM pots WHERE id = ?", potId))) throw new Error(`no pot ${potId}`);
+      await db.run("UPDATE splits SET pot_id = ? WHERE transaction_id = ?", potId, id);
     }
-    db.query("UPDATE transactions SET status = 'confirmed' WHERE id = ?").run(id);
-  })();
-  return c.json({ ok: true });
-});
-
-/** Recategorize a transaction to another pot. */
-app.post("/api/transactions/:id/recategorize", async (c) => {
-  const db = openDb();
-  const id = badId(c, "id");
-  if (id === null) return c.json({ error: "bad transaction id" }, 400);
-  if (!txnExists(db, id)) return c.json({ error: `no transaction ${id}` }, 404);
-  const { ok, body } = await readJson(c);
-  if (!ok) return c.json({ error: "malformed JSON" }, 400);
-  const potId = Number(body?.potId);
-  if (!Number.isInteger(potId) || potId <= 0) return c.json({ error: "potId required" }, 400);
-  if (!db.query("SELECT 1 FROM pots WHERE id = ?").get(potId)) return c.json({ error: `no pot ${potId}` }, 404);
-  db.query("UPDATE splits SET pot_id = ? WHERE transaction_id = ?").run(potId, id);
-  return c.json({ ok: true });
-});
-
-/** Soft-void a transaction: excluded from spend, inflows, and RTA, kept for audit. */
-app.post("/api/transactions/:id/void", (c) => {
-  const db = openDb();
-  const id = badId(c, "id");
-  if (id === null) return c.json({ error: "bad transaction id" }, 400);
-  if (!txnExists(db, id)) return c.json({ error: `no transaction ${id}` }, 404);
-  db.query("UPDATE transactions SET voided = 1 WHERE id = ?").run(id);
-  return c.json({ ok: true });
-});
-
-/** Assign dollars to a pot for a month. Body: { month: "YYYY-MM", potId, cents }. */
-app.post("/api/assign", async (c) => {
-  const db = openDb();
-  const { ok, body } = await readJson(c);
-  if (!ok) return c.json({ error: "malformed JSON" }, 400);
-  const { month, potId, cents } = body ?? {};
-  try {
-    const r = assignToPot(db, month, potId, cents);
-    return c.json({ ok: true, ...r });
-  } catch (e) {
-    return c.json({ error: (e as Error).message }, 400);
-  }
-});
-
-/** Bulk-fill a month's assignments from history. Body: { month: "YYYY-MM",
- *  strategy: "average_3mo" | "last_month" | "target", dryRun?: boolean }.
- *  With dryRun the computed lines are returned without writing anything. */
-app.post("/api/assign/scaffold", async (c) => {
-  const db = openDb();
-  const { ok, body } = await readJson(c);
-  if (!ok) return c.json({ error: "malformed JSON" }, 400);
-  const { month, strategy, dryRun } = body ?? {};
-  try {
-    const lines = scaffoldMonth(db, month, strategy as ScaffoldStrategy, dryRun === true);
-    return c.json({ ok: true, month, strategy, lines });
-  } catch (e) {
-    return c.json({ error: (e as Error).message }, 400);
-  }
-});
-
-/** Sinking schedules (agent-managed; the UI only reads). Query param month
- *  selects the month the contributions are derived for. */
-app.get("/api/sinking", (c) => {
-  const db = openDb();
-  const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
-  if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
-  const schedules = listSchedules(db).map((s) => sinkingStatus(db, s.potId, month)!);
-  return c.json({ month, schedules });
-});
-
-/** Create a schedule. Body: { potId | pot, expectedCents, dueMonth: "YYYY-MM", cadenceMonths? }. */
-app.post("/api/sinking", async (c) => {
-  const db = openDb();
-  const { ok, body } = await readJson(c);
-  if (!ok) return c.json({ error: "malformed JSON" }, 400);
-  const potRef = body?.potId ?? body?.pot;
-  const expectedCents = Math.round(Number(body?.expectedCents));
-  const dueMonth = body?.dueMonth;
-  const cadenceMonths = body?.cadenceMonths === undefined ? 12 : Number(body.cadenceMonths);
-  if (potRef === undefined || potRef === null) return c.json({ error: "potId (or pot name) required" }, 400);
-  try {
-    const s = createSchedule(db, potRef, expectedCents, dueMonth, cadenceMonths);
-    return c.json({ ok: true, id: s.id });
-  } catch (e) {
-    return c.json({ error: (e as Error).message }, 400);
-  }
-});
-
-/** Mark the bill paid: roll the due month forward one cadence period. */
-app.post("/api/sinking/:id/paid", (c) => {
-  const db = openDb();
-  const id = badId(c, "id");
-  if (id === null) return c.json({ error: "bad schedule id" }, 400);
-  const s = getScheduleById(db, id);
-  if (!s) return c.json({ error: `no sinking schedule ${id}` }, 404);
-  try {
-    const next = markPaid(db, s.potId);
-    return c.json({ ok: true, dueMonth: next.dueMonth });
-  } catch (e) {
-    return c.json({ error: (e as Error).message }, 400);
-  }
-});
-
-/** Delete a schedule. The pot and its history are untouched. */
-app.delete("/api/sinking/:id", (c) => {
-  const db = openDb();
-  const id = badId(c, "id");
-  if (id === null) return c.json({ error: "bad schedule id" }, 400);
-  const s = getScheduleById(db, id);
-  if (!s) return c.json({ error: `no sinking schedule ${id}` }, 404);
-  try {
-    removeSchedule(db, s.potId);
+    await db.run("UPDATE transactions SET status = 'confirmed' WHERE id = ?", id);
     return c.json({ ok: true });
-  } catch (e) {
-    return c.json({ error: (e as Error).message }, 400);
-  }
-});
-
-/** Machine-readable ritual summary for the agent's weekly run. */
-app.get("/api/attention", (c) => {
-  const db = openDb();
-  const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
-  if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
-  const pending = db.query("SELECT COUNT(*) AS n FROM transactions WHERE status = 'pending_review' AND voided = 0").get() as { n: number };
-  const accounts = db.query("SELECT id, name FROM accounts ORDER BY id").all() as { id: number; name: string }[];
-  const unreconciledAccounts = accounts
-    .map((a) => {
-      const last = db.query("SELECT actual_balance_cents FROM reconciliations WHERE account_id = ? ORDER BY id DESC LIMIT 1").get(a.id) as { actual_balance_cents: number } | null;
-      const cleared = db.query(
-        "SELECT COALESCE(SUM(amount_cents), 0) AS total FROM transactions WHERE account_id = ? AND cleared IN ('cleared','reconciled') AND voided = 0"
-      ).get(a.id) as { total: number };
-      return { id: a.id, name: a.name, diffCents: cleared.total - (last?.actual_balance_cents ?? 0) };
-    })
-    .filter((a) => a.diffCents !== 0);
-  const owed = contactOwed(db);
-  const byContact = new Map<number, { name: string; cents: number }>();
-  for (const o of owed) {
-    const e = byContact.get(o.contactId) ?? { name: o.contactName, cents: 0 };
-    e.cents += o.owedCents;
-    byContact.set(o.contactId, e);
-  }
-  const sharedOwedBy = [...byContact.entries()]
-    .map(([contactId, v]) => ({ contactId, ...v }))
-    .sort((a, b) => b.cents - a.cents);
-  const sharedOwedCents = sharedOwedBy.reduce((a, o) => a + o.cents, 0);
-  return c.json({
-    month,
-    pendingReviewCount: pending.n,
-    unreconciledAccounts,
-    rtaCents: rtaCents(db, month),
-    unsettledSharedCents: Math.max(0, sharedOwedCents - contactCredit(db)),
-    sharedOwedBy,
   });
-});
 
-const balanceOf = (db: ReturnType<typeof openDb>, accountId: number, clearedOnly: boolean) => {
-  const row = db.query(
-    `SELECT COALESCE(SUM(amount_cents), 0) AS total FROM transactions WHERE account_id = ? AND voided = 0${clearedOnly ? " AND cleared IN ('cleared','reconciled')" : ""}`
-  ).get(accountId) as { total: number };
-  return row.total;
-};
+  /** Recategorize a transaction to another pot. */
+  app.post("/api/transactions/:id/recategorize", async (c) => {
+    const db = await getDb();
+    const id = badId(c, "id");
+    if (id === null) return c.json({ error: "bad transaction id" }, 400);
+    if (!(await txnExists(db, id))) return c.json({ error: `no transaction ${id}` }, 404);
+    const { ok, body } = await readJson(c);
+    if (!ok) return c.json({ error: "malformed JSON" }, 400);
+    const potId = Number(body?.potId);
+    if (!Number.isInteger(potId) || potId <= 0) return c.json({ error: "potId required" }, 400);
+    if (!(await db.get("SELECT 1 FROM pots WHERE id = ?", potId))) return c.json({ error: `no pot ${potId}` }, 404);
+    await db.run("UPDATE splits SET pot_id = ? WHERE transaction_id = ?", potId, id);
+    return c.json({ ok: true });
+  });
 
-app.get("/api/accounts", (c) => {
-  const db = openDb();
-  const accounts = db.query("SELECT id, name, type, last4 FROM accounts ORDER BY id").all() as any[];
-  return c.json({
-    accounts: accounts.map((a) => {
-      const last = db.query(
-        "SELECT created_at FROM reconciliations WHERE account_id = ? ORDER BY id DESC LIMIT 1"
-      ).get(a.id) as { created_at: string } | null;
-      return {
+  /** Soft-void a transaction: excluded from spend, inflows, and RTA, kept for audit. */
+  app.post("/api/transactions/:id/void", async (c) => {
+    const db = await getDb();
+    const id = badId(c, "id");
+    if (id === null) return c.json({ error: "bad transaction id" }, 400);
+    if (!(await txnExists(db, id))) return c.json({ error: `no transaction ${id}` }, 404);
+    await db.run("UPDATE transactions SET voided = 1 WHERE id = ?", id);
+    return c.json({ ok: true });
+  });
+
+  /** Assign dollars to a pot for a month. Body: { month: "YYYY-MM", potId, cents }. */
+  app.post("/api/assign", async (c) => {
+    const db = await getDb();
+    const { ok, body } = await readJson(c);
+    if (!ok) return c.json({ error: "malformed JSON" }, 400);
+    const { month, potId, cents } = body ?? {};
+    try {
+      const r = await assignToPot(db, month, potId, cents);
+      return c.json({ ok: true, ...r });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+
+  /** Bulk-fill a month's assignments from history. Body: { month: "YYYY-MM",
+   *  strategy: "average_3mo" | "last_month" | "target", dryRun?: boolean }.
+   *  With dryRun the computed lines are returned without writing anything. */
+  app.post("/api/assign/scaffold", async (c) => {
+    const db = await getDb();
+    const { ok, body } = await readJson(c);
+    if (!ok) return c.json({ error: "malformed JSON" }, 400);
+    const { month, strategy, dryRun } = body ?? {};
+    try {
+      const lines = await scaffoldMonth(db, month, strategy as ScaffoldStrategy, dryRun === true);
+      return c.json({ ok: true, month, strategy, lines });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+
+  /** Sinking schedules (agent-managed; the UI only reads). Query param month
+   *  selects the month the contributions are derived for. */
+  app.get("/api/sinking", async (c) => {
+    const db = await getDb();
+    const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
+    if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
+    const schedules = [];
+    for (const s of await listSchedules(db)) schedules.push((await sinkingStatus(db, s.potId, month))!);
+    return c.json({ month, schedules });
+  });
+
+  /** Create a schedule. Body: { potId | pot, expectedCents, dueMonth: "YYYY-MM", cadenceMonths? }. */
+  app.post("/api/sinking", async (c) => {
+    const db = await getDb();
+    const { ok, body } = await readJson(c);
+    if (!ok) return c.json({ error: "malformed JSON" }, 400);
+    const potRef = body?.potId ?? body?.pot;
+    const expectedCents = Math.round(Number(body?.expectedCents));
+    const dueMonth = body?.dueMonth;
+    const cadenceMonths = body?.cadenceMonths === undefined ? 12 : Number(body.cadenceMonths);
+    if (potRef === undefined || potRef === null) return c.json({ error: "potId (or pot name) required" }, 400);
+    try {
+      const s = await createSchedule(db, potRef, expectedCents, dueMonth, cadenceMonths);
+      return c.json({ ok: true, id: s.id });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+
+  /** Mark the bill paid: roll the due month forward one cadence period. */
+  app.post("/api/sinking/:id/paid", async (c) => {
+    const db = await getDb();
+    const id = badId(c, "id");
+    if (id === null) return c.json({ error: "bad schedule id" }, 400);
+    const s = await getScheduleById(db, id);
+    if (!s) return c.json({ error: `no sinking schedule ${id}` }, 404);
+    try {
+      const next = await markPaid(db, s.potId);
+      return c.json({ ok: true, dueMonth: next.dueMonth });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+
+  /** Delete a schedule. The pot and its history are untouched. */
+  app.delete("/api/sinking/:id", async (c) => {
+    const db = await getDb();
+    const id = badId(c, "id");
+    if (id === null) return c.json({ error: "bad schedule id" }, 400);
+    const s = await getScheduleById(db, id);
+    if (!s) return c.json({ error: `no sinking schedule ${id}` }, 404);
+    try {
+      await removeSchedule(db, s.potId);
+      return c.json({ ok: true });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+
+  /** Machine-readable ritual summary for the agent's weekly run. */
+  app.get("/api/attention", async (c) => {
+    const db = await getDb();
+    const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
+    if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
+    const pending = (await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM transactions WHERE status = 'pending_review' AND voided = 0"))!;
+    const accounts = await db.all<{ id: number; name: string }>("SELECT id, name FROM accounts ORDER BY id");
+    const unreconciledAccounts = [];
+    for (const a of accounts) {
+      const last = await db.get<{ actual_balance_cents: number }>(
+        "SELECT actual_balance_cents FROM reconciliations WHERE account_id = ? ORDER BY id DESC LIMIT 1",
+        a.id
+      );
+      const cleared = (await db.get<{ total: number }>(
+        "SELECT COALESCE(SUM(amount_cents), 0) AS total FROM transactions WHERE account_id = ? AND cleared IN ('cleared','reconciled') AND voided = 0",
+        a.id
+      ))!;
+      const diffCents = cleared.total - (last?.actual_balance_cents ?? 0);
+      if (diffCents !== 0) unreconciledAccounts.push({ id: a.id, name: a.name, diffCents });
+    }
+    const owed = await contactOwed(db);
+    const byContact = new Map<number, { name: string; cents: number }>();
+    for (const o of owed) {
+      const e = byContact.get(o.contactId) ?? { name: o.contactName, cents: 0 };
+      e.cents += o.owedCents;
+      byContact.set(o.contactId, e);
+    }
+    const sharedOwedBy = [...byContact.entries()]
+      .map(([contactId, v]) => ({ contactId, ...v }))
+      .sort((a, b) => b.cents - a.cents);
+    const sharedOwedCents = sharedOwedBy.reduce((a, o) => a + o.cents, 0);
+    return c.json({
+      month,
+      pendingReviewCount: pending.n,
+      unreconciledAccounts,
+      rtaCents: await rtaCents(db, month),
+      unsettledSharedCents: Math.max(0, sharedOwedCents - (await contactCredit(db))),
+      sharedOwedBy,
+    });
+  });
+
+  const balanceOf = async (db: Db, accountId: number, clearedOnly: boolean): Promise<number> => {
+    const row = (await db.get<{ total: number }>(
+      `SELECT COALESCE(SUM(amount_cents), 0) AS total FROM transactions WHERE account_id = ? AND voided = 0${clearedOnly ? " AND cleared IN ('cleared','reconciled')" : ""}`,
+      accountId
+    ))!;
+    return row.total;
+  };
+
+  app.get("/api/accounts", async (c) => {
+    const db = await getDb();
+    const accounts = await db.all<any>("SELECT id, name, type, last4 FROM accounts ORDER BY id");
+    const out = [];
+    for (const a of accounts) {
+      const last = await db.get<{ created_at: string }>(
+        "SELECT created_at FROM reconciliations WHERE account_id = ? ORDER BY id DESC LIMIT 1",
+        a.id
+      );
+      out.push({
         ...a,
-        workingBalanceCents: balanceOf(db, a.id, false),
-        clearedBalanceCents: balanceOf(db, a.id, true),
+        workingBalanceCents: await balanceOf(db, a.id, false),
+        clearedBalanceCents: await balanceOf(db, a.id, true),
         lastReconciledAt: last?.created_at ?? null,
-      };
-    }),
+      });
+    }
+    return c.json({ accounts: out });
   });
-});
 
-/** Reconcile an account against its real-world balance. Body: { actualBalanceCents }.
- *  Balanced → cleared transactions become reconciled and the event is recorded.
- *  Not balanced → returns the difference plus uncleared transactions to investigate. */
-app.post("/api/accounts/:id/reconcile", async (c) => {
-  const db = openDb();
-  const accountId = badId(c, "id");
-  if (accountId === null) return c.json({ error: "bad account id" }, 400);
-  if (!db.query("SELECT 1 FROM accounts WHERE id = ?").get(accountId)) return c.json({ error: `no account ${accountId}` }, 404);
-  const { ok, body } = await readJson(c);
-  if (!ok) return c.json({ error: "malformed JSON" }, 400);
-  const actualBalanceCents = Math.round(Number(body?.actualBalanceCents));
-  if (!Number.isFinite(actualBalanceCents)) return c.json({ error: "actualBalanceCents required" }, 400);
-  const cleared = balanceOf(db, accountId, true);
-  const result = reconcile({ clearedBalanceCents: cleared, actualBalanceCents });
+  /** Reconcile an account against its real-world balance. Body: { actualBalanceCents }.
+   *  Balanced → cleared transactions become reconciled and the event is recorded.
+   *  Not balanced → returns the difference plus uncleared transactions to investigate. */
+  app.post("/api/accounts/:id/reconcile", async (c) => {
+    const db = await getDb();
+    const accountId = badId(c, "id");
+    if (accountId === null) return c.json({ error: "bad account id" }, 400);
+    if (!(await db.get("SELECT 1 FROM accounts WHERE id = ?", accountId))) return c.json({ error: `no account ${accountId}` }, 404);
+    const { ok, body } = await readJson(c);
+    if (!ok) return c.json({ error: "malformed JSON" }, 400);
+    const actualBalanceCents = Math.round(Number(body?.actualBalanceCents));
+    if (!Number.isFinite(actualBalanceCents)) return c.json({ error: "actualBalanceCents required" }, 400);
+    const cleared = await balanceOf(db, accountId, true);
+    const result = reconcile({ clearedBalanceCents: cleared, actualBalanceCents });
 
-  if (result.balanced) {
-    db.query("UPDATE transactions SET cleared = 'reconciled' WHERE account_id = ? AND cleared = 'cleared'").run(accountId);
-    db.query(
-      "INSERT INTO reconciliations (account_id, actual_balance_cents, budget_balance_cents, difference_cents) VALUES (?, ?, ?, 0)"
-    ).run(accountId, actualBalanceCents, cleared);
-    return c.json({ ...result, clearedBalanceCents: cleared, actualBalanceCents });
-  }
+    if (result.balanced) {
+      await db.run("UPDATE transactions SET cleared = 'reconciled' WHERE account_id = ? AND cleared = 'cleared'", accountId);
+      await db.run(
+        "INSERT INTO reconciliations (account_id, actual_balance_cents, budget_balance_cents, difference_cents) VALUES (?, ?, ?, 0)",
+        accountId,
+        actualBalanceCents,
+        cleared
+      );
+      return c.json({ ...result, clearedBalanceCents: cleared, actualBalanceCents });
+    }
 
-  const uncleared = db.query(
-    "SELECT id, date, description, amount_cents FROM transactions WHERE account_id = ? AND cleared = 'uncleared' AND voided = 0 ORDER BY id"
-  ).all(accountId) as { id: number; amount_cents: number }[];
-  return c.json({
-    ...result,
-    clearedBalanceCents: cleared,
-    actualBalanceCents,
-    uncleared,
-    suggestedClearId: suggestClear(uncleared, result.differenceCents),
+    const uncleared = await db.all<{ id: number; amount_cents: number }>(
+      "SELECT id, date, description, amount_cents FROM transactions WHERE account_id = ? AND cleared = 'uncleared' AND voided = 0 ORDER BY id",
+      accountId
+    );
+    return c.json({
+      ...result,
+      clearedBalanceCents: cleared,
+      actualBalanceCents,
+      uncleared,
+      suggestedClearId: suggestClear(uncleared, result.differenceCents),
+    });
   });
-});
 
-app.post("/api/transactions/:id/clear", (c) => {
-  const db = openDb();
-  const id = badId(c, "id");
-  if (id === null) return c.json({ error: "bad transaction id" }, 400);
-  db.query("UPDATE transactions SET cleared = 'cleared' WHERE id = ? AND cleared = 'uncleared'").run(id);
-  return c.json({ ok: true });
-});
-
-/** Every non-voided transaction in a month, newest first, with pot and
- *  contact-share detail. Powers the Transactions page. */
-app.get("/api/transactions", (c) => {
-  const db = openDb();
-  const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
-  if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
-  return c.json({ month, transactions: listTransactions(db, month) });
-});
-
-/** Record a manually entered transaction. Body: { date, accountId, potId,
- *  amountCents (signed, nonzero), description, isTransfer?, contactId?, shareCents? }. */
-app.post("/api/transactions", async (c) => {
-  const db = openDb();
-  const { ok, body } = await readJson(c);
-  if (!ok) return c.json({ error: "malformed JSON" }, 400);
-  try {
-    const id = createTransaction(db, body ?? {});
-    return c.json({ ok: true, id });
-  } catch (e) {
-    return c.json({ error: (e as Error).message }, 400);
-  }
-});
-
-/** Replace a transaction's fields and splits. Same body shape as POST. */
-app.put("/api/transactions/:id", async (c) => {
-  const db = openDb();
-  const id = badId(c, "id");
-  if (id === null) return c.json({ error: "bad transaction id" }, 400);
-  if (!txnExists(db, id)) return c.json({ error: `no transaction ${id}` }, 404);
-  const { ok, body } = await readJson(c);
-  if (!ok) return c.json({ error: "malformed JSON" }, 400);
-  try {
-    updateTransaction(db, id, body ?? {});
+  app.post("/api/transactions/:id/clear", async (c) => {
+    const db = await getDb();
+    const id = badId(c, "id");
+    if (id === null) return c.json({ error: "bad transaction id" }, 400);
+    await db.run("UPDATE transactions SET cleared = 'cleared' WHERE id = ? AND cleared = 'uncleared'", id);
     return c.json({ ok: true });
-  } catch (e) {
-    return c.json({ error: (e as Error).message }, 400);
-  }
-});
+  });
 
-/** Delete a transaction. This is a soft void: excluded from spend, inflow,
- *  and RTA math, kept for audit. Same semantics as the existing void route. */
-app.delete("/api/transactions/:id", (c) => {
-  const db = openDb();
-  const id = badId(c, "id");
-  if (id === null) return c.json({ error: "bad transaction id" }, 400);
-  if (!txnExists(db, id)) return c.json({ error: `no transaction ${id}` }, 404);
-  db.query("UPDATE transactions SET voided = 1 WHERE id = ?").run(id);
-  return c.json({ ok: true });
-});
+  /** Every non-voided transaction in a month, newest first, with pot and
+   *  contact-share detail. Powers the Transactions page. */
+  app.get("/api/transactions", async (c) => {
+    const db = await getDb();
+    const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
+    if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
+    return c.json({ month, transactions: await listTransactions(db, month) });
+  });
 
-app.get("/api/pots", (c) => {
-  const db = openDb();
-  const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
-  const pots = db.query(
-    `SELECT p.id, p.name, p.pot_group, p.target_type, p.target_cents, p.is_assignable, p.contact_id, p.share_pct,
-            c.name AS contact_name
-     FROM pots p LEFT JOIN contacts c ON c.id = p.contact_id
-     WHERE p.hidden = 0 ORDER BY p.id`
-  ).all() as any[];
-  return c.json({
-    month,
-    rtaCents: rtaCents(db, month),
-    pots: pots.map((p) => {
-      const { userCents, sharedCents } = potSpend(db, p.id, month);
-      const sched = sinkingStatus(db, p.id, month);
-      return {
+  /** Record a manually entered transaction. Body: { date, accountId, potId,
+   *  amountCents (signed, nonzero), description, isTransfer?, contactId?, shareCents? }. */
+  app.post("/api/transactions", async (c) => {
+    const db = await getDb();
+    const { ok, body } = await readJson(c);
+    if (!ok) return c.json({ error: "malformed JSON" }, 400);
+    try {
+      const id = await createTransaction(db, body ?? {});
+      return c.json({ ok: true, id });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+
+  /** Replace a transaction's fields and splits. Same body shape as POST. */
+  app.put("/api/transactions/:id", async (c) => {
+    const db = await getDb();
+    const id = badId(c, "id");
+    if (id === null) return c.json({ error: "bad transaction id" }, 400);
+    if (!(await txnExists(db, id))) return c.json({ error: `no transaction ${id}` }, 404);
+    const { ok, body } = await readJson(c);
+    if (!ok) return c.json({ error: "malformed JSON" }, 400);
+    try {
+      await updateTransaction(db, id, body ?? {});
+      return c.json({ ok: true });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+
+  /** Delete a transaction. This is a soft void: excluded from spend, inflow,
+   *  and RTA math, kept for audit. Same semantics as the existing void route. */
+  app.delete("/api/transactions/:id", async (c) => {
+    const db = await getDb();
+    const id = badId(c, "id");
+    if (id === null) return c.json({ error: "bad transaction id" }, 400);
+    if (!(await txnExists(db, id))) return c.json({ error: `no transaction ${id}` }, 404);
+    await db.run("UPDATE transactions SET voided = 1 WHERE id = ?", id);
+    return c.json({ ok: true });
+  });
+
+  app.get("/api/pots", async (c) => {
+    const db = await getDb();
+    const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
+    const pots = await db.all<any>(
+      `SELECT p.id, p.name, p.pot_group, p.target_type, p.target_cents, p.is_assignable, p.contact_id, p.share_pct,
+              c.name AS contact_name
+       FROM pots p LEFT JOIN contacts c ON c.id = p.contact_id
+       WHERE p.hidden = 0 ORDER BY p.id`
+    );
+    const out = [];
+    for (const p of pots) {
+      const { userCents, sharedCents } = await potSpend(db, p.id, month);
+      const sched = await sinkingStatus(db, p.id, month);
+      out.push({
         id: p.id, name: p.name, group: p.pot_group, targetType: p.target_type, targetCents: p.target_cents,
         spentCents: userCents, sharedCents,
         contactId: p.contact_id, contactName: p.contact_name, sharePct: p.share_pct,
-        assignable: p.is_assignable === 1, assignedCents: assignedToPot(db, month, p.id),
-        receivedCents: potInflow(db, p.id, month),
+        assignable: p.is_assignable === 1, assignedCents: await assignedToPot(db, month, p.id),
+        receivedCents: await potInflow(db, p.id, month),
         sinking: sched ? {
           expectedCents: sched.expectedCents, dueMonth: sched.dueMonth, cadenceMonths: sched.cadenceMonths,
           contributionCents: sched.contributionCents, balanceCents: sched.balanceCents, state: sched.state,
         } : null,
-      };
-    }),
+      });
+    }
+    return c.json({
+      month,
+      rtaCents: await rtaCents(db, month),
+      pots: out,
+    });
   });
-});
 
-/** Create a pot. Body: { name, group?, targetCents?, targetType?, contactId?, sharePct? }. */
-app.post("/api/pots", async (c) => {
-  const db = openDb();
-  const { ok, body } = await readJson(c);
-  if (!ok) return c.json({ error: "malformed JSON" }, 400);
-  try {
-    const id = createPot(db, body ?? {});
-    return c.json({ ok: true, id });
-  } catch (e) {
-    return c.json({ error: (e as Error).message }, 400);
-  }
-});
+  /** Create a pot. Body: { name, group?, targetCents?, targetType?, contactId?, sharePct? }. */
+  app.post("/api/pots", async (c) => {
+    const db = await getDb();
+    const { ok, body } = await readJson(c);
+    if (!ok) return c.json({ error: "malformed JSON" }, 400);
+    try {
+      const id = await createPot(db, body ?? {});
+      return c.json({ ok: true, id });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
 
-/** Update a pot's name, group, target, or share config. */
-app.put("/api/pots/:id", async (c) => {
-  const db = openDb();
-  const id = badId(c, "id");
-  if (id === null) return c.json({ error: "bad pot id" }, 400);
-  if (!potExists(db, id)) return c.json({ error: `no pot ${id}` }, 404);
-  const { ok, body } = await readJson(c);
-  if (!ok) return c.json({ error: "malformed JSON" }, 400);
-  try {
-    updatePot(db, id, body ?? {});
-    return c.json({ ok: true });
-  } catch (e) {
-    return c.json({ error: (e as Error).message }, 400);
-  }
-});
+  /** Update a pot's name, group, target, or share config. */
+  app.put("/api/pots/:id", async (c) => {
+    const db = await getDb();
+    const id = badId(c, "id");
+    if (id === null) return c.json({ error: "bad pot id" }, 400);
+    if (!(await potExists(db, id))) return c.json({ error: `no pot ${id}` }, 404);
+    const { ok, body } = await readJson(c);
+    if (!ok) return c.json({ error: "malformed JSON" }, 400);
+    try {
+      await updatePot(db, id, body ?? {});
+      return c.json({ ok: true });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
 
-/** Delete a pot. Its transactions, splits, and assignments move to the
- *  Uncategorized pot; nothing is destroyed. */
-app.delete("/api/pots/:id", (c) => {
-  const db = openDb();
-  const id = badId(c, "id");
-  if (id === null) return c.json({ error: "bad pot id" }, 400);
-  if (!potExists(db, id)) return c.json({ error: `no pot ${id}` }, 404);
-  try {
-    const summary = deletePot(db, id);
-    return c.json({ ok: true, ...summary });
-  } catch (e) {
-    return c.json({ error: (e as Error).message }, 400);
-  }
-});
+  /** Delete a pot. Its transactions, splits, and assignments move to the
+   *  Uncategorized pot; nothing is destroyed. */
+  app.delete("/api/pots/:id", async (c) => {
+    const db = await getDb();
+    const id = badId(c, "id");
+    if (id === null) return c.json({ error: "bad pot id" }, 400);
+    if (!(await potExists(db, id))) return c.json({ error: `no pot ${id}` }, 404);
+    try {
+      const summary = await deletePot(db, id);
+      return c.json({ ok: true, ...summary });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
 
-/** Every contact with what they owe, grouped by pot. Powers Sharing. */
-app.get("/api/contacts", (c) => {
-  const db = openDb();
-  return c.json({ contacts: contactBalances(db) });
-});
+  /** Every contact with what they owe, grouped by pot. Powers Sharing. */
+  app.get("/api/contacts", async (c) => {
+    const db = await getDb();
+    return c.json({ contacts: await contactBalances(db) });
+  });
 
-/** Add a contact. Body: { name }. */
-app.post("/api/contacts", async (c) => {
-  const db = openDb();
-  const { ok, body } = await readJson(c);
-  if (!ok) return c.json({ error: "malformed JSON" }, 400);
-  try {
-    const id = createContact(db, body?.name);
-    return c.json({ ok: true, id });
-  } catch (e) {
-    return c.json({ error: (e as Error).message }, 400);
-  }
-});
+  /** Add a contact. Body: { name }. */
+  app.post("/api/contacts", async (c) => {
+    const db = await getDb();
+    const { ok, body } = await readJson(c);
+    if (!ok) return c.json({ error: "malformed JSON" }, 400);
+    try {
+      const id = await createContact(db, body?.name);
+      return c.json({ ok: true, id });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
 
-/** Rename a contact. Body: { name }. */
-app.put("/api/contacts/:id", async (c) => {
-  const db = openDb();
-  const id = badId(c, "id");
-  if (id === null) return c.json({ error: "bad contact id" }, 400);
-  const { ok, body } = await readJson(c);
-  if (!ok) return c.json({ error: "malformed JSON" }, 400);
-  try {
-    renameContact(db, id, body?.name);
-    return c.json({ ok: true });
-  } catch (e) {
-    const msg = (e as Error).message;
-    return c.json({ error: msg }, msg.startsWith("no contact") ? 404 : 400);
-  }
-});
+  /** Rename a contact. Body: { name }. */
+  app.put("/api/contacts/:id", async (c) => {
+    const db = await getDb();
+    const id = badId(c, "id");
+    if (id === null) return c.json({ error: "bad contact id" }, 400);
+    const { ok, body } = await readJson(c);
+    if (!ok) return c.json({ error: "malformed JSON" }, 400);
+    try {
+      await renameContact(db, id, body?.name);
+      return c.json({ ok: true });
+    } catch (e) {
+      const msg = (e as Error).message;
+      return c.json({ error: msg }, msg.startsWith("no contact") ? 404 : 400);
+    }
+  });
 
-/** Delete a contact. Blocked while pots or splits reference them. */
-app.delete("/api/contacts/:id", (c) => {
-  const db = openDb();
-  const id = badId(c, "id");
-  if (id === null) return c.json({ error: "bad contact id" }, 400);
-  try {
-    deleteContact(db, id);
-    return c.json({ ok: true });
-  } catch (e) {
-    const msg = (e as Error).message;
-    return c.json({ error: msg }, msg.startsWith("no contact") ? 404 : 400);
-  }
-});
+  /** Delete a contact. Blocked while pots or splits reference them. */
+  app.delete("/api/contacts/:id", async (c) => {
+    const db = await getDb();
+    const id = badId(c, "id");
+    if (id === null) return c.json({ error: "bad contact id" }, 400);
+    try {
+      await deleteContact(db, id);
+      return c.json({ ok: true });
+    } catch (e) {
+      const msg = (e as Error).message;
+      return c.json({ error: msg }, msg.startsWith("no contact") ? 404 : 400);
+    }
+  });
 
-app.get("/api/trend", (c) => {
-  const db = openDb();
-  return c.json({ trend: spendTrend(db) });
-});
+  app.get("/api/trend", async (c) => {
+    const db = await getDb();
+    return c.json({ trend: await spendTrend(db) });
+  });
+
+  /** One pot's spend per month, oldest first. Drives the per-pot history chart. */
+  app.get("/api/pot-history", async (c) => {
+    const db = await getDb();
+    const parsed = parseHistoryQuery({ potId: c.req.query("potId"), months: c.req.query("months") });
+    if ("error" in parsed) return c.json({ error: parsed.error }, 400);
+    const pot = await db.get("SELECT id FROM pots WHERE id = ? AND hidden = 0", parsed.potId);
+    if (!pot) return c.json({ error: `no pot ${parsed.potId}` }, 404);
+    return c.json({ potId: parsed.potId, history: await potHistory(db, parsed.potId, parsed.months) });
+  });
+
+  /** Read-only month-end close preview. The agent applies the close after
+   *  the user's review; this endpoint never writes. */
+  app.get("/api/close-preview", async (c) => {
+    const db = await getDb();
+    const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
+    if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
+    return c.json(await closePreview(db, month));
+  });
+
+  /** Apply the month-end close. Body: { month: "YYYY-MM" }. The $0 rule binds
+   *  here: ready-to-assign must be exactly $0, and the month must not already
+   *  be closed. Human review happens before the agent runs this. */
+  app.post("/api/close", async (c) => {
+    const db = await getDb();
+    const { ok, body } = await readJson(c);
+    if (!ok) return c.json({ error: "malformed JSON" }, 400);
+    const month = body?.month ?? new Date().toISOString().slice(0, 7);
+    if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
+    try {
+      await applyClose(db, await closePreview(db, month));
+      return c.json({ ok: true, month });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+
+  // Record a lump sum from a contact and allocate it against what they owe, oldest first.
+  // Body: { contactId, accountId, amountCents, note? }.
+  app.post("/api/settle", async (c) => {
+    const db = await getDb();
+    const { ok, body } = await readJson(c);
+    if (!ok) return c.json({ error: "malformed JSON" }, 400);
+    const amountCents = Math.round(Number(body?.amountCents));
+    const accountId = Number(body?.accountId);
+    const contactId = Number(body?.contactId);
+    if (!accountId || !amountCents || amountCents <= 0) return c.json({ error: "accountId and positive amountCents required" }, 400);
+    if (!contactId) return c.json({ error: "contactId required" }, 400);
+    if (!(await db.get("SELECT 1 FROM accounts WHERE id = ?", accountId))) return c.json({ error: `no account ${accountId}` }, 404);
+    try {
+      const summary = await applySettlement(db, { contactId, accountId, amountCents, note: body?.note, enteredBy: "user" });
+      return c.json(summary);
+    } catch (e) {
+      const msg = (e as Error).message;
+      return c.json({ error: msg }, msg.startsWith("no contact") ? 404 : 400);
+    }
+  });
+
+  return app;
+}
 
 /** Validate the pot-history query params. Pure so it can be unit-tested. */
 export function parseHistoryQuery(query: Record<string, string | undefined>): { potId: number; months: number } | { error: string } {
@@ -489,62 +570,10 @@ export function parseHistoryQuery(query: Record<string, string | undefined>): { 
   return { potId, months };
 }
 
-/** One pot's spend per month, oldest first. Drives the per-pot history chart. */
-app.get("/api/pot-history", (c) => {
-  const db = openDb();
-  const parsed = parseHistoryQuery({ potId: c.req.query("potId"), months: c.req.query("months") });
-  if ("error" in parsed) return c.json({ error: parsed.error }, 400);
-  const pot = db.query("SELECT id FROM pots WHERE id = ? AND hidden = 0").get(parsed.potId);
-  if (!pot) return c.json({ error: `no pot ${parsed.potId}` }, 404);
-  return c.json({ potId: parsed.potId, history: potHistory(db, parsed.potId, parsed.months) });
-});
-
-/** Read-only month-end close preview. The agent applies the close after
- *  the user's review; this endpoint never writes. */
-app.get("/api/close-preview", (c) => {
-  const db = openDb();
-  const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
-  if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
-  return c.json(closePreview(db, month));
-});
-
-/** Apply the month-end close. Body: { month: "YYYY-MM" }. The $0 rule binds
- *  here: ready-to-assign must be exactly $0, and the month must not already
- *  be closed. Human review happens before the agent runs this. */
-app.post("/api/close", async (c) => {
-  const db = openDb();
-  const { ok, body } = await readJson(c);
-  if (!ok) return c.json({ error: "malformed JSON" }, 400);
-  const month = body?.month ?? new Date().toISOString().slice(0, 7);
-  if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
-  try {
-    applyClose(db, closePreview(db, month));
-    return c.json({ ok: true, month });
-  } catch (e) {
-    return c.json({ error: (e as Error).message }, 400);
-  }
-});
-
-// Record a lump sum from a contact and allocate it against what they owe, oldest first.
-// Body: { contactId, accountId, amountCents, note? }.
-app.post("/api/settle", async (c) => {
-  const db = openDb();
-  const { ok, body } = await readJson(c);
-  if (!ok) return c.json({ error: "malformed JSON" }, 400);
-  const amountCents = Math.round(Number(body?.amountCents));
-  const accountId = Number(body?.accountId);
-  const contactId = Number(body?.contactId);
-  if (!accountId || !amountCents || amountCents <= 0) return c.json({ error: "accountId and positive amountCents required" }, 400);
-  if (!contactId) return c.json({ error: "contactId required" }, 400);
-  if (!db.query("SELECT 1 FROM accounts WHERE id = ?").get(accountId)) return c.json({ error: `no account ${accountId}` }, 404);
-  try {
-    const summary = applySettlement(db, { contactId, accountId, amountCents, note: body?.note, enteredBy: "user" });
-    return c.json(summary);
-  } catch (e) {
-    const msg = (e as Error).message;
-    return c.json({ error: msg }, msg.startsWith("no contact") ? 404 : 400);
-  }
-});
+/* Bun-local wiring below. The Worker entry (Phase 3) calls createApp with a
+ * D1-backed Db and serves static assets via Workers Static Assets; the
+ * hono/bun static serving here stays Bun-only. */
+const app = createApp(openDb);
 
 const dist = "./client/dist";
 if (existsSync(dist)) {
