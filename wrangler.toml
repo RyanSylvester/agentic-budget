@@ -22,10 +22,7 @@ binding = "DB"
 database_name = "daybook"
 database_id = "23cf04d3-254c-4a02-88fb-caa430eaa202"
 
-# KV: session tokens + login rate-limit keys (Phase 5 auth). NOT YET WIRED:
-# creating the namespace needs Workers KV Storage:Edit on the deploy token
-# (it currently has Workers Scripts:Edit + D1:Edit only). Once the namespace
-# exists, uncomment:
-# [[kv_namespaces]]
-# binding = "SESSIONS"
-# id = "<from kv namespace create: title daybook-sessions>"
+# KV: session tokens + login rate-limit keys (Phase 5 auth).
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "e4b5e8c08e2f4ddbb78f45847ef3a0a2"
