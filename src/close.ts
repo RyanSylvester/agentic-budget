@@ -35,7 +35,7 @@ export function closeMonth(input: CloseInput): { rtaEndCents: number; movedToSav
 
 /* Live-data wiring: build the close preview from the database. */
 
-import type { Database } from "bun:sqlite";
+import type { Db } from "./db-interface";
 import { monthSpend, monthInflows, potSpend, assignedTotal, rtaCents } from "./queries";
 import { contactOwed } from "./settle";
 import { fmtCents } from "./money";
@@ -91,33 +91,35 @@ export function closeEquation(preview: Pick<ClosePreview, "inflowsCents" | "spen
 }
 
 /** Everything the month-end close needs, read from live data. */
-export function closePreview(db: Database, month: string): ClosePreview {
-  const pots = db.query(
+export async function closePreview(db: Db, month: string): Promise<ClosePreview> {
+  const pots = await db.all<{ id: number; name: string; target_type: "fixed" | "average_3mo" | "savings"; target_cents: number; is_assignable: number }>(
     `SELECT id, name, target_type, target_cents, is_assignable FROM pots WHERE hidden = 0 ORDER BY id`
-  ).all() as { id: number; name: string; target_type: "fixed" | "average_3mo" | "savings"; target_cents: number; is_assignable: number }[];
+  );
 
   const nextMonth = shiftMonth(month, 1);
-  const lines: PotCloseLine[] = pots.map((p) => {
-    const historyCents = [3, 2, 1].map((i) => potSpend(db, p.id, shiftMonth(month, -i)).userCents);
-    const spentCents = potSpend(db, p.id, month).userCents;
+  const lines: PotCloseLine[] = [];
+  for (const p of pots) {
+    const historyCents: number[] = [];
+    for (const i of [3, 2, 1]) historyCents.push((await potSpend(db, p.id, shiftMonth(month, -i))).userCents);
+    const spentCents = (await potSpend(db, p.id, month)).userCents;
     // Income-group pots receive money; they get no wireframe target.
     // Scheduled pots keep the schedule as source of truth: no target write,
     // and the preview shows the schedule's next-month contribution instead.
-    const sched = p.is_assignable ? sinkingStatus(db, p.id, nextMonth) : null;
+    const sched = p.is_assignable ? await sinkingStatus(db, p.id, nextMonth) : null;
     const wireframeCents = sched
       ? sched.contributionCents
       : p.is_assignable
         ? wireframeTarget({ potId: p.id, targetType: p.target_type, historyCents })
         : 0;
-    return { potId: p.id, name: p.name, targetType: p.target_type, targetCents: p.target_cents, spentCents, historyCents, wireframeCents, assignable: p.is_assignable === 1, wireframeSkipped: sched !== null };
-  });
+    lines.push({ potId: p.id, name: p.name, targetType: p.target_type, targetCents: p.target_cents, spentCents, historyCents, wireframeCents, assignable: p.is_assignable === 1, wireframeSkipped: sched !== null });
+  }
 
-  const inflowsCents = monthInflows(db, month);
-  const spentCents = monthSpend(db, month);
-  const assignedCents = assignedTotal(db, month);
-  const rtaBeforeCents = rtaCents(db, month);
+  const inflowsCents = await monthInflows(db, month);
+  const spentCents = await monthSpend(db, month);
+  const assignedCents = await assignedTotal(db, month);
+  const rtaBeforeCents = await rtaCents(db, month);
   const { movedToSavingsCents } = closeMonth({ rtaStartCents: rtaBeforeCents });
-  const owed = contactOwed(db);
+  const owed = await contactOwed(db);
   const sharedOwedCents = owed.reduce((a, o) => a + o.owedCents, 0);
   const byName = new Map<string, number>();
   for (const o of owed) byName.set(o.contactName, (byName.get(o.contactName) ?? 0) + o.owedCents);
@@ -125,7 +127,7 @@ export function closePreview(db: Database, month: string): ClosePreview {
     .map(([name, cents]) => ({ name, cents }))
     .sort((a, b) => b.cents - a.cents);
 
-  const closed = !!db.query(`SELECT 1 FROM month_closes WHERE month = ?`).get(month);
+  const closed = !!(await db.get(`SELECT 1 FROM month_closes WHERE month = ?`, month));
 
   return { month, nextMonth, inflowsCents, spentCents, assignedCents, rtaBeforeCents, movedToSavingsCents, sharedOwedCents, sharedOwedBy, pots: lines, closed };
 }
@@ -134,23 +136,24 @@ export function closePreview(db: Database, month: string): ClosePreview {
  *  The $0 rule binds only here, at apply time: Ready-to-Assign must be exactly
  *  $0 when the month is closed. Mid-month it is free to be anything; the
  *  dashboard shows it as a neutral number until the last day. Throws if this
- *  month was already closed. All-or-nothing. Human review happens before the
- *  agent runs this. */
-export function applyClose(db: Database, preview: ClosePreview): void {
+ *  month was already closed. Sequential awaits, not a transaction: the single
+ *  writer is the only writer, so the read-then-write sequence cannot
+ *  interleave. Human review happens before the agent runs this. */
+export async function applyClose(db: Db, preview: ClosePreview): Promise<void> {
   if (preview.rtaBeforeCents !== 0) {
     throw new Error(`RTA is $${fmtCents(preview.rtaBeforeCents)}; the close applies at month-end once every dollar is assigned`);
   }
-  db.transaction(() => {
-    const exists = db.query(`SELECT 1 FROM month_closes WHERE month = ?`).get(preview.month);
-    if (exists) throw new Error(`close for ${preview.month} already applied`);
-    db.query(
-      `INSERT INTO month_closes (month, rta_start_cents, rta_end_cents, moved_to_savings_cents)
-       VALUES (?, ?, 0, ?)`
-    ).run(preview.month, preview.rtaBeforeCents, preview.movedToSavingsCents);
-    const upd = db.query(`UPDATE pots SET target_cents = ? WHERE id = ?`);
-    for (const p of preview.pots) {
-      if (!p.assignable || p.wireframeSkipped) continue; // income pots get no wireframe target; scheduled pots keep the schedule
-      upd.run(p.wireframeCents, p.potId);
-    }
-  })();
+  const exists = await db.get(`SELECT 1 FROM month_closes WHERE month = ?`, preview.month);
+  if (exists) throw new Error(`close for ${preview.month} already applied`);
+  await db.run(
+    `INSERT INTO month_closes (month, rta_start_cents, rta_end_cents, moved_to_savings_cents)
+     VALUES (?, ?, 0, ?)`,
+    preview.month,
+    preview.rtaBeforeCents,
+    preview.movedToSavingsCents
+  );
+  for (const p of preview.pots) {
+    if (!p.assignable || p.wireframeSkipped) continue; // income pots get no wireframe target; scheduled pots keep the schedule
+    await db.run(`UPDATE pots SET target_cents = ? WHERE id = ?`, p.wireframeCents, p.potId);
+  }
 }

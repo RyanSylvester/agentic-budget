@@ -4,7 +4,7 @@
  *  and use the schedule's derived contribution instead (the average strategy
  *  is actively wrong for annual bills: ~$0 for 11 months, then a spike).
  *  Reuses assignToPot per pot, so all the usual validation applies. */
-import type { Database } from "bun:sqlite";
+import type { Db } from "./db-interface";
 import { assignToPot, assignedToPot } from "./assign";
 import { shiftMonth } from "./close";
 import { validMonth } from "./money";
@@ -25,48 +25,49 @@ export interface ScaffoldLine {
 }
 
 /** Compute (and, unless dryRun, write) one month's scaffolded assignments.
- *  Throws on a bad month or an unknown strategy. */
-export function scaffoldMonth(
-  db: Database,
+ *  Throws on a bad month or an unknown strategy. Sequential awaits, not a
+ *  transaction: the single writer is the only writer. */
+export async function scaffoldMonth(
+  db: Db,
   month: string,
   strategy: ScaffoldStrategy,
   dryRun = false
-): ScaffoldLine[] {
+): Promise<ScaffoldLine[]> {
   if (!validMonth(month)) throw new Error(`bad month "${month}"; expected YYYY-MM`);
   if (!SCAFFOLD_STRATEGIES.includes(strategy)) {
     throw new Error(`bad strategy "${strategy}"; expected one of ${SCAFFOLD_STRATEGIES.join(", ")}`);
   }
-  const pots = db.query(
+  const pots = await db.all<{ id: number; name: string; is_assignable: number }>(
     `SELECT id, name, is_assignable FROM pots WHERE hidden = 0 ORDER BY id`
-  ).all() as { id: number; name: string; is_assignable: number }[];
+  );
 
-  const lines: ScaffoldLine[] = pots.map((p) => {
+  const lines: ScaffoldLine[] = [];
+  for (const p of pots) {
     const income = p.is_assignable === 0;
     let cents: number;
     let scheduled = false;
     if (income) {
       // Income pots hold planned income: carry last month's plan forward.
-      cents = assignedToPot(db, shiftMonth(month, -1), p.id);
+      cents = await assignedToPot(db, shiftMonth(month, -1), p.id);
     } else {
       // A sinking schedule takes precedence over the history strategies.
-      const sched = sinkingStatus(db, p.id, month);
+      const sched = await sinkingStatus(db, p.id, month);
       if (sched) {
         cents = sched.contributionCents;
         scheduled = true;
       } else if (strategy === "last_month") {
-        cents = assignedToPot(db, shiftMonth(month, -1), p.id);
+        cents = await assignedToPot(db, shiftMonth(month, -1), p.id);
       } else {
-        const hist = [1, 2, 3].map((i) => assignedToPot(db, shiftMonth(month, -i), p.id));
+        const hist: number[] = [];
+        for (const i of [1, 2, 3]) hist.push(await assignedToPot(db, shiftMonth(month, -i), p.id));
         cents = Math.round(hist.reduce((a, b) => a + b, 0) / hist.length);
       }
     }
-    return { potId: p.id, name: p.name, cents, income, scheduled };
-  });
+    lines.push({ potId: p.id, name: p.name, cents, income, scheduled });
+  }
 
   if (!dryRun) {
-    db.transaction(() => {
-      for (const l of lines) assignToPot(db, month, l.potId, l.cents);
-    })();
+    for (const l of lines) await assignToPot(db, month, l.potId, l.cents);
   }
   return lines;
 }
