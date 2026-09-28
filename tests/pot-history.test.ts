@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { wrapDb } from "../src/db";
 import { potHistory } from "../src/queries";
 import { assignedToPot } from "../src/assign";
-import { parseHistoryQuery } from "../src/server";
+import { parseHistoryQuery } from "../src/app";
 import type { Db } from "../src/db-interface";
 
 function seed(): Db {

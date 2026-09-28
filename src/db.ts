@@ -28,7 +28,10 @@ export class BunDb implements Db {
   }
 
   async exec(sql: string): Promise<void> {
-    this.raw.exec(sql);
+    // Multi-statement schema/migration replay must be atomic on the Bun path
+    // too (D1 is atomic per the Phase 1 spike). No caller passes its own
+    // BEGIN/COMMIT, so wrapping unconditionally is safe.
+    this.raw.exec(`BEGIN; ${sql}; COMMIT;`);
   }
 }
 
