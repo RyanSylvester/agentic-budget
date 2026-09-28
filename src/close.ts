@@ -38,7 +38,7 @@ export function closeMonth(input: CloseInput): { rtaEndCents: number; movedToSav
 import type { Db } from "./db-interface";
 import { monthSpend, monthInflows, potSpend, assignedTotal, rtaCents } from "./queries";
 import { contactOwed } from "./settle";
-import { fmtCents, FIRST_USER } from "./money";
+import { fmtCents } from "./money";
 import { sinkingStatus } from "./sinking";
 
 /** Shift a YYYY-MM month by delta months. */
@@ -139,7 +139,7 @@ export async function closePreview(db: Db, month: string): Promise<ClosePreview>
  *  month was already closed. Sequential awaits, not a transaction: the single
  *  writer is the only writer, so the read-then-write sequence cannot
  *  interleave. Human review happens before the agent runs this. */
-export async function applyClose(db: Db, preview: ClosePreview): Promise<void> {
+export async function applyClose(db: Db, userId: number, preview: ClosePreview): Promise<void> {
   if (preview.rtaBeforeCents !== 0) {
     throw new Error(`RTA is $${fmtCents(preview.rtaBeforeCents)}; the close applies at month-end once every dollar is assigned`);
   }
@@ -147,7 +147,8 @@ export async function applyClose(db: Db, preview: ClosePreview): Promise<void> {
   if (exists) throw new Error(`close for ${preview.month} already applied`);
   await db.run(
     `INSERT INTO month_closes (user_id, month, rta_start_cents, rta_end_cents, moved_to_savings_cents)
-     VALUES (${FIRST_USER}, ?, ?, 0, ?)`,
+     VALUES (?, ?, ?, 0, ?)`,
+    userId,
     preview.month,
     preview.rtaBeforeCents,
     preview.movedToSavingsCents

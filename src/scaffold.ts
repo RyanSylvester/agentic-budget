@@ -24,11 +24,12 @@ export interface ScaffoldLine {
   scheduled?: boolean;
 }
 
-/** Compute (and, unless dryRun, write) one month's scaffolded assignments.
- *  Throws on a bad month or an unknown strategy. Sequential awaits, not a
- *  transaction: the single writer is the only writer. */
+/** Compute (and, unless dryRun, write) one month's scaffolded assignments for
+ *  a user. Throws on a bad month or an unknown strategy. Sequential awaits,
+ *  not a transaction: the single writer is the only writer. */
 export async function scaffoldMonth(
   db: Db,
+  userId: number,
   month: string,
   strategy: ScaffoldStrategy,
   dryRun = false
@@ -67,7 +68,7 @@ export async function scaffoldMonth(
   }
 
   if (!dryRun) {
-    for (const l of lines) await assignToPot(db, month, l.potId, l.cents);
+    for (const l of lines) await assignToPot(db, userId, month, l.potId, l.cents);
   }
   return lines;
 }

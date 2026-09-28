@@ -44,13 +44,14 @@ import { contactBalances, createContact, deleteContact, listContacts, renameCont
 import { createPot, deletePot, updatePot } from "./pots";
 import { createSchedule, listSchedules, markPaid, removeSchedule, sinkingStatus } from "./sinking";
 import { createMigration } from "./migrations";
-import { assertSplitsSum, resolvePotId, validDate, validMonth, fmtCents, FIRST_USER } from "./money";
+import { assertSplitsSum, resolvePotId, validDate, validMonth, fmtCents } from "./money";
 import { scaffoldMonth, type ScaffoldStrategy } from "./scaffold";
-import { loadRemoteConfig, saveRemoteConfig, promptHidden, configPath } from "./remote";
+import { loadRemoteConfig, saveRemoteConfig, promptHidden, configPath, apiFetch } from "./remote";
 import { runRemote, printScaffold, printClosePreview } from "./cli-remote";
+import { randomBytes } from "node:crypto";
 
 function usage(): never {
-  console.error("usage: budget <record|assign|recategorize|void|pot|contact|settle|review|reconcile|close|sinking|user|migration|migrate-remote|serve|login> [options]");
+  console.error("usage: budget <record|assign|recategorize|void|pot|contact|settle|review|reconcile|close|sinking|user|invite|migration|migrate-remote|serve|login> [options]");
   process.exit(2);
 }
 
@@ -63,11 +64,6 @@ function flag(name: string): string | undefined {
 }
 
 function fail(msg: string): never {
-  // M1: every write attributes its row to the first user. On a database with
-  // no user yet this surfaces as a raw NOT NULL failure; point at the fix.
-  if (msg.includes("NOT NULL constraint failed") && msg.includes(".user_id")) {
-    msg += "\nNo user exists yet: run `budget user create <username>` first.";
-  }
   console.error(msg);
   process.exit(1);
 }
@@ -80,14 +76,54 @@ async function mustResolvePot(db: Db, ref: string): Promise<number> {
   }
 }
 
+/** Local mode has no login: writes attribute their rows to the first
+ *  (lowest-id) user, mirroring the M1 backfill rule. */
+async function localUserId(db: Db): Promise<number> {
+  const row = await db.get<{ id: number }>("SELECT id FROM users ORDER BY id LIMIT 1");
+  if (!row) fail("no user yet: run `budget user create <username>` first");
+  return row.id;
+}
+
 async function main() {
   if (cmd === "login") {
     const apiUrl = flag("api-url") ?? loadRemoteConfig()?.apiUrl;
     if (!apiUrl) fail(`usage: budget login --api-url <worker-url>`);
     const token = await promptHidden("agent token: ");
     if (!token) fail("no token entered; nothing saved");
+    // Verify the token authenticates before saving: a dead token in the
+    // config would fail every later command with a bare 401.
+    const probe = { apiUrl: apiUrl.replace(/\/+$/, ""), token };
+    let me: any;
+    try {
+      me = await apiFetch(probe, "/api/auth/me");
+    } catch (e) {
+      fail(`token rejected by ${probe.apiUrl}: ${(e as Error).message}`);
+    }
+    if (!me?.authenticated) fail(`token rejected by ${probe.apiUrl}: not authenticated`);
     saveRemoteConfig(apiUrl, token);
-    console.log(`saved remote config for ${apiUrl} (${configPath()})`);
+    console.log(`saved remote config for ${apiUrl} (${configPath()})${me.username ? `, authenticated as ${me.username}` : ""}`);
+    return;
+  }
+  if (cmd === "invite") {
+    const sub = rest[0];
+    if (sub !== "create") fail(`usage: budget invite create`);
+    const remote = loadRemoteConfig();
+    if (remote) {
+      // Remote mode: mint through the Worker API. Any authenticated
+      // identity (user session or agent token) may mint a code.
+      let data: any;
+      try {
+        data = await apiFetch(remote, "/api/auth/invite-codes", { method: "POST" });
+      } catch (e) {
+        fail((e as Error).message);
+      }
+      console.log(data.code);
+      return;
+    }
+    const db = await openDb();
+    const code = randomBytes(16).toString("hex");
+    await db.run("INSERT INTO invite_codes (code) VALUES (?)", code);
+    console.log(code);
     return;
   }
   const remote = loadRemoteConfig();
@@ -144,16 +180,17 @@ async function main() {
     }
     // Sequential awaits, not a transaction: the single writer is the only
     // writer, so the read-then-write sequence cannot interleave.
+    const userId = await localUserId(db);
     const row = (await db.get<{ id: number }>(
-      `INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared, review_reason, is_transfer, external_id) VALUES (${FIRST_USER}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-      date, accountId, amount, description, source, enteredBy, status, cleared, uncertain, isTransfer, externalId
+      `INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared, review_reason, is_transfer, external_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+      userId, date, accountId, amount, description, source, enteredBy, status, cleared, uncertain, isTransfer, externalId
     ))!;
     if (share !== 0 && contactId !== null) {
       const userCents = amount + share; // amount negative outflow; contact's share positive dollars
-      await db.run(`INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (${FIRST_USER}, ?, ?, ?, ?, ?)`, row.id, potId, "user", null, userCents);
-      await db.run(`INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (${FIRST_USER}, ?, ?, ?, ?, ?)`, row.id, potId, "contact", contactId, -share);
+      await db.run(`INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (?, ?, ?, ?, ?, ?)`, userId, row.id, potId, "user", null, userCents);
+      await db.run(`INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (?, ?, ?, ?, ?, ?)`, userId, row.id, potId, "contact", contactId, -share);
     } else {
-      await db.run(`INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (${FIRST_USER}, ?, ?, ?, ?, ?)`, row.id, potId, "user", null, amount);
+      await db.run(`INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (?, ?, ?, ?, ?, ?)`, userId, row.id, potId, "user", null, amount);
     }
     await assertSplitsSum(db, row.id);
     const txnId = row.id;
@@ -175,7 +212,7 @@ async function main() {
       const strategy = (sflag("strategy") ?? "average_3mo") as ScaffoldStrategy;
       const dryRun = srest.includes("--dry-run");
       try {
-        const lines = await scaffoldMonth(db, month, strategy, dryRun);
+        const lines = await scaffoldMonth(db, await localUserId(db), month, strategy, dryRun);
         printScaffold(month, strategy, dryRun, lines);
       } catch (e) {
         fail((e as Error).message);
@@ -187,7 +224,7 @@ async function main() {
     const cents = Math.round(parseFloat(flag("cents") ?? "NaN"));
     if (!pot || !Number.isFinite(cents)) usage();
     try {
-      const r = await assignToPot(db, month, pot, cents);
+      const r = await assignToPot(db, await localUserId(db), month, pot, cents);
       console.log(`assigned $${fmtCents(r.cents)} to pot ${r.potId} for ${r.month}`);
     } catch (e) {
       fail((e as Error).message);
@@ -220,7 +257,7 @@ async function main() {
       const targetCents = Math.round(parseFloat(flag("target-cents") ?? "0"));
       if (!name) usage();
       try {
-        const id = await createPot(db, {
+        const id = await createPot(db, await localUserId(db), {
           name, group, targetType, targetCents,
           contactId: flag("contact-id") ? parseInt(flag("contact-id")!, 10) : undefined,
           sharePct: flag("share-pct") ? parseInt(flag("share-pct")!, 10) : undefined,
@@ -254,7 +291,7 @@ async function main() {
       if (!potRef) usage();
       const potId = await mustResolvePot(db, potRef);
       try {
-        const s = await deletePot(db, potId);
+        const s = await deletePot(db, await localUserId(db), potId);
         console.log(`deleted pot ${potId}; ${s.movedTransactions} transactions and ${s.movedAssignments} assignments moved to Uncategorized (pot ${s.uncategorizedPotId})`);
       } catch (e) {
         fail((e as Error).message);
@@ -288,7 +325,7 @@ async function main() {
       const name = flag("name");
       if (!name) usage();
       try {
-        const id = await createContact(db, name);
+        const id = await createContact(db, await localUserId(db), name);
         console.log(`created contact ${id} "${name}"`);
       } catch (e) {
         fail((e as Error).message);
@@ -323,7 +360,7 @@ async function main() {
     const contact = await db.get<{ name: string }>("SELECT name FROM contacts WHERE id = ?", contactId);
     if (!contact) fail(`no contact ${contactId}`);
     const before = (await contactOwed(db, contactId)).reduce((a, o) => a + o.owedCents, 0);
-    const { allocations, creditAllocations, creditConsumedCents, leftoverCents } = await applySettlement(db, { contactId, accountId, amountCents, note });
+    const { allocations, creditAllocations, creditConsumedCents, leftoverCents } = await applySettlement(db, await localUserId(db), { contactId, accountId, amountCents, note });
     console.log(`settlement of $${fmtCents(amountCents)} recorded (cleared, confirmed).`);
     for (const a of creditAllocations) console.log(`  credit ${(a.amountCents / 100).toFixed(2)} -> ${a.potName ?? "Uncategorized"}`);
     for (const a of allocations) console.log(`  filled ${(a.amountCents / 100).toFixed(2)} -> ${a.potName ?? "Uncategorized"}`);
@@ -340,7 +377,7 @@ async function main() {
     console.log(`cleared balance: $${fmtCents(clearedRow.total)}  actual: $${fmtCents(actual)}  difference: $${fmtCents(result.differenceCents)}`);
     if (result.balanced) {
       await db.run("UPDATE transactions SET cleared = 'reconciled' WHERE account_id = ? AND cleared = 'cleared'", accountId);
-      await db.run(`INSERT INTO reconciliations (user_id, account_id, actual_balance_cents, budget_balance_cents, difference_cents) VALUES (${FIRST_USER}, ?, ?, ?, 0)`, accountId, actual, clearedRow.total);
+      await db.run(`INSERT INTO reconciliations (user_id, account_id, actual_balance_cents, budget_balance_cents, difference_cents) VALUES (?, ?, ?, ?, 0)`, await localUserId(db), accountId, actual, clearedRow.total);
       console.log("balanced — transactions reconciled.");
     } else {
       const uncleared = await db.all<any>("SELECT id, date, description, amount_cents FROM transactions WHERE account_id = ? AND cleared = 'uncleared' AND voided = 0 ORDER BY id", accountId);
@@ -361,7 +398,7 @@ async function main() {
     printClosePreview(p);
     if (rest.includes("--apply")) {
       try {
-        await applyClose(db, p);
+        await applyClose(db, await localUserId(db), p);
         console.log(`applied: close recorded for ${p.month}, ${p.nextMonth} targets wireframed.`);
       } catch (e) {
         console.error(`cannot apply: ${(e as Error).message}`);
@@ -380,7 +417,7 @@ async function main() {
       const cadence = flag("cadence") ? parseInt(flag("cadence")!, 10) : 12;
       if (!pot || !Number.isFinite(expectedCents) || !due) usage();
       try {
-        const s = await createSchedule(db, pot!, expectedCents, due!, cadence);
+        const s = await createSchedule(db, await localUserId(db), pot!, expectedCents, due!, cadence);
         const st = (await sinkingStatus(db, s.potId, new Date().toISOString().slice(0, 7)))!;
         console.log(`schedule ${s.id}: "${s.potName}" expects $${fmtCents(s.expectedCents)}, due ${s.dueMonth} (every ${s.cadenceMonths}mo), $${fmtCents(st.contributionCents)}/mo from here`);
       } catch (e) {

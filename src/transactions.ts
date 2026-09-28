@@ -2,7 +2,7 @@
  *  Pure DB functions that throw on bad input; the routes translate that to
  *  400s. Every write ends with assertSplitsSum, like the other write paths. */
 import type { Db } from "./db-interface";
-import { assertSplitsSum, validDate, FIRST_USER } from "./money";
+import { assertSplitsSum, validDate } from "./money";
 
 export interface TransactionInput {
   date?: string;
@@ -116,6 +116,7 @@ async function normalizeInput(db: Db, input: TransactionInput): Promise<{
 /** Insert the user (+ optional contact) splits for a transaction. */
 async function insertSplits(
   db: Db,
+  userId: number,
   txnId: number,
   potId: number | null,
   amountCents: number,
@@ -123,24 +124,25 @@ async function insertSplits(
   shareCents: number
 ): Promise<void> {
   if (shareCents !== 0 && contactId !== null) {
-    await db.run(`INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (${FIRST_USER}, ?, ?, ?, ?, ?)`, txnId, potId, "user", null, amountCents - shareCents);
-    await db.run(`INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (${FIRST_USER}, ?, ?, ?, ?, ?)`, txnId, potId, "contact", contactId, shareCents);
+    await db.run(`INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (?, ?, ?, ?, ?, ?)`, userId, txnId, potId, "user", null, amountCents - shareCents);
+    await db.run(`INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (?, ?, ?, ?, ?, ?)`, userId, txnId, potId, "contact", contactId, shareCents);
   } else {
-    await db.run(`INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (${FIRST_USER}, ?, ?, ?, ?, ?)`, txnId, potId, "user", null, amountCents);
+    await db.run(`INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (?, ?, ?, ?, ?, ?)`, userId, txnId, potId, "user", null, amountCents);
   }
 }
 
-/** Record a manually entered transaction. Returns the new id.
+/** Record a manually entered transaction for a user. Returns the new id.
  *  Sequential awaits, not a transaction: the single writer is the only
  *  writer, so the read-then-write sequence cannot interleave. */
-export async function createTransaction(db: Db, input: TransactionInput): Promise<number> {
+export async function createTransaction(db: Db, userId: number, input: TransactionInput): Promise<number> {
   const f = await normalizeInput(db, input);
   const status = f.reviewReason ? "pending_review" : "confirmed";
   const enteredBy = input.enteredBy ?? "user";
   if (enteredBy !== "agent" && enteredBy !== "user") throw new Error("bad enteredBy");
   const t = await db.get<{ id: number }>(
     `INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared, review_reason, is_transfer, external_id)
-     VALUES (${FIRST_USER}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+    userId,
     f.date,
     f.accountId,
     f.amountCents,
@@ -153,7 +155,7 @@ export async function createTransaction(db: Db, input: TransactionInput): Promis
     f.isTransfer ? 1 : 0,
     f.externalId
   );
-  await insertSplits(db, t!.id, f.potId, f.amountCents, f.contactId, f.shareCents);
+  await insertSplits(db, userId, t!.id, f.potId, f.amountCents, f.contactId, f.shareCents);
   await assertSplitsSum(db, t!.id);
   return t!.id;
 }
@@ -219,6 +221,6 @@ export async function updateTransaction(db: Db, id: number, input: TransactionIn
 
   await db.run("UPDATE transactions SET date = ?, account_id = ?, amount_cents = ?, description = ?, is_transfer = ? WHERE id = ?", f.date, f.accountId, f.amountCents, f.description, f.isTransfer ? 1 : 0, id);
   await db.run("DELETE FROM splits WHERE transaction_id = ?", id);
-  await insertSplits(db, id, f.potId, f.amountCents, f.contactId, f.shareCents);
+  await insertSplits(db, cur.user_id, id, f.potId, f.amountCents, f.contactId, f.shareCents);
   await assertSplitsSum(db, id);
 }

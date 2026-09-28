@@ -1,32 +1,29 @@
 import { describe, expect, test } from "bun:test";
-import { Database } from "bun:sqlite";
-import { readFileSync } from "node:fs";
-import { wrapDb } from "../src/db";
 import type { Db } from "../src/db-interface";
+import { testDb } from "./helpers";
 import { monthSpend, potSpend } from "../src/queries";
 import { allocateSettlement, applySettlement, contactCredit, contactOwed } from "../src/settle";
 
-function seed(): Db {
-  const raw = new Database(":memory:");
-  raw.exec(readFileSync("src/schema.sql", "utf8"));
-  raw.exec(`INSERT INTO accounts (name, type) VALUES ('Chequing','chequing')`);
-  raw.exec(`INSERT INTO pots (name, pot_group, target_type, target_cents) VALUES ('Housing','essentials','fixed',300000), ('Groceries','essentials','average_3mo',120000)`);
-  raw.exec(`INSERT INTO contacts (name) VALUES ('Alex')`);
-  return wrapDb(raw);
+async function seed(): Promise<Db> {
+  const db = await testDb();
+  await db.exec(`INSERT INTO accounts (user_id, name, type) VALUES (1, 'Chequing','chequing')`);
+  await db.exec(`INSERT INTO pots (user_id, name, pot_group, target_type, target_cents) VALUES (1, 'Housing','essentials','fixed',300000), (1, 'Groceries','essentials','average_3mo',120000)`);
+  await db.exec(`INSERT INTO contacts (user_id, name) VALUES (1, 'Alex')`);
+  return db;
 }
 
 async function addTxn(db: Db, date: string, amountCents: number, userCents: number, contactCents: number, potId: number) {
   const t = (await db.get<{ id: number }>(
-    "INSERT INTO transactions (date, account_id, amount_cents, description, source, entered_by, status, cleared) VALUES (?, 1, ?, 't', 'manual', 'agent', 'confirmed', 'cleared') RETURNING id",
+    "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared) VALUES (1, ?, 1, ?, 't', 'manual', 'agent', 'confirmed', 'cleared') RETURNING id",
     date, amountCents
   ))!;
-  await db.run("INSERT INTO splits (transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (?, ?, ?, ?, ?)", t.id, potId, "user", null, userCents);
-  if (contactCents !== 0) await db.run("INSERT INTO splits (transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (?, ?, ?, ?, ?)", t.id, potId, "contact", 1, -contactCents);
+  await db.run("INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (1, ?, ?, ?, ?, ?)", t.id, potId, "user", null, userCents);
+  if (contactCents !== 0) await db.run("INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (1, ?, ?, ?, ?, ?)", t.id, potId, "contact", 1, -contactCents);
 }
 
 describe("splits", () => {
   test("the user's views exclude the contact's share", async () => {
-    const db = seed();
+    const db = await seed();
     // $3,340 rent, split evenly, housing pot
     await addTxn(db, "2026-09-01", -334000, -167000, 167000, 1);
     expect(await monthSpend(db, "2026-09")).toBe(167000);
@@ -37,10 +34,10 @@ describe("splits", () => {
   });
 
   test("pending_review transactions don't count", async () => {
-    const db = seed();
-    await db.exec(`INSERT INTO transactions (date, account_id, amount_cents, description, source, entered_by, status, cleared) VALUES ('2026-09-03', 1, -50000, 't', 'manual', 'agent', 'pending_review', 'uncleared')`);
+    const db = await seed();
+    await db.exec(`INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared) VALUES (1, '2026-09-03', 1, -50000, 't', 'manual', 'agent', 'pending_review', 'uncleared')`);
     const t = (await db.get<{ id: number }>("SELECT id FROM transactions"))!;
-    await db.run("INSERT INTO splits (transaction_id, pot_id, owner, amount_cents) VALUES (?, 1, 'user', -50000)", t.id);
+    await db.run("INSERT INTO splits (user_id, transaction_id, pot_id, owner, amount_cents) VALUES (1, ?, 1, 'user', -50000)", t.id);
     expect(await monthSpend(db, "2026-09")).toBe(0);
   });
 });
@@ -67,12 +64,12 @@ describe("settlements", () => {
   });
 
   test("applySettlement end to end: lump sum fills buckets, user's spend untouched", async () => {
-    const db = seed();
+    const db = await seed();
     await addTxn(db, "2026-09-01", -334000, -167000, 167000, 1); // rent split
     await addTxn(db, "2026-09-05", -9000, -4500, 4500, 2);       // groceries split
     expect((await contactOwed(db, 1)).reduce((a, o) => a + o.owedCents, 0)).toBe(171500);
 
-    const summary = await applySettlement(db, { contactId: 1, accountId: 1, amountCents: 200000, note: "Alex e-transfer" });
+    const summary = await applySettlement(db, 1, { contactId: 1, accountId: 1, amountCents: 200000, note: "Alex e-transfer" });
     expect(summary.allocations.map((a) => a.amountCents)).toEqual([167000, 4500]);
     expect(summary.leftoverCents).toBe(28500);
 
@@ -90,10 +87,10 @@ describe("settlements", () => {
 
 describe("uncertain review + transfers", () => {
   test("transfers are excluded from spend but count for reconciliation", async () => {
-    const db = seed();
-    await db.exec(`INSERT INTO transactions (date, account_id, amount_cents, description, source, entered_by, status, cleared, is_transfer) VALUES ('2026-09-01', 1, -190000, 'Payday holding loop', 'manual', 'agent', 'confirmed', 'cleared', 1)`);
+    const db = await seed();
+    await db.exec(`INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared, is_transfer) VALUES (1, '2026-09-01', 1, -190000, 'Payday holding loop', 'manual', 'agent', 'confirmed', 'cleared', 1)`);
     const t = (await db.get<{ id: number }>("SELECT id FROM transactions"))!;
-    await db.run("INSERT INTO splits (transaction_id, owner, amount_cents) VALUES (?, 'user', -190000)", t.id);
+    await db.run("INSERT INTO splits (user_id, transaction_id, owner, amount_cents) VALUES (1, ?, 'user', -190000)", t.id);
     await addTxn(db, "2026-09-02", -8000, -8000, 0, 2);
     expect(await monthSpend(db, "2026-09")).toBe(8000);
     // ...but the money really moved, so the account balance includes it
@@ -102,10 +99,10 @@ describe("uncertain review + transfers", () => {
   });
 
   test("uncertain entries queue with a reason; confident ones confirm directly", async () => {
-    const db = seed();
-    await db.exec(`INSERT INTO transactions (date, account_id, amount_cents, description, source, entered_by, status, cleared, review_reason) VALUES ('2026-09-03', 1, -2500, 'Mystery charge', 'gmail', 'agent', 'pending_review', 'uncleared', 'unsure which pot')`);
+    const db = await seed();
+    await db.exec(`INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared, review_reason) VALUES (1, '2026-09-03', 1, -2500, 'Mystery charge', 'gmail', 'agent', 'pending_review', 'uncleared', 'unsure which pot')`);
     const t = (await db.get<{ id: number }>("SELECT id FROM transactions"))!;
-    await db.run("INSERT INTO splits (transaction_id, owner, amount_cents) VALUES (?, 'user', -2500)", t.id);
+    await db.run("INSERT INTO splits (user_id, transaction_id, owner, amount_cents) VALUES (1, ?, 'user', -2500)", t.id);
     // pending_review never counts toward spend
     expect(await monthSpend(db, "2026-09")).toBe(0);
     const row = (await db.get<{ review_reason: string }>("SELECT review_reason FROM transactions WHERE id = ?", t.id))!;

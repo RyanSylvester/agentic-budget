@@ -3,7 +3,6 @@
  *  throw on bad input; routes translate that to 400s/404s. */
 import type { Db } from "./db-interface";
 import { contactCredit, contactOwed } from "./settle";
-import { FIRST_USER } from "./money";
 
 export interface Contact {
   id: number;
@@ -51,9 +50,9 @@ export async function contactBalances(db: Db): Promise<ContactBalance[]> {
   return out;
 }
 
-export async function createContact(db: Db, name: unknown): Promise<number> {
+export async function createContact(db: Db, userId: number, name: unknown): Promise<number> {
   const n = needName(name);
-  const row = await db.get<{ id: number }>(`INSERT INTO contacts (user_id, name) VALUES (${FIRST_USER}, ?) RETURNING id`, n);
+  const row = await db.get<{ id: number }>(`INSERT INTO contacts (user_id, name) VALUES (?, ?) RETURNING id`, userId, n);
   return row!.id;
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { LoginScreen, SetupScreen } from "./AuthScreens";
+import { LoginScreen, SignupScreen } from "./AuthScreens";
 
 /* ---------- types ---------- */
 
@@ -2514,12 +2514,14 @@ interface AuthState {
   setupRequired: boolean;
 }
 
-/** Root component: gates the app on GET /api/auth/me. First run shows the
- *  setup screen, logged-out shows login, and an authenticated session (or a
- *  local dev server with auth disabled) renders the shell. */
+/** Root component: gates the app on GET /api/auth/me. No users yet shows the
+ *  signup screen, logged-out shows login (with a link to signup for later
+ *  users), and an authenticated session (or a local dev server with auth
+ *  disabled) renders the shell. */
 export default function App() {
   const [auth, setAuth] = useState<AuthState | null>(null);
   const [failed, setFailed] = useState(false);
+  const [authView, setAuthView] = useState<"login" | "signup">("login");
 
   const load = () => {
     setFailed(false);
@@ -2563,7 +2565,13 @@ export default function App() {
     );
   }
 
-  if (auth.setupRequired) return <SetupScreen onSetup={load} />;
-  if (!auth.authenticated) return <LoginScreen onAuthenticated={load} />;
+  if (auth.setupRequired) return <SignupScreen onSignup={load} />;
+  if (!auth.authenticated) {
+    return authView === "signup" ? (
+      <SignupScreen onSignup={load} onBackToLogin={() => setAuthView("login")} />
+    ) : (
+      <LoginScreen onAuthenticated={load} onSignup={() => setAuthView("signup")} />
+    );
+  }
   return <AppShell />;
 }

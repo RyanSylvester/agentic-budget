@@ -4,7 +4,6 @@
  *  Pure DB functions that throw on bad input; routes translate to 400s/404s. */
 import type { Db, DbValue } from "./db-interface";
 import { tableExists } from "./db-interface";
-import { FIRST_USER } from "./money";
 
 export type TargetType = "fixed" | "average_3mo" | "savings";
 
@@ -77,15 +76,16 @@ function assignableForGroup(group: string): number {
   return group === "Income" ? 0 : 1;
 }
 
-/** Create a pot. Returns the new id. */
-export async function createPot(db: Db, input: PotInput): Promise<number> {
+/** Create a pot for a user. Returns the new id. */
+export async function createPot(db: Db, userId: number, input: PotInput): Promise<number> {
   const name = needName(input.name);
   const group = needGroup(input.group ?? "Life");
   const targetType = needTargetType(input.targetType);
   const targetCents = needTargetCents(input.targetCents);
   const share = await needShare(db, input.contactId, input.sharePct);
   const row = await db.get<{ id: number }>(
-    `INSERT INTO pots (user_id, name, pot_group, target_type, target_cents, is_assignable, contact_id, share_pct) VALUES (${FIRST_USER}, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+    `INSERT INTO pots (user_id, name, pot_group, target_type, target_cents, is_assignable, contact_id, share_pct) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+    userId,
     name,
     group,
     targetType,
@@ -154,31 +154,33 @@ export interface PotDeleteSummary {
   movedAssignments: number;
 }
 
-/** The catch-all pot for deleted pots' history. Created on demand. */
-export async function uncategorizedPotId(db: Db): Promise<number> {
-  const found = await db.get<{ id: number }>("SELECT id FROM pots WHERE name = 'Uncategorized' AND hidden = 0");
+/** The catch-all pot for a user's deleted pots' history. Created on demand. */
+export async function uncategorizedPotId(db: Db, userId: number): Promise<number> {
+  const found = await db.get<{ id: number }>("SELECT id FROM pots WHERE user_id = ? AND name = 'Uncategorized' AND hidden = 0", userId);
   if (found) return found.id;
   const row = await db.get<{ id: number }>(
-    `INSERT INTO pots (user_id, name, pot_group, target_type, target_cents) VALUES (${FIRST_USER}, 'Uncategorized', 'General', 'fixed', 0) RETURNING id`
+    `INSERT INTO pots (user_id, name, pot_group, target_type, target_cents) VALUES (?, 'Uncategorized', 'General', 'fixed', 0) RETURNING id`,
+    userId
   );
   return row!.id;
 }
 
-/** Delete a pot, moving its history to Uncategorized. Never destroys data.
+/** Delete a pot, moving its history to the user's Uncategorized pot. Never destroys data.
  *  Sequential awaits, not a transaction: the single writer is the only
  *  writer, so the read-then-write sequence cannot interleave. */
-export async function deletePot(db: Db, id: number): Promise<PotDeleteSummary> {
+export async function deletePot(db: Db, userId: number, id: number): Promise<PotDeleteSummary> {
   const pot = await db.get<{ id: number; name: string }>("SELECT id, name FROM pots WHERE id = ?", id);
   if (!pot) throw new Error(`no pot ${id}`);
-  const uncat = await uncategorizedPotId(db);
+  const uncat = await uncategorizedPotId(db, userId);
   if (uncat === id) throw new Error("the Uncategorized pot cannot be deleted");
   const txns = await db.run("UPDATE transactions SET pot_id = ? WHERE pot_id = ?", uncat, id);
   await db.run("UPDATE splits SET pot_id = ? WHERE pot_id = ?", uncat, id);
   const rows = await db.all<{ month: string; cents: number }>("SELECT month, cents FROM assignments WHERE pot_id = ?", id);
   for (const r of rows) {
     await db.run(
-      `INSERT INTO assignments (user_id, month, pot_id, cents) VALUES (${FIRST_USER}, ?, ?, ?)
+      `INSERT INTO assignments (user_id, month, pot_id, cents) VALUES (?, ?, ?, ?)
        ON CONFLICT (user_id, month, pot_id) DO UPDATE SET cents = cents + excluded.cents`,
+      userId,
       r.month,
       uncat,
       r.cents

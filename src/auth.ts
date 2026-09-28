@@ -7,15 +7,25 @@
  *       {username, kdfKey} where kdfKey is K as hex.
  *    3. The server recomputes verifier = HMAC_SHA256(pepper, K) and compares
  *       it against the stored verifier in constant time. On success it mints
- *       an opaque 256-bit session token, stores it in KV with a 30-day TTL,
- *       and returns it as an HttpOnly Secure SameSite=Lax cookie.
- *    4. First run: /api/auth/setup {username, salt, kdfKey} stores the
- *       verifier. It works only while the users table is empty, then 404s
- *       permanently.
+ *       an opaque 256-bit session token, stores {userId, username} in KV
+ *       with a 30-day TTL, and returns it as an HttpOnly Secure
+ *       SameSite=Lax cookie.
+ *    4. Signup: POST /api/auth/signup {username, salt, kdfKey, inviteCode}.
+ *       The invite code is required once any user exists; while the users
+ *       table is empty the first user may sign up without one (bootstrap).
+ *       Codes are single-use: validated, then claimed with a conditional
+ *       UPDATE so concurrent signups cannot share one. Signup also creates
+ *       the user's Uncategorized pot. The old one-time /api/auth/setup now
+ *       permanently 404s.
+ *    5. Agent access: per-user bearer tokens. An authenticated user mints one
+ *       via POST /api/auth/agent-tokens (the raw token is shown once; only
+ *       its SHA-256 is stored) and revokes via DELETE. Requests present it
+ *       as Authorization: Bearer. The old global AGENT_TOKEN is retired.
  *
  *  Pass-the-hash property: K is a bearer credential while in flight, so
- *  logins are HTTPS-only and rate-limited per IP (5 attempts per 10 min).
- *  Sessions live 30 days so K is transmitted rarely.
+ *  logins are HTTPS-only and rate-limited per IP (5 attempts per 10 min);
+ *  signups are rate-limited separately. Sessions live 30 days so K is
+ *  transmitted rarely.
  *
  *  Worker-safe by construction: imports only `hono` and a type-only
  *  db-interface import. No bun:sqlite, no node:fs, no hono/bun.
@@ -36,10 +46,14 @@ export interface KVStore {
 export interface AuthConfig {
   kv: KVStore;
   pepper: string;
-  agentToken: string;
 }
 
-export type Identity = "agent" | "user";
+/** Who is making the request, resolved per request by the middleware:
+ *  "user" for a cookie session, "agent" for a per-user bearer token. */
+export interface Identity {
+  kind: "agent" | "user";
+  userId: number;
+}
 
 /** 30-day sessions; 5 login attempts per IP per 10 minutes. */
 export const SESSION_TTL_SECONDS = 2592000;
@@ -93,6 +107,13 @@ export async function computeVerifier(pepper: string, kdfKeyHex: string): Promis
   return new Uint8Array(sig);
 }
 
+/** SHA-256 of a token, hex-encoded. Agent tokens are stored hashed; the raw
+ *  token is shown once at creation and never again. */
+export async function sha256Hex(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  return bytesToHex(new Uint8Array(digest));
+}
+
 /* ---------- sessions & rate limits ---------- */
 
 function sessionCookie(token: string, maxAge: number): string {
@@ -112,16 +133,17 @@ function getSessionToken(cookieHeader: string | null): string | null {
   return null;
 }
 
-async function mintSession(kv: KVStore, username: string): Promise<string> {
+async function mintSession(kv: KVStore, userId: number, username: string): Promise<string> {
   const token = randomHex(32);
-  await kv.put(`sess:${token}`, JSON.stringify({ username }), { expirationTtl: SESSION_TTL_SECONDS });
+  await kv.put(`sess:${token}`, JSON.stringify({ userId, username }), { expirationTtl: SESSION_TTL_SECONDS });
   return token;
 }
 
-/** True when this IP has exhausted its login budget. Counts every login
- *  attempt (success or failure); the window is fixed at 10 minutes. */
-export async function rateLimitHit(kv: KVStore, ip: string): Promise<boolean> {
-  const key = `rl:${ip}`;
+/** True when this IP has exhausted its budget for the scope. Counts every
+ *  attempt (success or failure); the window is fixed at 10 minutes.
+ *  Scopes ("login", "signup") get independent buckets under `rl:<scope>:`. */
+export async function rateLimitHit(kv: KVStore, ip: string, scope = "login"): Promise<boolean> {
+  const key = `rl:${scope}:${ip}`;
   const now = Date.now();
   let count = 0;
   let start = now;
@@ -150,26 +172,46 @@ function clientIp(c: any): string {
   );
 }
 
-/** Identify the request: valid session cookie -> "user"; matching bearer
- *  token -> "agent"; otherwise null. The bearer compare is constant-time. */
-export async function identifyRequest(c: any, config: AuthConfig): Promise<Identity | null> {
+/** Identify the request: a valid session cookie resolves to the user it was
+ *  minted for; a bearer token is hashed and looked up in agent_tokens
+ *  (per-user tokens, M2). Otherwise null. Pre-M2 sessions stored only
+ *  {username} and no longer resolve: those clients re-login. */
+export async function identifyRequest(c: any, config: AuthConfig, db: Db): Promise<Identity | null> {
   const token = getSessionToken(c.req.header("Cookie") ?? null);
-  if (token && (await config.kv.get(`sess:${token}`))) return "user";
+  if (token) {
+    const raw = await config.kv.get(`sess:${token}`);
+    if (raw) {
+      try {
+        const s = JSON.parse(raw) as { userId?: unknown; username?: unknown };
+        if (typeof s.userId === "number" && Number.isInteger(s.userId) && s.userId > 0) {
+          return { kind: "user", userId: s.userId };
+        }
+      } catch {
+        // Corrupt session value: fall through to unauthenticated.
+      }
+    }
+  }
   const authz: string = c.req.header("Authorization") ?? "";
-  if (config.agentToken && authz.startsWith("Bearer ")) {
-    const presented = new TextEncoder().encode(authz.slice(7));
-    const expected = new TextEncoder().encode(config.agentToken);
-    if (timingSafeEqual(presented, expected)) return "agent";
+  if (authz.startsWith("Bearer ")) {
+    const presented = authz.slice(7).trim().toLowerCase();
+    if (/^[0-9a-f]{64}$/.test(presented)) {
+      const row = await db.get<{ user_id: number }>(
+        "SELECT user_id FROM agent_tokens WHERE token_hash = ?",
+        await sha256Hex(presented)
+      );
+      if (row) return { kind: "agent", userId: row.user_id };
+    }
   }
   return null;
 }
 
-/** Hono middleware for /api/*: skips /api/auth/*, requires a session or the
- *  agent bearer token, and records the identity for entered_by derivation. */
-export function authMiddleware(config: AuthConfig) {
+/** Hono middleware for /api/*: skips /api/auth/* (those routes identify the
+ *  request themselves), requires a session or a per-user agent token, and
+ *  records the identity for user_id scoping and entered_by derivation. */
+export function authMiddleware(config: AuthConfig, getDb: () => Promise<Db>) {
   return async (c: any, next: () => Promise<void>) => {
     if (c.req.path.startsWith("/api/auth/")) return next();
-    const identity = await identifyRequest(c, config);
+    const identity = await identifyRequest(c, config, await getDb());
     if (!identity) return c.json({ error: "unauthorized" }, 401);
     c.set("identity", identity);
     await next();
@@ -204,31 +246,70 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
     return c.json({ salt: randomHex(16), kdf_params: DEFAULT_KDF_PARAMS });
   });
 
-  /** One-time setup: stores verifier = HMAC_SHA256(pepper, kdfKey). Only
-   *  while the users table is empty; afterwards this permanently 404s. */
+  /** Retired in M2: one-time setup was replaced by invite-code signup.
+   *  Kept as an explicit 404 so old clients fail closed and loud. */
   app.post("/api/auth/setup", async (c) => {
+    return c.json({ error: "not found" }, 404);
+  });
+
+  /** Signup with an invite code. The code is required once any user exists;
+   *  while the users table is empty the first user may sign up without one
+   *  (bootstrap, like the old setup). The code is single-use: it is
+   *  validated, the user row is inserted, then the code is claimed with a
+   *  conditional UPDATE so concurrent signups cannot share one. Losing the
+   *  race rolls the fresh user row back. Signup also provisions the user's
+   *  Uncategorized pot (deletePot's move target). */
+  app.post("/api/auth/signup", async (c) => {
     if (!config.pepper) return c.json({ error: "auth not configured" }, 500);
-    const db = await getDb();
-    if ((await userCount(db)) > 0) return c.json({ error: "not found" }, 404);
     const body = await c.req.json().catch(() => null);
     const username = validUsername(body?.username) ? body.username.trim() : "";
     const salt = typeof body?.salt === "string" && /^[0-9a-fA-F]{32}$/.test(body.salt) ? body.salt.toLowerCase() : "";
     const kdfKey = typeof body?.kdfKey === "string" && /^[0-9a-fA-F]{64}$/.test(body.kdfKey) ? body.kdfKey : "";
+    const rawCode = typeof body?.inviteCode === "string" ? body.inviteCode.trim().toLowerCase() : "";
+    const inviteCode = /^[0-9a-f]{32}$/.test(rawCode) ? rawCode : "";
     if (!username || !salt || !kdfKey) return c.json({ error: "username, salt, and kdfKey required" }, 400);
+    if (await rateLimitHit(config.kv, clientIp(c), "signup")) {
+      return c.json({ error: "too many attempts; try again later" }, 429);
+    }
+    const db = await getDb();
+    const existing = await userCount(db);
+    if (existing > 0 && !inviteCode) return c.json({ error: "invite code required" }, 400);
+    if (inviteCode) {
+      const ok = await db.get("SELECT code FROM invite_codes WHERE code = ? AND used_by IS NULL", inviteCode);
+      if (!ok) return c.json({ error: "invalid or already-used invite code" }, 400);
+    }
     const verifier = bytesToHex(await computeVerifier(config.pepper, kdfKey));
+    let userId: number;
     try {
-      await db.run(
-        "INSERT INTO users (username, salt, verifier, kdf_params, created_at) VALUES (?, ?, ?, ?, ?)",
+      const row = await db.get<{ id: number }>(
+        "INSERT INTO users (username, salt, verifier, kdf_params, created_at) VALUES (?, ?, ?, ?, ?) RETURNING id",
         username,
         salt,
         verifier,
         DEFAULT_KDF_PARAMS,
         new Date().toISOString()
       );
+      userId = row!.id;
     } catch {
-      // Lost a setup race (username is UNIQUE): behave as if setup is done.
-      return c.json({ error: "not found" }, 404);
+      // Username is UNIQUE: the invite code stays unused so the client can retry.
+      return c.json({ error: "that username is taken" }, 400);
     }
+    if (inviteCode) {
+      const claimed = await db.run(
+        "UPDATE invite_codes SET used_by = ?, used_at = ? WHERE code = ? AND used_by IS NULL",
+        userId,
+        new Date().toISOString(),
+        inviteCode
+      );
+      if (claimed.changes === 0) {
+        await db.run("DELETE FROM users WHERE id = ?", userId);
+        return c.json({ error: "invalid or already-used invite code" }, 400);
+      }
+    }
+    await db.run(
+      "INSERT INTO pots (user_id, name, pot_group, target_type, target_cents) VALUES (?, 'Uncategorized', 'General', 'fixed', 0)",
+      userId
+    );
     return c.json({ ok: true });
   });
 
@@ -243,11 +324,11 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
     if (!username || !kdfKey) return c.json({ error: "username and kdfKey required" }, 400);
     if (await rateLimitHit(config.kv, clientIp(c))) return c.json({ error: "too many attempts; try again later" }, 429);
     const db = await getDb();
-    const row = await db.get<{ verifier: string }>("SELECT verifier FROM users WHERE username = ?", username);
+    const row = await db.get<{ id: number; verifier: string }>("SELECT id, verifier FROM users WHERE username = ?", username);
     const expected = row ? hexToBytes(row.verifier) : crypto.getRandomValues(new Uint8Array(32));
     const actual = await computeVerifier(config.pepper, kdfKey);
-    if (!timingSafeEqual(actual, expected)) return c.json({ error: "wrong username or password" }, 401);
-    const token = await mintSession(config.kv, username);
+    if (!row || !timingSafeEqual(actual, expected)) return c.json({ error: "wrong username or password" }, 401);
+    const token = await mintSession(config.kv, row.id, username);
     c.header("Set-Cookie", sessionCookie(token, SESSION_TTL_SECONDS));
     return c.json({ ok: true });
   });
@@ -260,13 +341,58 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
     return c.json({ ok: true });
   });
 
-  /** Frontend gate: { authenticated, setupRequired }. */
+  /** Frontend gate: { authenticated, setupRequired }. Identity-aware: a valid
+   *  session or per-user agent token reports authenticated. */
   app.get("/api/auth/me", async (c) => {
-    const token = getSessionToken(c.req.header("Cookie") ?? null);
-    if (token && (await config.kv.get(`sess:${token}`))) {
-      return c.json({ authenticated: true, setupRequired: false });
-    }
     const db = await getDb();
+    const identity = await identifyRequest(c, config, db);
+    if (identity) {
+      const row = await db.get<{ username: string }>("SELECT username FROM users WHERE id = ?", identity.userId);
+      return c.json({ authenticated: true, setupRequired: false, username: row?.username ?? null });
+    }
     return c.json({ authenticated: false, setupRequired: (await userCount(db)) === 0 });
+  });
+
+  /** Mint a per-user agent token. Requires a user session: these are
+   *  full-access bearer credentials, so another agent token cannot mint one.
+   *  The raw token is returned once; only its SHA-256 is stored. */
+  app.post("/api/auth/agent-tokens", async (c) => {
+    const db = await getDb();
+    const identity = await identifyRequest(c, config, db);
+    if (!identity || identity.kind !== "user") return c.json({ error: "unauthorized" }, 401);
+    const body = await c.req.json().catch(() => null);
+    const name = typeof body?.name === "string" && body.name.trim() ? body.name.trim().slice(0, 80) : "cli";
+    const token = randomHex(32);
+    const row = await db.get<{ id: number }>(
+      "INSERT INTO agent_tokens (user_id, token_hash, name) VALUES (?, ?, ?) RETURNING id",
+      identity.userId,
+      await sha256Hex(token),
+      name
+    );
+    return c.json({ ok: true, id: row!.id, token });
+  });
+
+  /** Revoke one of the user's agent tokens. */
+  app.delete("/api/auth/agent-tokens/:id", async (c) => {
+    const db = await getDb();
+    const identity = await identifyRequest(c, config, db);
+    if (!identity || identity.kind !== "user") return c.json({ error: "unauthorized" }, 401);
+    const tokenId = parseInt(c.req.param("id"), 10);
+    if (!Number.isInteger(tokenId) || tokenId <= 0) return c.json({ error: "bad token id" }, 400);
+    const r = await db.run("DELETE FROM agent_tokens WHERE id = ? AND user_id = ?", tokenId, identity.userId);
+    if (r.changes === 0) return c.json({ error: "no such token" }, 404);
+    return c.json({ ok: true });
+  });
+
+  /** Mint a single-use invite code. Any authenticated identity may do this:
+   *  the operator's agent mints codes through the CLI, and invitees are
+   *  bounded by code distribution. */
+  app.post("/api/auth/invite-codes", async (c) => {
+    const db = await getDb();
+    const identity = await identifyRequest(c, config, db);
+    if (!identity) return c.json({ error: "unauthorized" }, 401);
+    const code = randomHex(16);
+    await db.run("INSERT INTO invite_codes (code, created_by) VALUES (?, ?)", code, identity.userId);
+    return c.json({ ok: true, code });
   });
 }

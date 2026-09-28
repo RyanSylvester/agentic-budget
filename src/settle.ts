@@ -4,7 +4,7 @@
  *  allocateSettlement; DB writes live in applySettlement, run as sequential
  *  awaits (single writer: one user, one agent). */
 import type { Db, DbValue } from "./db-interface";
-import { assertSplitsSum, FIRST_USER } from "./money";
+import { assertSplitsSum } from "./money";
 
 export interface OwedSplit {
   splitId: number;
@@ -79,6 +79,7 @@ export interface SettlementSummary {
  *  writer, so the read-then-write sequence cannot interleave. */
 export async function applySettlement(
   db: Db,
+  userId: number,
   opts: { contactId: number; accountId: number; amountCents: number; note?: string; enteredBy?: "agent" | "user" }
 ): Promise<SettlementSummary> {
   const enteredBy = opts.enteredBy ?? "agent";
@@ -102,7 +103,7 @@ export async function applySettlement(
         if (need <= 0) break;
         if (cr.leftover_cents <= 0) continue;
         const take = Math.min(need, cr.leftover_cents);
-        await db.run(`INSERT INTO settlement_allocations (user_id, settlement_id, split_id, amount_cents) VALUES (${FIRST_USER}, ?, ?, ?)`, cr.id, o.splitId, take);
+        await db.run(`INSERT INTO settlement_allocations (user_id, settlement_id, split_id, amount_cents) VALUES (?, ?, ?, ?)`, userId, cr.id, o.splitId, take);
         await db.run("UPDATE settlements SET leftover_cents = leftover_cents - ? WHERE id = ?", take, cr.id);
         cr.leftover_cents -= take;
         need -= take;
@@ -118,7 +119,8 @@ export async function applySettlement(
 
   const txn = await db.get<{ id: number }>(
     `INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared)
-     VALUES (${FIRST_USER}, date('now'), ?, ?, ?, 'manual', ?, 'confirmed', 'cleared') RETURNING id`,
+     VALUES (?, date('now'), ?, ?, ?, 'manual', ?, 'confirmed', 'cleared') RETURNING id`,
+    userId,
     opts.accountId,
     opts.amountCents,
     opts.note ?? `${contact.name} settlement`,
@@ -126,21 +128,23 @@ export async function applySettlement(
   );
   // 100% contact-owned: real money for reconciliation, invisible to the user's spend views.
   await db.run(
-    `INSERT INTO splits (user_id, transaction_id, owner, contact_id, amount_cents) VALUES (${FIRST_USER}, ?, 'contact', ?, ?)`,
+    `INSERT INTO splits (user_id, transaction_id, owner, contact_id, amount_cents) VALUES (?, ?, 'contact', ?, ?)`,
+    userId,
     txn!.id,
     opts.contactId,
     opts.amountCents
   );
 
   const st = await db.get<{ id: number }>(
-    `INSERT INTO settlements (user_id, transaction_id, date, amount_cents, leftover_cents, note) VALUES (${FIRST_USER}, ?, date('now'), ?, ?, ?) RETURNING id`,
+    `INSERT INTO settlements (user_id, transaction_id, date, amount_cents, leftover_cents, note) VALUES (?, ?, date('now'), ?, ?, ?) RETURNING id`,
+    userId,
     txn!.id,
     opts.amountCents,
     leftoverCents,
     opts.note ?? null
   );
   for (const a of allocations) {
-    await db.run(`INSERT INTO settlement_allocations (user_id, settlement_id, split_id, amount_cents) VALUES (${FIRST_USER}, ?, ?, ?)`, st!.id, a.splitId, a.amountCents);
+    await db.run(`INSERT INTO settlement_allocations (user_id, settlement_id, split_id, amount_cents) VALUES (?, ?, ?, ?)`, userId, st!.id, a.splitId, a.amountCents);
   }
 
   await assertSplitsSum(db, txn!.id);

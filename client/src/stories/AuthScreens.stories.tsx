@@ -1,9 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, within } from "storybook/test";
-import { LoginScreen, SetupScreen, type DeriveKey } from "../AuthScreens";
+import { LoginScreen, SignupScreen, type DeriveKey } from "../AuthScreens";
 import type { MockApiConfig } from "./mockApi";
 
-/* Login and first-run setup screens. The KDF is stubbed in stories so the
+/* Login and signup screens. The KDF is stubbed in stories so the
    real argon2id cost does not slow down interaction tests. */
 
 const fastKdf: DeriveKey = async () => "ab".repeat(32);
@@ -17,7 +17,7 @@ const meta: Meta<typeof LoginScreen> = {
     docs: {
       description: {
         component:
-          "Login and first-run setup. The password never leaves the device: the client derives an Argon2id key and only the derived key is sent to the server.",
+          "Login and signup. The password never leaves the device: the client derives an Argon2id key and only the derived key is sent to the server.",
       },
     },
   },
@@ -89,30 +89,79 @@ export const LoginRateLimited: Story = {
   },
 };
 
-type SetupStory = StoryObj<typeof SetupScreen>;
+type SignupStory = StoryObj<typeof SignupScreen>;
 
-export const SetupDefault: SetupStory = {
-  args: { deriveKey: fastKdf, onSetup: () => {} },
+export const SignupDefault: SignupStory = {
+  args: { deriveKey: fastKdf, onSignup: () => {} },
   parameters: {
     mockApi: {
-      post: { "/api/auth/setup": { ok: true } },
+      post: { "/api/auth/signup": { ok: true } },
     } satisfies MockApiConfig,
-    docs: { description: { story: "First-run password creation." } },
+    docs: { description: { story: "Account creation with an invite code field. The code is optional only for the very first account." } },
   },
 };
 
-export const SetupMismatch: SetupStory = {
-  args: { deriveKey: fastKdf, onSetup: () => {} },
+export const SignupMismatch: SignupStory = {
+  args: { deriveKey: fastKdf, onSignup: () => {} },
   parameters: {
-    mockApi: { post: { "/api/auth/setup": { ok: true } } } satisfies MockApiConfig,
+    mockApi: { post: { "/api/auth/signup": { ok: true } } } satisfies MockApiConfig,
     docs: { description: { story: "Mismatched confirmation is caught before anything is sent." } },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.type(canvas.getByLabelText("Username"), "owner");
+    await userEvent.type(canvas.getByLabelText("Username"), "newuser");
     await userEvent.type(canvas.getByLabelText("Password"), "one");
     await userEvent.type(canvas.getByLabelText("Confirm password"), "two");
-    await userEvent.click(canvas.getByRole("button", { name: "Create password" }));
+    await userEvent.click(canvas.getByRole("button", { name: "Create account" }));
     await expect(await canvas.findByRole("alert")).toHaveTextContent("Passwords don't match.");
+  },
+};
+
+export const SignupInviteRequired: SignupStory = {
+  args: { deriveKey: fastKdf, onSignup: () => {} },
+  parameters: {
+    mockApi: {
+      post: {
+        "/api/auth/signup": () =>
+          new Response(JSON.stringify({ error: "an invite code is required to sign up" }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          }),
+      },
+    } satisfies MockApiConfig,
+    docs: { description: { story: "Once an account exists, signup without a code is rejected with a plain error." } },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.type(canvas.getByLabelText("Username"), "newuser");
+    await userEvent.type(canvas.getByLabelText("Password"), "correct horse");
+    await userEvent.type(canvas.getByLabelText("Confirm password"), "correct horse");
+    await userEvent.click(canvas.getByRole("button", { name: "Create account" }));
+    await expect(await canvas.findByRole("alert")).toHaveTextContent("an invite code is required to sign up");
+  },
+};
+
+export const SignupBadCode: SignupStory = {
+  args: { deriveKey: fastKdf, onSignup: () => {} },
+  parameters: {
+    mockApi: {
+      post: {
+        "/api/auth/signup": () =>
+          new Response(JSON.stringify({ error: "invalid invite code" }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          }),
+      },
+    } satisfies MockApiConfig,
+    docs: { description: { story: "A wrong or already-used invite code is rejected." } },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.type(canvas.getByLabelText("Username"), "newuser");
+    await userEvent.type(canvas.getByLabelText("Password"), "correct horse");
+    await userEvent.type(canvas.getByLabelText("Confirm password"), "correct horse");
+    await userEvent.type(canvas.getByLabelText("Invite code"), "nope");
+    await userEvent.click(canvas.getByRole("button", { name: "Create account" }));
+    await expect(await canvas.findByRole("alert")).toHaveTextContent("invalid invite code");
   },
 };

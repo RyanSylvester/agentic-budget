@@ -1,10 +1,9 @@
 # Daybook on Cloudflare Workers. One Worker serves the JSON API and the Vite
 # client as static assets, same-origin (no CORS). No secrets in this file:
-# database_id and binding names are not secret. Worker secrets (Phase 5 auth)
-# are set for production with:
-#   wrangler secret put PEPPER        # HMAC pepper for the password verifier
-#   wrangler secret put AGENT_TOKEN   # bearer token for the agent write path
-# and never committed. For local `wrangler dev`, dev-only values live in
+# database_id and binding names are not secret. The production PEPPER secret
+# is set with `wrangler secret put PEPPER` and never committed. Agent access
+# uses per-user bearer tokens minted via POST /api/auth/agent-tokens; there
+# is no global agent token. For local `wrangler dev`, dev-only values live in
 # `.dev.vars` (gitignored).
 
 name = "daybook"

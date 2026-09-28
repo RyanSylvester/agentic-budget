@@ -35,12 +35,9 @@ interface Env {
   SESSIONS: KVNamespace;
   /* PEPPER: HMAC pepper for the password verifier. Set with
    *   wrangler secret put PEPPER   (production, Phase 7)
-   * AGENT_TOKEN: bearer token for the agent write path. Set with
-   *   wrangler secret put AGENT_TOKEN   (production, Phase 7)
    * For local `wrangler dev`, put dev-only values in `.dev.vars`
    * (gitignored, never committed). */
   PEPPER: string;
-  AGENT_TOKEN: string;
 }
 
 /** D1 rejects bigint bindings; the app passes money as numbers, but coerce
@@ -78,7 +75,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/")) {
       const app = createApp(async () => new D1Db(env.DB), {
-        auth: { kv: env.SESSIONS, pepper: env.PEPPER, agentToken: env.AGENT_TOKEN },
+        auth: { kv: env.SESSIONS, pepper: env.PEPPER },
       });
       return app.fetch(request);
     }

@@ -19,7 +19,7 @@ import { assignToPot, assignedToPot } from "./assign";
 import { scaffoldMonth, type ScaffoldStrategy } from "./scaffold";
 import { createTransaction, updateTransaction } from "./transactions";
 import { createSchedule, getScheduleById, listSchedules, markPaid, removeSchedule, sinkingStatus } from "./sinking";
-import { validMonth, FIRST_USER } from "./money";
+import { validMonth } from "./money";
 
 /* Input validation helpers: 400 for bad input, 404 when the row is missing. */
 
@@ -40,11 +40,23 @@ async function txnExists(db: Db, id: number): Promise<boolean> {
   return !!(await db.get("SELECT 1 FROM transactions WHERE id = ?", id));
 }
 
-/** Identity recorded on writes: "agent" for the bearer-token write path,
- *  "user" for cookie sessions. Defaults to "user" when auth is not
- *  configured (local Bun dev, where the agent writes through the CLI). */
-function requestIdentity(c: any): Identity {
-  return (c.get("identity") as Identity | undefined) ?? "user";
+/** The acting identity's kind, for entered_by derivation: "agent" for the
+ *  bearer-token write path, "user" for cookie sessions. Defaults to "user"
+ *  when auth is not configured (local Bun dev, where the agent writes
+ *  through the CLI). */
+function requestKind(c: any): "agent" | "user" {
+  return (c.get("identity") as Identity | undefined)?.kind ?? "user";
+}
+
+/** The acting user's id, for user_id scoping on writes. On the Worker it
+ *  comes from the auth middleware (which 401s when absent); in
+ *  unauthenticated Bun mode it is the first (only) local user. Throws when
+ *  no local user exists yet; write handlers surface it as a 400. */
+async function requestUserId(c: any, db: Db, authed: boolean): Promise<number> {
+  if (authed) return (c.get("identity") as Identity).userId;
+  const row = await db.get<{ id: number }>("SELECT id FROM users ORDER BY id LIMIT 1");
+  if (!row) throw new Error("no user yet: run `budget user create <username>` first");
+  return row.id;
 }
 
 /** Build the API app. getDb supplies the database per request; the Bun entry
@@ -54,9 +66,10 @@ function requestIdentity(c: any): Identity {
  *  local session so the frontend gate passes. */
 export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }): Hono {
   const app = new Hono();
+  const authed = !!opts?.auth;
 
   if (opts?.auth) {
-    app.use("/api/*", authMiddleware(opts.auth));
+    app.use("/api/*", authMiddleware(opts.auth, getDb));
     registerAuth(app, getDb, opts.auth);
   } else {
     app.get("/api/auth/me", (c) => c.json({ authenticated: true, setupRequired: false }));
@@ -142,7 +155,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     const { month, potId, cents } = body ?? {};
     try {
-      const r = await assignToPot(db, month, potId, cents);
+      const r = await assignToPot(db, await requestUserId(c, db, authed), month, potId, cents);
       return c.json({ ok: true, ...r });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
@@ -158,7 +171,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     const { month, strategy, dryRun } = body ?? {};
     try {
-      const lines = await scaffoldMonth(db, month, strategy as ScaffoldStrategy, dryRun === true);
+      const lines = await scaffoldMonth(db, await requestUserId(c, db, authed), month, strategy as ScaffoldStrategy, dryRun === true);
       return c.json({ ok: true, month, strategy, lines });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
@@ -187,7 +200,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const cadenceMonths = body?.cadenceMonths === undefined ? 12 : Number(body.cadenceMonths);
     if (potRef === undefined || potRef === null) return c.json({ error: "potId (or pot name) required" }, 400);
     try {
-      const s = await createSchedule(db, potRef, expectedCents, dueMonth, cadenceMonths);
+      const s = await createSchedule(db, await requestUserId(c, db, authed), potRef, expectedCents, dueMonth, cadenceMonths);
       return c.json({ ok: true, id: s.id });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
@@ -310,7 +323,8 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (result.balanced) {
       await db.run("UPDATE transactions SET cleared = 'reconciled' WHERE account_id = ? AND cleared = 'cleared'", accountId);
       await db.run(
-        `INSERT INTO reconciliations (user_id, account_id, actual_balance_cents, budget_balance_cents, difference_cents) VALUES (${FIRST_USER}, ?, ?, ?, 0)`,
+        `INSERT INTO reconciliations (user_id, account_id, actual_balance_cents, budget_balance_cents, difference_cents) VALUES (?, ?, ?, ?, 0)`,
+        await requestUserId(c, db, authed),
         accountId,
         actualBalanceCents,
         cleared
@@ -362,7 +376,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
         const dup = await db.get<{ id: number }>("SELECT id FROM transactions WHERE external_id = ?", b.externalId);
         if (dup) return c.json({ ok: true, id: dup.id, duplicate: true });
       }
-      const id = await createTransaction(db, { ...b, enteredBy: requestIdentity(c) });
+      const id = await createTransaction(db, await requestUserId(c, db, authed), { ...b, enteredBy: requestKind(c) });
       return c.json({ ok: true, id });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
@@ -436,7 +450,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const { ok, body } = await readJson(c);
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     try {
-      const id = await createPot(db, body ?? {});
+      const id = await createPot(db, await requestUserId(c, db, authed), body ?? {});
       return c.json({ ok: true, id });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
@@ -467,7 +481,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (id === null) return c.json({ error: "bad pot id" }, 400);
     if (!(await potExists(db, id))) return c.json({ error: `no pot ${id}` }, 404);
     try {
-      const summary = await deletePot(db, id);
+      const summary = await deletePot(db, await requestUserId(c, db, authed), id);
       return c.json({ ok: true, ...summary });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
@@ -486,7 +500,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const { ok, body } = await readJson(c);
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     try {
-      const id = await createContact(db, body?.name);
+      const id = await createContact(db, await requestUserId(c, db, authed), body?.name);
       return c.json({ ok: true, id });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
@@ -557,7 +571,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const month = body?.month ?? new Date().toISOString().slice(0, 7);
     if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
     try {
-      await applyClose(db, await closePreview(db, month));
+      await applyClose(db, await requestUserId(c, db, authed), await closePreview(db, month));
       return c.json({ ok: true, month });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
@@ -577,7 +591,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (!contactId) return c.json({ error: "contactId required" }, 400);
     if (!(await db.get("SELECT 1 FROM accounts WHERE id = ?", accountId))) return c.json({ error: `no account ${accountId}` }, 404);
     try {
-      const summary = await applySettlement(db, { contactId, accountId, amountCents, note: body?.note, enteredBy: requestIdentity(c) });
+      const summary = await applySettlement(db, await requestUserId(c, db, authed), { contactId, accountId, amountCents, note: body?.note, enteredBy: requestKind(c) });
       return c.json(summary);
     } catch (e) {
       const msg = (e as Error).message;

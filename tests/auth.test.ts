@@ -10,6 +10,7 @@ import {
   bytesToHex,
   randomHex,
   computeVerifier,
+  sha256Hex,
   rateLimitHit,
   type AuthConfig,
   type KVStore,
@@ -36,14 +37,14 @@ async function setupApp(auth?: Partial<AuthConfig>): Promise<{ app: Hono; kv: Ma
   const kv = new MapKV();
   const db = wrapDb(new Database(":memory:"));
   await migrateDb(db);
-  const config: AuthConfig = { kv, pepper: "test-pepper", agentToken: "test-agent-token", ...auth };
+  const config: AuthConfig = { kv, pepper: "test-pepper", ...auth };
   const app = createApp(async () => db, { auth: config });
   return { app, kv, db, config };
 }
 
 async function seedShop(db: Db): Promise<void> {
-  await db.run("INSERT INTO accounts (name, type) VALUES ('Chequing', 'chequing')");
-  await db.run("INSERT INTO pots (name, pot_group, target_type, target_cents) VALUES ('Groceries', 'Food', 'fixed', 0)");
+  await db.run("INSERT INTO accounts (user_id, name, type) VALUES (1, 'Chequing', 'chequing')");
+  await db.run("INSERT INTO pots (user_id, name, pot_group, target_type, target_cents) VALUES (1, 'Groceries', 'Food', 'fixed', 0)");
 }
 
 function call(
@@ -71,6 +72,39 @@ function jsonCall(app: Hono, method: string, path: string, opts?: { body?: unkno
 function sessionCookie(res: Response): string {
   const set = res.headers.get("set-cookie") ?? "";
   return set.split(";")[0];
+}
+
+/** First user signs up with no invite code. Signup does not mint a session
+ *  (like the old setup): callers log in afterwards for an authenticated
+ *  cookie. */
+async function signupFirst(app: Hono, username = "owner"): Promise<void> {
+  const r = await jsonCall(app, "POST", "/api/auth/signup", {
+    body: { username, salt: SALT, kdfKey: KDF_KEY },
+  });
+  expect(r.status).toBe(200);
+  expect(((await r.json()) as any).ok).toBe(true);
+}
+
+async function loginAs(app: Hono, username = "owner"): Promise<string> {
+  const r = await jsonCall(app, "POST", "/api/auth/login", {
+    body: { username, kdfKey: KDF_KEY },
+  });
+  expect(r.status).toBe(200);
+  return sessionCookie(r);
+}
+
+async function mintInvite(app: Hono, cookie: string): Promise<string> {
+  const r = await jsonCall(app, "POST", "/api/auth/invite-codes", { cookie });
+  expect(r.status).toBe(200);
+  return ((await r.json()) as any).code as string;
+}
+
+async function mintAgentToken(app: Hono, cookie: string, name = "t"): Promise<{ id: number; token: string }> {
+  const r = await jsonCall(app, "POST", "/api/auth/agent-tokens", { body: { name }, cookie });
+  expect(r.status).toBe(200);
+  const body = (await r.json()) as any;
+  expect(body.token).toMatch(/^[0-9a-f]{64}$/);
+  return { id: body.id, token: body.token };
 }
 
 describe("timingSafeEqual", () => {
@@ -131,6 +165,12 @@ describe("rateLimitHit", () => {
     for (let i = 0; i < 6; i++) await rateLimitHit(kv, "1.2.3.4");
     expect(await rateLimitHit(kv, "5.6.7.8")).toBe(false);
   });
+  test("login and signup scopes are independent", async () => {
+    const kv = new MapKV();
+    for (let i = 0; i < 6; i++) await rateLimitHit(kv, "1.2.3.4", "login");
+    expect(await rateLimitHit(kv, "1.2.3.4", "login")).toBe(true);
+    expect(await rateLimitHit(kv, "1.2.3.4", "signup")).toBe(false);
+  });
 });
 
 describe("auth endpoints", () => {
@@ -140,39 +180,153 @@ describe("auth endpoints", () => {
     expect(me).toEqual({ authenticated: false, setupRequired: true });
   });
 
-  test("setup validates its inputs", async () => {
+  test("setup endpoint is gone", async () => {
     const { app } = await setupApp();
-    const r = await jsonCall(app, "POST", "/api/auth/setup", { body: { username: "u" } });
-    expect(r.status).toBe(400);
-  });
-
-  test("setup stores the peppered verifier and then permanently 404s", async () => {
-    const { app, db } = await setupApp();
     const r = await jsonCall(app, "POST", "/api/auth/setup", {
       body: { username: "owner", salt: SALT, kdfKey: KDF_KEY },
     });
+    expect(r.status).toBe(404);
+  });
+
+  test("signup validates its inputs", async () => {
+    const { app } = await setupApp();
+    expect((await jsonCall(app, "POST", "/api/auth/signup", { body: { username: "u" } })).status).toBe(400);
+    expect(
+      (await jsonCall(app, "POST", "/api/auth/signup", { body: { username: "  ", salt: SALT, kdfKey: KDF_KEY } })).status
+    ).toBe(400);
+    expect(
+      (await jsonCall(app, "POST", "/api/auth/signup", { body: { username: "u", salt: SALT, kdfKey: "short" } })).status
+    ).toBe(400);
+  });
+
+  test("first signup needs no invite code and stores the peppered verifier", async () => {
+    const { app, db } = await setupApp();
+    const r = await jsonCall(app, "POST", "/api/auth/signup", {
+      body: { username: "owner", salt: SALT, kdfKey: KDF_KEY },
+    });
     expect(r.status).toBe(200);
+    expect(((await r.json()) as any).ok).toBe(true);
+    // Like the old setup, signup does not mint a session: the client logs in.
+    expect(r.headers.get("set-cookie")).toBeNull();
+
     const row = (await db.get("SELECT salt, verifier, kdf_params FROM users WHERE username = 'owner'")) as any;
     expect(row.salt).toBe(SALT);
     expect(row.verifier).toBe(bytesToHex(await computeVerifier("test-pepper", KDF_KEY)));
     expect(row.kdf_params).toBe("m=19456,t=2,p=1");
-    const again = await jsonCall(app, "POST", "/api/auth/setup", {
-      body: { username: "intruder", salt: SALT, kdfKey: KDF_KEY },
-    });
-    expect(again.status).toBe(404);
+
+    // Signup provisions the user's Uncategorized pot (deletePot's move target).
+    const uncat = (await db.get(
+      "SELECT id FROM pots WHERE user_id = (SELECT id FROM users WHERE username = 'owner') AND name = 'Uncategorized'"
+    )) as any;
+    expect(uncat?.id).toBeGreaterThan(0);
+
+    const cookie = await loginAs(app);
+    const me = await (await call(app, "GET", "/api/auth/me", { cookie })).json();
+    expect(me.authenticated).toBe(true);
+    expect(me.setupRequired).toBe(false);
+    expect(me.username).toBe("owner");
   });
 
-  test("setup 500s when no pepper is configured", async () => {
+  test("signup 500s when no pepper is configured", async () => {
     const { app } = await setupApp({ pepper: "" });
-    const r = await jsonCall(app, "POST", "/api/auth/setup", {
+    const r = await jsonCall(app, "POST", "/api/auth/signup", {
       body: { username: "owner", salt: SALT, kdfKey: KDF_KEY },
     });
     expect(r.status).toBe(500);
   });
 
+  test("second signup without a code is rejected", async () => {
+    const { app } = await setupApp();
+    await signupFirst(app);
+    const r = await jsonCall(app, "POST", "/api/auth/signup", {
+      body: { username: "second", salt: SALT, kdfKey: KDF_KEY },
+    });
+    expect(r.status).toBe(400);
+    expect(((await r.json()) as any).error).toBe("invite code required");
+  });
+
+  test("signup with an unknown invite code is rejected", async () => {
+    const { app } = await setupApp();
+    await signupFirst(app);
+    // Malformed codes are treated as absent...
+    const malformed = await jsonCall(app, "POST", "/api/auth/signup", {
+      body: { username: "second", salt: SALT, kdfKey: KDF_KEY, inviteCode: "nope" },
+    });
+    expect(malformed.status).toBe(400);
+    expect(((await malformed.json()) as any).error).toBe("invite code required");
+    // ...while a well-formed but unknown code is explicitly invalid.
+    const r = await jsonCall(app, "POST", "/api/auth/signup", {
+      body: { username: "second", salt: SALT, kdfKey: KDF_KEY, inviteCode: "ab".repeat(16) },
+    });
+    expect(r.status).toBe(400);
+    expect(((await r.json()) as any).error).toBe("invalid or already-used invite code");
+  });
+
+  test("signup with a valid code works once and consumes the code", async () => {
+    const { app, db } = await setupApp();
+    await signupFirst(app);
+    const cookie = await loginAs(app);
+    const code = await mintInvite(app, cookie);
+
+    const r = await jsonCall(app, "POST", "/api/auth/signup", {
+      body: { username: "second", salt: SALT, kdfKey: KDF_KEY, inviteCode: code },
+    });
+    expect(r.status).toBe(200);
+    const second = (await db.get("SELECT id FROM users WHERE username = 'second'")) as any;
+    const used = (await db.get("SELECT used_by FROM invite_codes WHERE code = ?", code)) as any;
+    expect(used.used_by).toBe(second.id);
+
+    const reuse = await jsonCall(app, "POST", "/api/auth/signup", {
+      body: { username: "third", salt: SALT, kdfKey: KDF_KEY, inviteCode: code },
+    });
+    expect(reuse.status).toBe(400);
+    expect(((await reuse.json()) as any).error).toBe("invalid or already-used invite code");
+  });
+
+  test("taken usernames are rejected without consuming the code", async () => {
+    const { app, db } = await setupApp();
+    await signupFirst(app);
+    const cookie = await loginAs(app);
+    const used = await mintInvite(app, cookie);
+    const fresh = await mintInvite(app, cookie);
+
+    const r = await jsonCall(app, "POST", "/api/auth/signup", {
+      body: { username: "owner", salt: SALT, kdfKey: KDF_KEY, inviteCode: used },
+    });
+    expect(r.status).toBe(400);
+    expect(((await r.json()) as any).error).toBe("that username is taken");
+    // The code survives for a real signup.
+    const ok = await jsonCall(app, "POST", "/api/auth/signup", {
+      body: { username: "second", salt: SALT, kdfKey: KDF_KEY, inviteCode: used },
+    });
+    expect(ok.status).toBe(200);
+    expect(((await db.get("SELECT used_by FROM invite_codes WHERE code = ?", fresh)) as any).used_by).toBeNull();
+  });
+
+  test("sixth rapid signup attempt is rate-limited", async () => {
+    const { app } = await setupApp();
+    await signupFirst(app);
+    const headers = { "CF-Connecting-IP": "9.9.9.9" };
+    // The first signup above used no IP header (a different bucket). Each
+    // attempt below fails on the missing invite code but still spends the
+    // signup budget for 9.9.9.9.
+    for (let i = 0; i < 5; i++) {
+      const r = await jsonCall(app, "POST", "/api/auth/signup", {
+        body: { username: `u${i}`, salt: SALT, kdfKey: KDF_KEY },
+        headers,
+      });
+      expect(r.status).toBe(400);
+    }
+    const limited = await jsonCall(app, "POST", "/api/auth/signup", {
+      body: { username: "u5", salt: SALT, kdfKey: KDF_KEY },
+      headers,
+    });
+    expect(limited.status).toBe(429);
+  });
+
   test("challenge returns stored params for known users, random salt for unknown", async () => {
     const { app } = await setupApp();
-    await jsonCall(app, "POST", "/api/auth/setup", { body: { username: "owner", salt: SALT, kdfKey: KDF_KEY } });
+    await signupFirst(app);
     const known = await (
       await jsonCall(app, "POST", "/api/auth/challenge", { body: { username: "owner" } })
     ).json();
@@ -187,7 +341,7 @@ describe("auth endpoints", () => {
 
   test("login round-trip: wrong key 401s, right key sets a session cookie", async () => {
     const { app } = await setupApp();
-    await jsonCall(app, "POST", "/api/auth/setup", { body: { username: "owner", salt: SALT, kdfKey: KDF_KEY } });
+    await signupFirst(app);
 
     const bad = await jsonCall(app, "POST", "/api/auth/login", {
       body: { username: "owner", kdfKey: "ff".repeat(32) },
@@ -205,31 +359,88 @@ describe("auth endpoints", () => {
     expect(good.status).toBe(200);
     const set = good.headers.get("set-cookie") ?? "";
     expect(set).toMatch(/^session=[0-9a-f]{64};/);
-    expect(set).toContain("HttpOnly");
-    expect(set).toContain("Secure");
-    expect(set).toContain("SameSite=Lax");
 
     const me = await (await call(app, "GET", "/api/auth/me", { cookie: sessionCookie(good) })).json();
-    expect(me).toEqual({ authenticated: true, setupRequired: false });
+    expect(me.authenticated).toBe(true);
+    expect(me.setupRequired).toBe(false);
+    expect(me.username).toBe("owner");
   });
 
-  test("middleware: 401 without credentials, 200 with session or bearer", async () => {
+  test("middleware: 401 without credentials, 200 with session or minted bearer", async () => {
     const { app } = await setupApp();
-    await jsonCall(app, "POST", "/api/auth/setup", { body: { username: "owner", salt: SALT, kdfKey: KDF_KEY } });
-    const login = await jsonCall(app, "POST", "/api/auth/login", {
-      body: { username: "owner", kdfKey: KDF_KEY },
-    });
-    const cookie = sessionCookie(login);
+    await signupFirst(app);
+    const cookie = await loginAs(app);
+    const { token } = await mintAgentToken(app, cookie);
 
     expect((await call(app, "GET", "/api/overview")).status).toBe(401);
     expect((await call(app, "GET", "/api/overview", { headers: { Authorization: "Bearer wrong" } })).status).toBe(401);
-    expect((await call(app, "GET", "/api/overview", { headers: { Authorization: "Bearer test-agent-token" } })).status).toBe(200);
+    // The old global AGENT_TOKEN no longer exists: a stale shared secret authenticates nobody.
+    expect((await call(app, "GET", "/api/overview", { headers: { Authorization: "Bearer test-agent-token" } })).status).toBe(401);
+    expect((await call(app, "GET", "/api/overview", { headers: { Authorization: `Bearer ${token}` } })).status).toBe(200);
     expect((await call(app, "GET", "/api/overview", { cookie })).status).toBe(200);
+  });
+
+  test("me is identity-aware: bearer reports the token's user", async () => {
+    const { app } = await setupApp();
+    await signupFirst(app);
+    const cookie = await loginAs(app);
+    const { token } = await mintAgentToken(app, cookie);
+    const me = await (
+      await call(app, "GET", "/api/auth/me", { headers: { Authorization: `Bearer ${token}` } })
+    ).json();
+    expect(me).toEqual({ authenticated: true, setupRequired: false, username: "owner" });
+  });
+
+  test("agent tokens: mint needs a user session, revoke kills the token", async () => {
+    const { app, db } = await setupApp();
+    await signupFirst(app);
+    const cookie = await loginAs(app);
+    const { id, token } = await mintAgentToken(app, cookie, "cli");
+
+    const row = (await db.get("SELECT name, token_hash FROM agent_tokens WHERE id = ?", id)) as any;
+    expect(row.name).toBe("cli");
+    // Only the SHA-256 hash is stored, never the token itself.
+    expect(row.token_hash).not.toContain(token);
+    expect(row.token_hash).toBe(await sha256Hex(token));
+
+    // An agent identity cannot mint more tokens.
+    const agentMint = await jsonCall(app, "POST", "/api/auth/agent-tokens", {
+      body: { name: "nope" },
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(agentMint.status).toBe(401);
+
+    // Revoke via the session; the bearer stops working immediately and the
+    // row is gone.
+    const del = await call(app, "DELETE", `/api/auth/agent-tokens/${id}`, { cookie });
+    expect(del.status).toBe(200);
+    expect(await db.get("SELECT 1 FROM agent_tokens WHERE id = ?", id)).toBeNull();
+    expect((await call(app, "GET", "/api/overview", { headers: { Authorization: `Bearer ${token}` } })).status).toBe(
+      401
+    );
+  });
+
+  test("invite codes can be minted by a session or an agent token, never anonymously", async () => {
+    const { app } = await setupApp();
+    await signupFirst(app);
+    const cookie = await loginAs(app);
+    expect((await jsonCall(app, "POST", "/api/auth/invite-codes")).status).toBe(401);
+
+    const viaSession = await jsonCall(app, "POST", "/api/auth/invite-codes", { cookie });
+    expect(viaSession.status).toBe(200);
+    expect(((await viaSession.json()) as any).code).toMatch(/^[0-9a-f]{32}$/);
+
+    const { token } = await mintAgentToken(app, cookie);
+    const viaAgent = await jsonCall(app, "POST", "/api/auth/invite-codes", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(viaAgent.status).toBe(200);
+    expect(((await viaAgent.json()) as any).code).toMatch(/^[0-9a-f]{32}$/);
   });
 
   test("logout clears the session", async () => {
     const { app } = await setupApp();
-    await jsonCall(app, "POST", "/api/auth/setup", { body: { username: "owner", salt: SALT, kdfKey: KDF_KEY } });
+    await signupFirst(app);
     const login = await jsonCall(app, "POST", "/api/auth/login", {
       body: { username: "owner", kdfKey: KDF_KEY },
     });
@@ -243,7 +454,7 @@ describe("auth endpoints", () => {
 
   test("sixth rapid login attempt is rate-limited", async () => {
     const { app } = await setupApp();
-    await jsonCall(app, "POST", "/api/auth/setup", { body: { username: "owner", salt: SALT, kdfKey: KDF_KEY } });
+    await signupFirst(app);
     const headers = { "CF-Connecting-IP": "9.9.9.9" };
     for (let i = 0; i < 5; i++) {
       const r = await jsonCall(app, "POST", "/api/auth/login", {
@@ -265,28 +476,30 @@ describe("auth endpoints", () => {
     expect(alsoLimited.status).toBe(429);
   });
 
-  test("entered_by follows the auth identity", async () => {
+  test("entered_by and user_id follow the auth identity", async () => {
     const { app, db } = await setupApp();
+    await signupFirst(app);
+    const cookie = await loginAs(app);
+    const { token } = await mintAgentToken(app, cookie);
     await seedShop(db);
-    await jsonCall(app, "POST", "/api/auth/setup", { body: { username: "owner", salt: SALT, kdfKey: KDF_KEY } });
-    const login = await jsonCall(app, "POST", "/api/auth/login", {
-      body: { username: "owner", kdfKey: KDF_KEY },
-    });
-    const cookie = sessionCookie(login);
     const body = { date: "2026-09-27", accountId: 1, potId: 1, amountCents: -100, description: "user buy" };
 
     const asUser = await jsonCall(app, "POST", "/api/transactions", { body, cookie });
     expect(asUser.status).toBe(200);
     const userId = ((await asUser.json()) as any).id;
-    expect(((await db.get("SELECT entered_by AS e FROM transactions WHERE id = ?", userId)) as any).e).toBe("user");
+    const userRow = (await db.get("SELECT entered_by AS e, user_id AS u FROM transactions WHERE id = ?", userId)) as any;
+    expect(userRow.e).toBe("user");
+    expect(userRow.u).toBe(1);
 
     const asAgent = await jsonCall(app, "POST", "/api/transactions", {
       body: { ...body, description: "agent buy" },
-      headers: { Authorization: "Bearer test-agent-token" },
+      headers: { Authorization: `Bearer ${token}` },
     });
     expect(asAgent.status).toBe(200);
     const agentId = ((await asAgent.json()) as any).id;
-    expect(((await db.get("SELECT entered_by AS e FROM transactions WHERE id = ?", agentId)) as any).e).toBe("agent");
+    const agentRow = (await db.get("SELECT entered_by AS e, user_id AS u FROM transactions WHERE id = ?", agentId)) as any;
+    expect(agentRow.e).toBe("agent");
+    expect(agentRow.u).toBe(1);
   });
 
   test("no-auth app keeps the local dev behavior", async () => {
@@ -296,5 +509,20 @@ describe("auth endpoints", () => {
     const me = await (await call(app, "GET", "/api/auth/me")).json();
     expect(me).toEqual({ authenticated: true, setupRequired: false });
     expect((await call(app, "GET", "/api/overview")).status).toBe(200);
+  });
+
+  test("no-auth app writes attribute to the first local user", async () => {
+    const db = wrapDb(new Database(":memory:"));
+    await migrateDb(db);
+    await db.run("INSERT INTO users (username, salt, verifier, kdf_params) VALUES ('local', 's', 'v', 'kdf')");
+    await db.run("INSERT INTO accounts (user_id, name, type) VALUES (1, 'Chequing', 'chequing')");
+    await db.run("INSERT INTO pots (user_id, name, pot_group, target_type, target_cents) VALUES (1, 'Groceries', 'Food', 'fixed', 0)");
+    const app = createApp(async () => db);
+    const r = await jsonCall(app, "POST", "/api/transactions", {
+      body: { date: "2026-09-27", accountId: 1, potId: 1, amountCents: -100, description: "local buy" },
+    });
+    expect(r.status).toBe(200);
+    const id = ((await r.json()) as any).id;
+    expect(((await db.get("SELECT user_id AS u FROM transactions WHERE id = ?", id)) as any).u).toBe(1);
   });
 });
