@@ -4,22 +4,25 @@ import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { migrateDb } from "../src/db";
+import { migrateDb, wrapDb } from "../src/db";
+import type { Db } from "../src/db-interface";
 import { createMigration, listMigrations, runMigrations } from "../src/migrations";
 import { oldMigrateDb } from "./old-migrate";
 
 const schemaSql = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "schema.sql"), "utf8");
 
-function versions(db: Database): string[] {
-  return (db.query("SELECT version FROM schema_migrations ORDER BY version").all() as { version: string }[]).map(
+async function versions(db: Db): Promise<string[]> {
+  return (await db.all<{ version: string }>("SELECT version FROM schema_migrations ORDER BY version")).map(
     (r) => r.version
   );
 }
 
 /** A scratch database built through the OLD code path (schema.sql + the
  *  ad-hoc ALTER chain), with real data: the closest stand-in for the live
- *  budget.db at the moment the migration system ships. */
-function oldPathDb(): Database {
+ *  budget.db at the moment the migration system ships. Built on the raw
+ *  handle (oldMigrateDb is preserved verbatim), then wrapped in the Db
+ *  interface for the new migrateDb. */
+function oldPathDb(): Db {
   const db = new Database(":memory:");
   oldMigrateDb(db, schemaSql);
   db.exec(`INSERT INTO accounts (name, type) VALUES ('Chequing','chequing')`);
@@ -32,7 +35,7 @@ function oldPathDb(): Database {
   ).run();
   const t = (db.query("SELECT id FROM transactions").get() as { id: number }).id;
   db.query("INSERT INTO splits (transaction_id, pot_id, owner, amount_cents) VALUES (?, 1, 'user', -172000)").run(t);
-  return db;
+  return wrapDb(db);
 }
 
 describe("versioned migrations", () => {
@@ -45,64 +48,64 @@ describe("versioned migrations", () => {
     expect(vs[0]).toMatch(/^\d{14}$/);
   });
 
-  test("fresh databases get schema.sql plus every migration, no baseline marker", () => {
-    const db = new Database(":memory:");
-    migrateDb(db);
-    expect(versions(db)).toEqual(listMigrations().map((m) => m.version));
-    expect(versions(db)).not.toContain("000");
-    const t = db.query("SELECT name FROM sqlite_master WHERE name = 'sinking_schedules'").get();
+  test("fresh databases get schema.sql plus every migration, no baseline marker", async () => {
+    const db = wrapDb(new Database(":memory:"));
+    await migrateDb(db);
+    expect(await versions(db)).toEqual(listMigrations().map((m) => m.version));
+    expect(await versions(db)).not.toContain("000");
+    const t = await db.get("SELECT name FROM sqlite_master WHERE name = 'sinking_schedules'");
     expect(t).not.toBeNull();
-    const cols = (db.query("PRAGMA table_info(pots)").all() as { name: string }[]).map((c) => c.name);
+    const cols = (await db.all<{ name: string }>("PRAGMA table_info(pots)")).map((c) => c.name);
     expect(cols).toContain("is_assignable");
   });
 
-  test("pre-migration databases are baselined without re-applying history", () => {
+  test("pre-migration databases are baselined without re-applying history", async () => {
     const db = oldPathDb();
-    migrateDb(db);
+    await migrateDb(db);
 
     // baseline marker recorded, then the real migrations applied on top
-    const vs = versions(db);
+    const vs = await versions(db);
     expect(vs[0]).toBe("000");
     expect(vs.slice(1)).toEqual(listMigrations().map((m) => m.version));
 
     // the new tables arrived via migration, not the old chain
-    const t = db.query("SELECT name FROM sqlite_master WHERE name = 'sinking_schedules'").get();
+    const t = await db.get("SELECT name FROM sqlite_master WHERE name = 'sinking_schedules'");
     expect(t).not.toBeNull();
 
     // not a byte of user data lost
-    expect(db.query("SELECT COUNT(*) AS n FROM pots").get()).toEqual({ n: 2 });
-    expect(db.query("SELECT COUNT(*) AS n FROM contacts").get()).toEqual({ n: 1 });
-    expect(db.query("SELECT cents FROM assignments WHERE month = '2026-09' AND pot_id = 2").get()).toEqual({
+    expect(await db.get("SELECT COUNT(*) AS n FROM pots")).toEqual({ n: 2 });
+    expect(await db.get("SELECT COUNT(*) AS n FROM contacts")).toEqual({ n: 1 });
+    expect(await db.get("SELECT cents FROM assignments WHERE month = '2026-09' AND pot_id = 2")).toEqual({
       cents: 29901,
     });
-    const total = db.query("SELECT SUM(amount_cents) AS s FROM splits").get() as { s: number };
+    const total = (await db.get<{ s: number }>("SELECT SUM(amount_cents) AS s FROM splits"))!;
     expect(total.s).toBe(-172000);
   });
 
-  test("migrateDb is idempotent on fresh and baselined databases", () => {
-    const freshDb = new Database(":memory:");
-    migrateDb(freshDb);
-    migrateDb(freshDb);
-    expect(versions(freshDb)).toEqual(listMigrations().map((m) => m.version));
+  test("migrateDb is idempotent on fresh and baselined databases", async () => {
+    const freshDb = wrapDb(new Database(":memory:"));
+    await migrateDb(freshDb);
+    await migrateDb(freshDb);
+    expect(await versions(freshDb)).toEqual(listMigrations().map((m) => m.version));
 
     const oldDb = oldPathDb();
-    migrateDb(oldDb);
-    const once = versions(oldDb);
-    const countsBefore = dbCounts(oldDb);
-    migrateDb(oldDb);
-    expect(versions(oldDb)).toEqual(once);
-    expect(dbCounts(oldDb)).toEqual(countsBefore);
+    await migrateDb(oldDb);
+    const once = await versions(oldDb);
+    const countsBefore = await dbCounts(oldDb);
+    await migrateDb(oldDb);
+    expect(await versions(oldDb)).toEqual(once);
+    expect(await dbCounts(oldDb)).toEqual(countsBefore);
   });
 
-  test("runMigrations applies pending migrations in order to a partially migrated db", () => {
-    const db = new Database(":memory:");
-    db.exec(schemaSql);
+  test("runMigrations applies pending migrations in order to a partially migrated db", async () => {
+    const db = wrapDb(new Database(":memory:"));
+    await db.exec(schemaSql);
     // simulate a db that recorded the known versions by hand long ago (versions table exists, nothing else new)
-    runMigrations(db);
-    expect(versions(db)).toEqual(listMigrations().map((m) => m.version));
+    await runMigrations(db);
+    expect(await versions(db)).toEqual(listMigrations().map((m) => m.version));
     // a later run picks up nothing new and changes nothing
-    runMigrations(db);
-    expect(versions(db)).toEqual(listMigrations().map((m) => m.version));
+    await runMigrations(db);
+    expect(await versions(db)).toEqual(listMigrations().map((m) => m.version));
   });
 
   test("createMigration stamps the version from the clock; it is never hand-typed", () => {
@@ -123,10 +126,10 @@ describe("versioned migrations", () => {
 });
 
 /** Row counts of the user-data tables, for the idempotency comparison. */
-function dbCounts(db: Database): Record<string, number> {
+async function dbCounts(db: Db): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
   for (const t of ["pots", "contacts", "assignments", "transactions", "splits", "sinking_schedules"]) {
-    out[t] = (db.query(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number }).n;
+    out[t] = (await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM ${t}`))!.n;
   }
   return out;
 }

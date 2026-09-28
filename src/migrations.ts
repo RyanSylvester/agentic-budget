@@ -7,9 +7,11 @@
  *
  *  Databases created before the migration system get a '000' baseline marker
  *  (their history is NOT re-applied); fresh databases run every migration.
- *  Each migration runs in a transaction and its version is recorded only on
- *  success, so a failed migration retries cleanly on the next startup. */
-import type { Database } from "bun:sqlite";
+ *  Each migration runs as sequential statements (no interactive transactions:
+ *  the target runtime has none, and the single writer needs none) and its
+ *  version is recorded only on success, so a failed migration retries cleanly
+ *  on the next startup. */
+import type { Db } from "./db-interface";
 import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,34 +55,34 @@ export function createMigration(name: string, dir: string = DIR): string {
   return path;
 }
 
-export function tableExists(db: Database, name: string): boolean {
-  return !!db.query("SELECT 1 FROM sqlite_master WHERE name = ?").get(name);
+export async function tableExists(db: Db, name: string): Promise<boolean> {
+  return !!(await db.get("SELECT 1 FROM sqlite_master WHERE name = ?", name));
 }
 
-function appliedVersions(db: Database): Set<string> {
-  db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+async function appliedVersions(db: Db): Promise<Set<string>> {
+  await db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
     version    TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
   )`);
-  const rows = db.query("SELECT version FROM schema_migrations").all() as { version: string }[];
+  const rows = await db.all<{ version: string }>("SELECT version FROM schema_migrations");
   return new Set(rows.map((r) => r.version));
 }
 
 /** Apply every pending migration in version order. When `baseline` is set
  *  (a database built by the pre-migration code), record version '000' first
  *  so the old history is marked applied without being re-applied. */
-export function runMigrations(db: Database, opts: { baseline?: boolean } = {}): void {
-  const applied = appliedVersions(db);
+export async function runMigrations(db: Db, opts: { baseline?: boolean } = {}): Promise<void> {
+  const applied = await appliedVersions(db);
   if (opts.baseline && applied.size === 0) {
-    db.query("INSERT INTO schema_migrations (version) VALUES ('000')").run();
+    await db.run("INSERT INTO schema_migrations (version) VALUES ('000')");
     applied.add("000");
   }
-  const record = db.query("INSERT INTO schema_migrations (version) VALUES (?)");
   for (const m of listMigrations()) {
     if (applied.has(m.version)) continue;
-    db.transaction(() => {
-      db.exec(m.sql);
-      record.run(m.version);
-    })();
+    // Sequential statements, not a transaction: the single writer is the only
+    // writer, and the version row is recorded only after the SQL succeeds, so
+    // a failed migration retries cleanly on the next startup.
+    await db.exec(m.sql);
+    await db.run("INSERT INTO schema_migrations (version) VALUES (?)", m.version);
   }
 }
