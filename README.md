@@ -1,12 +1,6 @@
-# agentic-budget
-
-Agentic-first personal budgeting. The agent is the write path; the human gets
-the understanding. Built around one person's actual rules instead of fighting
-them.
-
 ## The idea
 
-No bank sync. Data enters because the agent puts it there: it reads statements,
+No bank sync. Data enters because the agent puts it there from whatever source you are running with: it reads statements,
 takes spending mentions from chat, and records everything through the `budget`
 CLI. The human gets a read-mostly dashboard: the month at a glance, pot
 balances, trends, and a review screen. The weekly review is the product
