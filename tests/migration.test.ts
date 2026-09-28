@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { migrateDb, wrapDb } from "../src/db";
+import { testDb } from "./helpers";
 import type { Db } from "../src/db-interface";
 import { createMigration, listMigrations, runMigrations } from "../src/migrations";
 import { oldMigrateDb } from "./old-migrate";
@@ -207,3 +208,17 @@ async function dbCounts(db: Db): Promise<Record<string, number>> {
   }
   return out;
 }
+
+describe("hot path indexes", () => {
+  test("the index migration creates seek-capable indexes on splits and settlement tables", async () => {
+    const db = await testDb();
+    const names = async (table: string): Promise<string[]> =>
+      (await db.all<{ name: string }>(`SELECT name FROM pragma_index_list("${table}")`)).map((r) => r.name);
+    const splits = await names("splits");
+    expect(splits).toContain("idx_splits_user_owner_txn");
+    expect(splits).toContain("idx_splits_user_txn");
+    expect(splits).toContain("idx_splits_user_pot");
+    expect(await names("settlement_allocations")).toContain("idx_settlement_allocations_split");
+    expect(await names("settlements")).toContain("idx_settlements_user_txn");
+  });
+});

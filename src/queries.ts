@@ -276,46 +276,48 @@ export interface ListedTransaction {
 }
 
 export async function listTransactions(db: Db, userId: number, month: string): Promise<ListedTransaction[]> {
+  // One pass over the month's transactions. The per-transaction pot pick
+  // (largest user split) and contact summary used to be five correlated
+  // subqueries, each a full scan of splits per row; they are now derived
+  // tables joined once, seeking on the splits indexes.
   return db.all<ListedTransaction>(
-    `SELECT t.id, t.date, t.description,
+    `WITH us AS (
+       SELECT transaction_id, pot_id,
+              ROW_NUMBER() OVER (PARTITION BY transaction_id
+                                 ORDER BY ABS(amount_cents) DESC, id) AS rn
+       FROM splits
+       WHERE user_id = ? AND owner = 'user'
+     ),
+     cs AS (
+       SELECT transaction_id, contact_id,
+              ROW_NUMBER() OVER (PARTITION BY transaction_id ORDER BY id) AS rn,
+              COUNT(*) OVER (PARTITION BY transaction_id) AS n,
+              SUM(amount_cents) OVER (PARTITION BY transaction_id) AS total
+       FROM splits
+       WHERE user_id = ? AND owner = 'contact'
+     )
+     SELECT t.id, t.date, t.description,
             t.amount_cents AS amountCents, t.is_transfer AS isTransfer,
             t.cleared, t.source,
             t.account_id AS accountId, a.name AS accountName,
-            (SELECT s2.pot_id FROM splits s2
-             WHERE s2.transaction_id = t.id AND s2.owner = 'user' AND s2.user_id = ?
-             ORDER BY ABS(s2.amount_cents) DESC LIMIT 1) AS potId,
-            (SELECT p.name FROM splits s2 JOIN pots p ON p.id = s2.pot_id
-             WHERE s2.transaction_id = t.id AND s2.owner = 'user'
-               AND s2.user_id = ? AND p.user_id = ?
-             ORDER BY ABS(s2.amount_cents) DESC LIMIT 1) AS potName,
-            (SELECT p.pot_group FROM splits s2 JOIN pots p ON p.id = s2.pot_id
-             WHERE s2.transaction_id = t.id AND s2.owner = 'user'
-               AND s2.user_id = ? AND p.user_id = ?
-             ORDER BY ABS(s2.amount_cents) DESC LIMIT 1) AS potGroup,
-            CASE WHEN SUM(CASE WHEN s.owner = 'contact' THEN 1 ELSE 0 END) > 0 THEN 1 ELSE 0 END AS splitWithContact,
-            COALESCE(-SUM(CASE WHEN s.owner = 'contact' THEN s.amount_cents ELSE 0 END), 0) AS sharedCents,
-            (SELECT s2.contact_id FROM splits s2
-             WHERE s2.transaction_id = t.id AND s2.owner = 'contact' AND s2.user_id = ? LIMIT 1) AS splitContactId,
-            (SELECT c.name FROM splits s2 JOIN contacts c ON c.id = s2.contact_id
-             WHERE s2.transaction_id = t.id AND s2.owner = 'contact'
-               AND s2.user_id = ? AND c.user_id = ? LIMIT 1) AS splitContactName
+            up.pot_id AS potId, p.name AS potName, p.pot_group AS potGroup,
+            CASE WHEN cs.n > 0 THEN 1 ELSE 0 END AS splitWithContact,
+            COALESCE(-cs.total, 0) AS sharedCents,
+            cs.contact_id AS splitContactId, c.name AS splitContactName
      FROM transactions t
-     JOIN accounts a ON a.id = t.account_id
-     LEFT JOIN splits s ON s.transaction_id = t.id AND s.user_id = ?
-     WHERE t.voided = 0 AND substr(t.date, 1, 7) = ? AND t.user_id = ? AND a.user_id = ?
-     GROUP BY t.id
+     JOIN accounts a ON a.id = t.account_id AND a.user_id = ?
+     LEFT JOIN us up ON up.transaction_id = t.id AND up.rn = 1
+     LEFT JOIN pots p ON p.id = up.pot_id AND p.user_id = ?
+     LEFT JOIN cs ON cs.transaction_id = t.id AND cs.rn = 1
+     LEFT JOIN contacts c ON c.id = cs.contact_id AND c.user_id = ?
+     WHERE t.voided = 0 AND substr(t.date, 1, 7) = ? AND t.user_id = ?
      ORDER BY t.date DESC, t.id DESC`,
     userId,
     userId,
     userId,
     userId,
     userId,
-    userId,
-    userId,
-    userId,
-    userId,
     month,
-    userId,
     userId
   );
 }

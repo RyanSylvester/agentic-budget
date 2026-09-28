@@ -159,4 +159,41 @@ describe("listTransactions", () => {
     expect(r.splitContactName).toBe("Alex");
     expect(r.accountName).toBe("Chequing");
   });
+
+  test("picks the largest user split pot, aggregates contact splits, tolerates splitless rows", async () => {
+    const db = await seed();
+    // Two user splits: Paycheck (-8000) beats Groceries (-2000) on |amount|.
+    // Two contact splits aggregate into one summary row.
+    await db.exec(`INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, cleared, is_transfer, voided)
+      VALUES (1, '2026-09-10', 1, -10000, 'Big shop', 'manual', 'user', 'uncleared', 0, 0)`);
+    await db.exec(`INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES
+      (1, 1, 1, 'user', NULL, -2000),
+      (1, 1, 2, 'user', NULL, -8000),
+      (1, 1, NULL, 'contact', 1, -1000),
+      (1, 1, NULL, 'contact', 1, -500)`);
+    // No splits at all: pot and contact fields stay null/zero, row still lists.
+    await db.exec(`INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, cleared, is_transfer, voided)
+      VALUES (1, '2026-09-11', 1, -500, 'Mystery', 'manual', 'user', 'uncleared', 0, 0)`);
+
+    const rows = await listTransactions(db, 1, "2026-09");
+    expect(rows.map((r) => r.description)).toEqual(["Mystery", "Big shop"]);
+
+    const big = rows[1];
+    expect(big.potId).toBe(2);
+    expect(big.potName).toBe("Paycheck");
+    expect(big.potGroup).toBe("Income");
+    expect(big.splitWithContact).toBe(1);
+    expect(big.sharedCents).toBe(1500);
+    expect(big.splitContactId).toBe(1);
+    expect(big.splitContactName).toBe("Alex");
+
+    const bare = rows[0];
+    expect(bare.potId).toBeNull();
+    expect(bare.potName).toBeNull();
+    expect(bare.potGroup).toBeNull();
+    expect(bare.splitWithContact).toBe(0);
+    expect(bare.sharedCents).toBe(0);
+    expect(bare.splitContactId).toBeNull();
+    expect(bare.splitContactName).toBeNull();
+  });
 });

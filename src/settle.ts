@@ -51,14 +51,19 @@ export async function contactOwed(db: Db, userId: number, contactId?: number): P
     params.push(contactId);
   }
   const rows = await db.all<OwedSplit>(
+    // The settled allocation used to be a correlated subquery per split
+    // (a full scan of settlement_allocations per row); it is now a LEFT
+    // JOIN aggregated once, seeking on the new index.
     `SELECT s.id AS splitId, s.contact_id AS contactId, c.name AS contactName,
             p.name AS potName, t.date AS date,
-            -s.amount_cents - COALESCE((SELECT SUM(a.amount_cents) FROM settlement_allocations a WHERE a.split_id = s.id AND a.user_id = ?), 0) AS owedCents
+            -s.amount_cents - COALESCE(SUM(a.amount_cents), 0) AS owedCents
      FROM splits s
      JOIN transactions t ON t.id = s.transaction_id
      JOIN contacts c ON c.id = s.contact_id
      LEFT JOIN pots p ON p.id = s.pot_id AND p.user_id = ?
+     LEFT JOIN settlement_allocations a ON a.split_id = s.id AND a.user_id = ?
      WHERE ${where}
+     GROUP BY s.id
      ORDER BY t.date, s.id`,
     ...params
   );
