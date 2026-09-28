@@ -88,17 +88,25 @@ export async function migrateDb(db: Db): Promise<void> {
 }
 
 let singleton: Db | null = null;
+let singletonPath: string | null = null;
 
 /** Open (and migrate) the budget database. Single-writer: one user, one agent.
  *  The WAL pragma is applied to the raw handle before wrapping: it is a
  *  Bun-local concern (D1 does not accept it), so it stays outside the Db
- *  interface. */
+ *  interface. A second call for a different path throws instead of silently
+ *  returning the wrong database. */
 export async function openDb(path: string = DB_PATH): Promise<Db> {
-  if (singleton) return singleton;
+  if (singleton) {
+    if (path !== singletonPath) {
+      throw new Error(`openDb: already open at ${singletonPath}; refusing a second database at ${path}`);
+    }
+    return singleton;
+  }
   const raw = new Database(path, { create: true });
   raw.exec("PRAGMA journal_mode = WAL;");
   const db = new BunDb(raw);
   await migrateDb(db);
+  singletonPath = path;
   singleton = db;
   return db;
 }
