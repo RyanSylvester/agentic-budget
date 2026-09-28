@@ -44,13 +44,13 @@ import { contactBalances, createContact, deleteContact, listContacts, renameCont
 import { createPot, deletePot, updatePot } from "./pots";
 import { createSchedule, listSchedules, markPaid, removeSchedule, sinkingStatus } from "./sinking";
 import { createMigration } from "./migrations";
-import { assertSplitsSum, resolvePotId, validDate, validMonth, fmtCents } from "./money";
+import { assertSplitsSum, resolvePotId, validDate, validMonth, fmtCents, FIRST_USER } from "./money";
 import { scaffoldMonth, type ScaffoldStrategy } from "./scaffold";
 import { loadRemoteConfig, saveRemoteConfig, promptHidden, configPath } from "./remote";
 import { runRemote, printScaffold, printClosePreview } from "./cli-remote";
 
 function usage(): never {
-  console.error("usage: budget <record|assign|recategorize|void|pot|contact|settle|review|reconcile|close|sinking|migration|migrate-remote|serve|login> [options]");
+  console.error("usage: budget <record|assign|recategorize|void|pot|contact|settle|review|reconcile|close|sinking|user|migration|migrate-remote|serve|login> [options]");
   process.exit(2);
 }
 
@@ -63,6 +63,11 @@ function flag(name: string): string | undefined {
 }
 
 function fail(msg: string): never {
+  // M1: every write attributes its row to the first user. On a database with
+  // no user yet this surfaces as a raw NOT NULL failure; point at the fix.
+  if (msg.includes("NOT NULL constraint failed") && msg.includes(".user_id")) {
+    msg += "\nNo user exists yet: run `budget user create <username>` first.";
+  }
   console.error(msg);
   process.exit(1);
 }
@@ -89,7 +94,7 @@ async function main() {
   if (remote) {
     // migrate-remote is mode-independent (it pushes local budget.db to D1
     // directly, never through the Worker API), so it stays available.
-    if (cmd === "migration" || cmd === "serve") {
+    if (cmd === "migration" || cmd === "serve" || cmd === "user") {
       fail(`"${cmd}" is local-only: it works on files on this machine, not the hosted Worker. Unset BUDGET_API_URL to run it locally.`);
     }
     await runRemote(remote, cmd, rest);
@@ -140,15 +145,15 @@ async function main() {
     // Sequential awaits, not a transaction: the single writer is the only
     // writer, so the read-then-write sequence cannot interleave.
     const row = (await db.get<{ id: number }>(
-      "INSERT INTO transactions (date, account_id, amount_cents, description, source, entered_by, status, cleared, review_reason, is_transfer, external_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+      `INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared, review_reason, is_transfer, external_id) VALUES (${FIRST_USER}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
       date, accountId, amount, description, source, enteredBy, status, cleared, uncertain, isTransfer, externalId
     ))!;
     if (share !== 0 && contactId !== null) {
       const userCents = amount + share; // amount negative outflow; contact's share positive dollars
-      await db.run("INSERT INTO splits (transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (?, ?, ?, ?, ?)", row.id, potId, "user", null, userCents);
-      await db.run("INSERT INTO splits (transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (?, ?, ?, ?, ?)", row.id, potId, "contact", contactId, -share);
+      await db.run(`INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (${FIRST_USER}, ?, ?, ?, ?, ?)`, row.id, potId, "user", null, userCents);
+      await db.run(`INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (${FIRST_USER}, ?, ?, ?, ?, ?)`, row.id, potId, "contact", contactId, -share);
     } else {
-      await db.run("INSERT INTO splits (transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (?, ?, ?, ?, ?)", row.id, potId, "user", null, amount);
+      await db.run(`INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (${FIRST_USER}, ?, ?, ?, ?, ?)`, row.id, potId, "user", null, amount);
     }
     await assertSplitsSum(db, row.id);
     const txnId = row.id;
@@ -335,7 +340,7 @@ async function main() {
     console.log(`cleared balance: $${fmtCents(clearedRow.total)}  actual: $${fmtCents(actual)}  difference: $${fmtCents(result.differenceCents)}`);
     if (result.balanced) {
       await db.run("UPDATE transactions SET cleared = 'reconciled' WHERE account_id = ? AND cleared = 'cleared'", accountId);
-      await db.run("INSERT INTO reconciliations (account_id, actual_balance_cents, budget_balance_cents, difference_cents) VALUES (?, ?, ?, 0)", accountId, actual, clearedRow.total);
+      await db.run(`INSERT INTO reconciliations (user_id, account_id, actual_balance_cents, budget_balance_cents, difference_cents) VALUES (${FIRST_USER}, ?, ?, ?, 0)`, accountId, actual, clearedRow.total);
       console.log("balanced — transactions reconciled.");
     } else {
       const uncleared = await db.all<any>("SELECT id, date, description, amount_cents FROM transactions WHERE account_id = ? AND cleared = 'uncleared' AND voided = 0 ORDER BY id", accountId);
@@ -412,6 +417,20 @@ async function main() {
     } else {
       usage();
     }
+  } else if (cmd === "user") {
+    const [sub, username] = rest;
+    if (sub === "create") {
+      if (!username) fail(`usage: budget user create <username>`);
+      try {
+        const { createLocalUser } = await import("./users");
+        const id = await createLocalUser(username);
+        console.log(`created user "${username}" (id ${id})`);
+      } catch (e) {
+        fail((e as Error).message);
+      }
+    } else {
+      usage();
+    }
   } else if (cmd === "migration") {
     const [sub, name] = rest;
     if (sub === "new") {
@@ -436,4 +455,4 @@ async function main() {
   }
 }
 
-await main();
+await main().catch((e) => fail((e as Error).message));

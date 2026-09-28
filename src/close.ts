@@ -38,7 +38,7 @@ export function closeMonth(input: CloseInput): { rtaEndCents: number; movedToSav
 import type { Db } from "./db-interface";
 import { monthSpend, monthInflows, potSpend, assignedTotal, rtaCents } from "./queries";
 import { contactOwed } from "./settle";
-import { fmtCents } from "./money";
+import { fmtCents, FIRST_USER } from "./money";
 import { sinkingStatus } from "./sinking";
 
 /** Shift a YYYY-MM month by delta months. */
@@ -146,8 +146,8 @@ export async function applyClose(db: Db, preview: ClosePreview): Promise<void> {
   const exists = await db.get(`SELECT 1 FROM month_closes WHERE month = ?`, preview.month);
   if (exists) throw new Error(`close for ${preview.month} already applied`);
   await db.run(
-    `INSERT INTO month_closes (month, rta_start_cents, rta_end_cents, moved_to_savings_cents)
-     VALUES (?, ?, 0, ?)`,
+    `INSERT INTO month_closes (user_id, month, rta_start_cents, rta_end_cents, moved_to_savings_cents)
+     VALUES (${FIRST_USER}, ?, ?, 0, ?)`,
     preview.month,
     preview.rtaBeforeCents,
     preview.movedToSavingsCents

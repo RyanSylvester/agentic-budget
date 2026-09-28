@@ -19,7 +19,7 @@ import { assignToPot, assignedToPot } from "./assign";
 import { scaffoldMonth, type ScaffoldStrategy } from "./scaffold";
 import { createTransaction, updateTransaction } from "./transactions";
 import { createSchedule, getScheduleById, listSchedules, markPaid, removeSchedule, sinkingStatus } from "./sinking";
-import { validMonth } from "./money";
+import { validMonth, FIRST_USER } from "./money";
 
 /* Input validation helpers: 400 for bad input, 404 when the row is missing. */
 
@@ -310,7 +310,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (result.balanced) {
       await db.run("UPDATE transactions SET cleared = 'reconciled' WHERE account_id = ? AND cleared = 'cleared'", accountId);
       await db.run(
-        "INSERT INTO reconciliations (account_id, actual_balance_cents, budget_balance_cents, difference_cents) VALUES (?, ?, ?, 0)",
+        `INSERT INTO reconciliations (user_id, account_id, actual_balance_cents, budget_balance_cents, difference_cents) VALUES (${FIRST_USER}, ?, ?, ?, 0)`,
         accountId,
         actualBalanceCents,
         cleared

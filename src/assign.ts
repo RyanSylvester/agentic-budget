@@ -3,7 +3,7 @@
  *  Assigning to an Income pot records planned/expected income for the month;
  *  it is stored in the same ledger but excluded from assignedTotal and RTA. */
 import type { Db } from "./db-interface";
-import { resolvePotId, validMonth } from "./money";
+import { resolvePotId, validMonth, FIRST_USER } from "./money";
 
 /** Set a pot's assigned total for a month. Throws on bad input,
  *  unknown pots, or hidden pots. Income pots accept assignments too:
@@ -20,7 +20,7 @@ export async function assignToPot(
   const pot = await db.get<{ hidden: number; name: string }>("SELECT hidden, name FROM pots WHERE id = ?", potId);
   if (pot!.hidden) throw new Error(`pot "${pot!.name}" is retired`);
   await db.run(
-    "INSERT INTO assignments (month, pot_id, cents) VALUES (?, ?, ?) ON CONFLICT(month, pot_id) DO UPDATE SET cents = excluded.cents",
+    `INSERT INTO assignments (user_id, month, pot_id, cents) VALUES (${FIRST_USER}, ?, ?, ?) ON CONFLICT(user_id, month, pot_id) DO UPDATE SET cents = excluded.cents`,
     month,
     potId,
     cents

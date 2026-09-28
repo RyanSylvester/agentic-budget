@@ -2,7 +2,7 @@
  *  Pure DB functions that throw on bad input; the routes translate that to
  *  400s. Every write ends with assertSplitsSum, like the other write paths. */
 import type { Db } from "./db-interface";
-import { assertSplitsSum, validDate } from "./money";
+import { assertSplitsSum, validDate, FIRST_USER } from "./money";
 
 export interface TransactionInput {
   date?: string;
@@ -123,10 +123,10 @@ async function insertSplits(
   shareCents: number
 ): Promise<void> {
   if (shareCents !== 0 && contactId !== null) {
-    await db.run("INSERT INTO splits (transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (?, ?, ?, ?, ?)", txnId, potId, "user", null, amountCents - shareCents);
-    await db.run("INSERT INTO splits (transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (?, ?, ?, ?, ?)", txnId, potId, "contact", contactId, shareCents);
+    await db.run(`INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (${FIRST_USER}, ?, ?, ?, ?, ?)`, txnId, potId, "user", null, amountCents - shareCents);
+    await db.run(`INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (${FIRST_USER}, ?, ?, ?, ?, ?)`, txnId, potId, "contact", contactId, shareCents);
   } else {
-    await db.run("INSERT INTO splits (transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (?, ?, ?, ?, ?)", txnId, potId, "user", null, amountCents);
+    await db.run(`INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (${FIRST_USER}, ?, ?, ?, ?, ?)`, txnId, potId, "user", null, amountCents);
   }
 }
 
@@ -139,8 +139,8 @@ export async function createTransaction(db: Db, input: TransactionInput): Promis
   const enteredBy = input.enteredBy ?? "user";
   if (enteredBy !== "agent" && enteredBy !== "user") throw new Error("bad enteredBy");
   const t = await db.get<{ id: number }>(
-    `INSERT INTO transactions (date, account_id, amount_cents, description, source, entered_by, status, cleared, review_reason, is_transfer, external_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+    `INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared, review_reason, is_transfer, external_id)
+     VALUES (${FIRST_USER}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
     f.date,
     f.accountId,
     f.amountCents,

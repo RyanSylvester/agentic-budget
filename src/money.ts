@@ -1,6 +1,12 @@
 /** Shared money invariants and small helpers used by every write path. */
 import type { Db } from "./db-interface";
 
+/** M1 single-user bridge: local mode has no login, so every write attributes
+ *  its row to the first (lowest-id) user, mirroring the M1 backfill rule.
+ *  M2 replaces this with the authenticated user's id. Use as a SQL fragment:
+ *  `INSERT INTO pots (user_id, name, ...) VALUES (${FIRST_USER}, ?, ...)` */
+export const FIRST_USER = "(SELECT id FROM users ORDER BY id LIMIT 1)";
+
 /** Every transaction's splits must sum to its amount. Throws otherwise.
  *  Called at the end of every write path (record, settle). */
 export async function assertSplitsSum(db: Db, txnId: number): Promise<void> {

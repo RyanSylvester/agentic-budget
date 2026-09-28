@@ -25,6 +25,41 @@ export interface Migration {
   sql: string;
 }
 
+/** Named prechecks a migration can request with a leading `-- precheck: <name>`
+ *  comment on its first line. SQLite cannot raise a custom error message at
+ *  runtime (RAISE() only works inside triggers, and triggers created in the
+ *  same exec() batch do not fire under bun:sqlite), so guards that need a
+ *  clear operator-facing message run here, in TypeScript, before the SQL.
+ *  A failing precheck throws: the version is never recorded, so the next
+ *  startup retries the migration cleanly. */
+const PRECHECKS: Record<string, (db: Db) => Promise<void>> = {
+  "m1-user-backfill": async (db) => {
+    const users = await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM users");
+    if ((users?.n ?? 0) > 0) return;
+    const dataTables = [
+      "accounts", "pots", "contacts", "transactions", "splits",
+      "assignments", "month_closes", "reconciliations", "settlements",
+      "settlement_allocations", "sinking_schedules", "settings",
+    ];
+    for (const t of dataTables) {
+      const r = await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM ${t}`);
+      if ((r?.n ?? 0) > 0) {
+        throw new Error(
+          "multi-user migration: data rows exist but the users table is empty; " +
+          "run `budget user create <username>` first, then retry"
+        );
+      }
+    }
+  },
+};
+
+/** The precheck name declared on a migration's first line, if any. */
+function precheckName(m: Migration): string | null {
+  const first = m.sql.split("\n")[0] ?? "";
+  const mt = first.match(/^--\s*precheck:\s*([a-z0-9-]+)/);
+  return mt ? mt[1] : null;
+}
+
 /** Every known migration, sorted by version. */
 export function listMigrations(dir: string = DIR): Migration[] {
   const files = readdirSync(dir)
@@ -75,6 +110,14 @@ export async function runMigrations(db: Db, opts: { baseline?: boolean } = {}): 
   }
   for (const m of listMigrations()) {
     if (applied.has(m.version)) continue;
+    // A declared precheck runs first: it may refuse the migration with a
+    // clear operator-facing error before any SQL executes.
+    const pre = precheckName(m);
+    if (pre) {
+      const fn = PRECHECKS[pre];
+      if (!fn) throw new Error(`unknown precheck "${pre}" in migration ${m.version}; refusing to run`);
+      await fn(db);
+    }
     // Sequential statements, not a transaction: the single writer is the only
     // writer, and the version row is recorded only after the SQL succeeds, so
     // a failed migration retries cleanly on the next startup.

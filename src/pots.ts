@@ -4,6 +4,7 @@
  *  Pure DB functions that throw on bad input; routes translate to 400s/404s. */
 import type { Db, DbValue } from "./db-interface";
 import { tableExists } from "./db-interface";
+import { FIRST_USER } from "./money";
 
 export type TargetType = "fixed" | "average_3mo" | "savings";
 
@@ -84,7 +85,7 @@ export async function createPot(db: Db, input: PotInput): Promise<number> {
   const targetCents = needTargetCents(input.targetCents);
   const share = await needShare(db, input.contactId, input.sharePct);
   const row = await db.get<{ id: number }>(
-    "INSERT INTO pots (name, pot_group, target_type, target_cents, is_assignable, contact_id, share_pct) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
+    `INSERT INTO pots (user_id, name, pot_group, target_type, target_cents, is_assignable, contact_id, share_pct) VALUES (${FIRST_USER}, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
     name,
     group,
     targetType,
@@ -158,7 +159,7 @@ export async function uncategorizedPotId(db: Db): Promise<number> {
   const found = await db.get<{ id: number }>("SELECT id FROM pots WHERE name = 'Uncategorized' AND hidden = 0");
   if (found) return found.id;
   const row = await db.get<{ id: number }>(
-    "INSERT INTO pots (name, pot_group, target_type, target_cents) VALUES ('Uncategorized', 'General', 'fixed', 0) RETURNING id"
+    `INSERT INTO pots (user_id, name, pot_group, target_type, target_cents) VALUES (${FIRST_USER}, 'Uncategorized', 'General', 'fixed', 0) RETURNING id`
   );
   return row!.id;
 }
@@ -176,8 +177,8 @@ export async function deletePot(db: Db, id: number): Promise<PotDeleteSummary> {
   const rows = await db.all<{ month: string; cents: number }>("SELECT month, cents FROM assignments WHERE pot_id = ?", id);
   for (const r of rows) {
     await db.run(
-      `INSERT INTO assignments (month, pot_id, cents) VALUES (?, ?, ?)
-       ON CONFLICT (month, pot_id) DO UPDATE SET cents = cents + excluded.cents`,
+      `INSERT INTO assignments (user_id, month, pot_id, cents) VALUES (${FIRST_USER}, ?, ?, ?)
+       ON CONFLICT (user_id, month, pot_id) DO UPDATE SET cents = cents + excluded.cents`,
       r.month,
       uncat,
       r.cents

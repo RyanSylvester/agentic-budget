@@ -7,7 +7,7 @@
  *  human UI only reads the derived line on the pot row. */
 import type { Db } from "./db-interface";
 import { tableExists } from "./db-interface";
-import { resolvePotId, validMonth } from "./money";
+import { resolvePotId, validMonth, FIRST_USER } from "./money";
 import { shiftMonth } from "./close";
 
 export interface SinkingSchedule {
@@ -87,7 +87,7 @@ export async function createSchedule(
   }
   if (await getSchedule(db, potId)) throw new Error(`"${name}" already has a sinking schedule (remove it first to replace it)`);
   await db.get<{ id: number }>(
-    "INSERT INTO sinking_schedules (pot_id, expected_cents, due_month, cadence_months) VALUES (?, ?, ?, ?) RETURNING id",
+    `INSERT INTO sinking_schedules (user_id, pot_id, expected_cents, due_month, cadence_months) VALUES (${FIRST_USER}, ?, ?, ?, ?) RETURNING id`,
     potId,
     expectedCents,
     dueMonth,
