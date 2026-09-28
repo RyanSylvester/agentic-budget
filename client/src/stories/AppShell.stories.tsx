@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { userEvent, within } from "storybook/test";
-import App from "../App";
+import { AppShell } from "../App";
 import {
   fixtureAccounts,
   fixtureContacts,
@@ -32,9 +32,9 @@ const fullApi = {
   },
 } satisfies MockApiConfig;
 
-const meta: Meta<typeof App> = {
+const meta: Meta<typeof AppShell> = {
   title: "App/Shell",
-  component: App,
+  component: AppShell,
   parameters: {
     mockApi: fullApi,
     layout: "fullscreen",
@@ -48,7 +48,7 @@ const meta: Meta<typeof App> = {
 };
 
 export default meta;
-type Story = StoryObj<typeof App>;
+type Story = StoryObj<typeof AppShell>;
 
 async function goToTab(canvasElement: HTMLElement, label: string) {
   const aside = within(canvasElement).getByRole("complementary");

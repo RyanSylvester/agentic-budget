@@ -23,11 +23,15 @@ export interface MockApiConfig {
   failPost?: string[];
 }
 
-const json = (data: unknown, status = 200) =>
-  new Response(JSON.stringify(data), {
+const json = (data: unknown, status = 200) => {
+  // A handler may return a full Response to control the status code
+  // (e.g. a 429 for the rate-limited story); pass it through untouched.
+  if (data instanceof Response) return data;
+  return new Response(JSON.stringify(data), {
     status,
     headers: { "content-type": "application/json" },
   });
+};
 
 export function createFetchStub(config: MockApiConfig): typeof fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {

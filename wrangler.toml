@@ -1,7 +1,11 @@
 # Daybook on Cloudflare Workers. One Worker serves the JSON API and the Vite
 # client as static assets, same-origin (no CORS). No secrets in this file:
-# database_id and binding names are not secret. Worker secrets (Phase 5:
-# AGENT_TOKEN) are set with `wrangler secret put` and never committed.
+# database_id and binding names are not secret. Worker secrets (Phase 5 auth)
+# are set for production with:
+#   wrangler secret put PEPPER        # HMAC pepper for the password verifier
+#   wrangler secret put AGENT_TOKEN   # bearer token for the agent write path
+# and never committed. For local `wrangler dev`, dev-only values live in
+# `.dev.vars` (gitignored).
 
 name = "daybook"
 main = "src/worker.ts"
@@ -21,6 +25,10 @@ run_worker_first = ["/api/*"]
 binding = "DB"
 database_name = "daybook"
 database_id = "23cf04d3-254c-4a02-88fb-caa430eaa202"
+# Timestamped migrations live in src/migrations (applied to remote D1 by
+# `budget migrate-remote`; applied to the local dev D1 by
+# `wrangler d1 migrations apply daybook --local`).
+migrations_dir = "src/migrations"
 
 # KV: session tokens + login rate-limit keys (Phase 5 auth).
 [[kv_namespaces]]

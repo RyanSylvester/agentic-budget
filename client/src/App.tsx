@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { LoginScreen, SetupScreen } from "./AuthScreens";
 
 /* ---------- types ---------- */
 
@@ -2344,7 +2345,9 @@ export function CountBadge({ n, className = "" }: { n: number; className?: strin
   );
 }
 
-export default function App() {
+/** The full app shell: tabs, sidebar, and content. Rendered only once the
+ *  auth gate below has confirmed a session. Also the Storybook entry point. */
+export function AppShell() {
   const [tab, setTab] = useState<Tab>("overview");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -2502,4 +2505,65 @@ export default function App() {
       )}
     </div>
   );
+}
+
+/* ---------- auth gate ---------- */
+
+interface AuthState {
+  authenticated: boolean;
+  setupRequired: boolean;
+}
+
+/** Root component: gates the app on GET /api/auth/me. First run shows the
+ *  setup screen, logged-out shows login, and an authenticated session (or a
+ *  local dev server with auth disabled) renders the shell. */
+export default function App() {
+  const [auth, setAuth] = useState<AuthState | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  const load = () => {
+    setFailed(false);
+    fetch("/api/auth/me")
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return (await r.json()) as AuthState;
+      })
+      .then(setAuth)
+      .catch(() => setFailed(true));
+  };
+
+  useEffect(load, []);
+
+  if (failed) {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-5">
+        <div className="card w-full max-w-sm p-6 text-center">
+          <p className="text-[15px] text-[var(--muted)]">Couldn't reach the server.</p>
+          <button onClick={load} className="btn-ink mt-3 px-4 py-2 text-[15px]">
+            Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!auth) {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-5">
+        <div className="w-full max-w-sm">
+          <Skeleton className="mx-auto h-9 w-40" />
+          <div className="card mt-6 p-6">
+            <Skeleton className="h-6 w-32" />
+            <Skeleton className="mt-4 h-11" />
+            <Skeleton className="mt-3 h-11" />
+            <Skeleton className="mt-4 h-11" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (auth.setupRequired) return <SetupScreen onSetup={load} />;
+  if (!auth.authenticated) return <LoginScreen onAuthenticated={load} />;
+  return <AppShell />;
 }
