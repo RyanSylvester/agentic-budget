@@ -1,13 +1,20 @@
 import { Database } from "bun:sqlite";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
 import type { Db, DbValue, RunResult, BatchStatement, BatchResult } from "./db-interface";
 import { tableExists } from "./db-interface";
 import { runMigrations } from "./migrations";
 
 const here = dirname(fileURLToPath(import.meta.url));
-export const DB_PATH = process.env.BUDGET_DB ?? join(here, "..", "budget.db");
+// Private local data lives outside the repo worktree so repo-wide file
+// operations (commits, uploads, sweeps) can never touch it. Falls back to
+// the legacy repo-local path for existing checkouts.
+const configDb = join(homedir(), ".config", "agentic-budget", "budget.db");
+const legacyDb = join(here, "..", "budget.db");
+export const DB_PATH =
+  process.env.BUDGET_DB ?? (existsSync(configDb) ? configDb : legacyDb);
 
 /** The Bun adapter: the Db interface on top of bun:sqlite. Serves the
  *  `budget` CLI, local `bun src/server.ts`, and the test suite (in-memory). */
