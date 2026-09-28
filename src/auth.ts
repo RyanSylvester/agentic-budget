@@ -311,6 +311,12 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
       sql: "INSERT INTO pots (user_id, name, pot_group, target_type, target_cents) VALUES ((SELECT id FROM users WHERE username = ?), 'Uncategorized', 'General', 'fixed', 0)",
       params: [username],
     });
+    // The signup pot is the user's first group, so it takes position 0 in
+    // the group order (a brand-new user has no other groups or rows).
+    stmts.push({
+      sql: "INSERT INTO group_order (user_id, group_name, position) SELECT id, 'General', 0 FROM users WHERE username = ?",
+      params: [username],
+    });
     let results: BatchResult[];
     try {
       results = await db.batch(stmts);

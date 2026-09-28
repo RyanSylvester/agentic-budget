@@ -13,6 +13,7 @@
  *    bun src/cli.ts pot unshare --pot 12
  *    bun src/cli.ts pot retire --pot 12
  *    bun src/cli.ts pot unhide --pot 12
+ *    bun src/cli.ts pot group-order Housing General Life   # set pot-group display order
  *    bun src/cli.ts contact list
  *    bun src/cli.ts contact add --name "Alex"
  *    bun src/cli.ts contact rename --contact 1 --name "Alex R."
@@ -41,7 +42,7 @@ import { applySettlement, contactOwed } from "./settle";
 import { closePreview, applyClose } from "./close";
 import { assignToPot } from "./assign";
 import { contactBalances, createContact, deleteContact, listContacts, renameContact } from "./contacts";
-import { createPot, deletePot, updatePot } from "./pots";
+import { createPot, deletePot, updatePot, setGroupOrder } from "./pots";
 import { createSchedule, listSchedules, markPaid, removeSchedule, sinkingStatus } from "./sinking";
 import { createMigration } from "./migrations";
 import { assertSplitsSum, resolvePotId, validDate, validMonth, fmtCents } from "./money";
@@ -311,6 +312,15 @@ async function main() {
       } else {
         await db.run("UPDATE pots SET hidden = ? WHERE id = ? AND user_id = ?", sub === "retire" ? 1 : 0, potId, userId);
         console.log(`${sub === "retire" ? "retired" : "unhid"} pot ${potId}`);
+      }
+    } else if (sub === "group-order") {
+      const groups = _subRest;
+      if (groups.length === 0) usage();
+      try {
+        const order = await setGroupOrder(db, userId, groups);
+        console.log(`group order: ${order.join(", ")}`);
+      } catch (e) {
+        fail((e as Error).message);
       }
     } else {
       usage();

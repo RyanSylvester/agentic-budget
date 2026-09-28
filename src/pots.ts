@@ -71,6 +71,76 @@ export async function potExists(db: Db, userId: number, id: number): Promise<boo
   return !!(await db.get("SELECT 1 FROM pots WHERE id = ? AND user_id = ?", id, userId));
 }
 
+/** Group ordering lives entirely in the group_order table as user data:
+ *  no group names or orders are hardcoded anywhere. Groups emerge from
+ *  pot_group labels on pots; these helpers only position whatever exists.
+ *  (Guarded for hand-built databases that never ran migrations.) */
+async function groupOrderTable(db: Db): Promise<boolean> {
+  return tableExists(db, "group_order");
+}
+
+/** Ensure the user's group_order has a row for `group`; new groups go last. */
+export async function ensureGroupOrderRow(db: Db, userId: number, group: string): Promise<void> {
+  if (!(await groupOrderTable(db))) return;
+  const row = await db.get("SELECT 1 FROM group_order WHERE user_id = ? AND group_name = ?", userId, group);
+  if (row) return;
+  const mx = await db.get<{ m: number | null }>("SELECT MAX(position) AS m FROM group_order WHERE user_id = ?", userId);
+  await db.run("INSERT INTO group_order (user_id, group_name, position) VALUES (?, ?, ?)", userId, group, (mx?.m ?? -1) + 1);
+}
+
+/** Drop the group_order row for `group` when the user has no pots left in it. */
+export async function pruneEmptyGroup(db: Db, userId: number, group: string): Promise<void> {
+  if (!(await groupOrderTable(db))) return;
+  const left = await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM pots WHERE user_id = ? AND pot_group = ?", userId, group);
+  if ((left?.n ?? 0) === 0) {
+    await db.run("DELETE FROM group_order WHERE user_id = ? AND group_name = ?", userId, group);
+  }
+}
+
+/** The groups a user actually has, from their pots and their order rows. */
+export async function knownGroups(db: Db, userId: number): Promise<string[]> {
+  const rows = await db.all<{ group_name: string }>(
+    `SELECT group_name FROM group_order WHERE user_id = ?
+     UNION
+     SELECT pot_group AS group_name FROM pots WHERE user_id = ?`,
+    userId,
+    userId
+  );
+  return rows.map((r) => r.group_name);
+}
+
+/** Replace the user's group display order with `groups`, normalized to
+ *  0,1,2... Existing groups the user has but did not list keep their
+ *  relative order after the listed ones. Unknown names are rejected: the
+ *  caller can read the real groups first, so a miss is a typo, not intent. */
+export async function setGroupOrder(db: Db, userId: number, groups: unknown): Promise<string[]> {
+  if (!(await groupOrderTable(db))) throw new Error("group ordering is not set up; run migrations first");
+  if (!Array.isArray(groups)) throw new Error("groups must be an array of group names");
+  const clean: string[] = [];
+  for (const g of groups) {
+    const name = (g ?? "").toString().trim();
+    if (!name) throw new Error("group names must not be blank");
+    if (name.length > 80) throw new Error("group names must be 80 characters or fewer");
+    if (!clean.includes(name)) clean.push(name);
+  }
+  if (clean.length === 0) throw new Error("at least one group name is required");
+  const known = await knownGroups(db, userId);
+  for (const name of clean) {
+    if (!known.includes(name)) throw new Error(`unknown group "${name}"; known groups: ${known.join(", ") || "(none)"}`);
+  }
+  const existing = await db.all<{ group_name: string }>(
+    "SELECT group_name FROM group_order WHERE user_id = ? ORDER BY position",
+    userId
+  );
+  const ordered = [...clean];
+  for (const e of existing) if (!ordered.includes(e.group_name)) ordered.push(e.group_name);
+  await db.run("DELETE FROM group_order WHERE user_id = ?", userId);
+  for (let i = 0; i < ordered.length; i++) {
+    await db.run("INSERT INTO group_order (user_id, group_name, position) VALUES (?, ?, ?)", userId, ordered[i], i);
+  }
+  return ordered;
+}
+
 /** Income-group pots receive money; assignments to them mean planned income
  *  and are excluded from assignedTotal and RTA. Only spending pots draw. */
 function assignableForGroup(group: string): number {
@@ -95,6 +165,8 @@ export async function createPot(db: Db, userId: number, input: PotInput): Promis
     share.contactId,
     share.sharePct
   );
+  // A brand-new group label goes last in the user's group order.
+  await ensureGroupOrderRow(db, userId, group);
   return row!.id;
 }
 
@@ -107,13 +179,18 @@ export async function updatePot(db: Db, userId: number, id: number, input: PotIn
     sets.push("name = ?");
     params.push(needName(input.name));
   }
+  // A pot moving groups keeps the order table in sync: the new group goes
+  // last if unseen, and the old group drops out when emptied.
+  let oldGroup: string | null = null;
+  let newGroup: string | null = null;
   if (input.group !== undefined) {
-    const g = needGroup(input.group);
+    newGroup = needGroup(input.group);
+    oldGroup = (await db.get<{ pot_group: string }>("SELECT pot_group FROM pots WHERE id = ? AND user_id = ?", id, userId))!.pot_group;
     sets.push("pot_group = ?");
-    params.push(g);
+    params.push(newGroup);
     // The assignable flag follows the group: Income pots hold planned income.
     sets.push("is_assignable = ?");
-    params.push(assignableForGroup(g));
+    params.push(assignableForGroup(newGroup));
   }
   if (input.targetType !== undefined) {
     sets.push("target_type = ?");
@@ -149,6 +226,10 @@ export async function updatePot(db: Db, userId: number, id: number, input: PotIn
   }
   if (sets.length === 0) return;
   await db.run(`UPDATE pots SET ${sets.join(", ")} WHERE id = ? AND user_id = ?`, ...params, id, userId);
+  if (newGroup !== null) {
+    await ensureGroupOrderRow(db, userId, newGroup);
+    if (oldGroup !== null && oldGroup !== newGroup) await pruneEmptyGroup(db, userId, oldGroup);
+  }
 }
 
 export interface PotDeleteSummary {
@@ -165,6 +246,7 @@ export async function uncategorizedPotId(db: Db, userId: number): Promise<number
     `INSERT INTO pots (user_id, name, pot_group, target_type, target_cents) VALUES (?, 'Uncategorized', 'General', 'fixed', 0) RETURNING id`,
     userId
   );
+  await ensureGroupOrderRow(db, userId, "General");
   return row!.id;
 }
 
@@ -175,7 +257,7 @@ export async function uncategorizedPotId(db: Db, userId: number): Promise<number
  *  concurrent writes on its primary; a second tab of the same user could
  *  already interleave before multi-user, and that has not changed. */
 export async function deletePot(db: Db, userId: number, id: number): Promise<PotDeleteSummary> {
-  const pot = await db.get<{ id: number; name: string }>("SELECT id, name FROM pots WHERE id = ? AND user_id = ?", id, userId);
+  const pot = await db.get<{ id: number; name: string; pot_group: string }>("SELECT id, name, pot_group FROM pots WHERE id = ? AND user_id = ?", id, userId);
   if (!pot) throw new Error(`no pot ${id}`);
   const uncat = await uncategorizedPotId(db, userId);
   if (uncat === id) throw new Error("the Uncategorized pot cannot be deleted");
@@ -199,5 +281,6 @@ export async function deletePot(db: Db, userId: number, id: number): Promise<Pot
     await db.run("DELETE FROM sinking_schedules WHERE pot_id = ? AND user_id = ?", id, userId);
   }
   await db.run("DELETE FROM pots WHERE id = ? AND user_id = ?", id, userId);
+  await pruneEmptyGroup(db, userId, pot.pot_group);
   return { uncategorizedPotId: uncat, movedTransactions: txns.changes, movedAssignments: rows.length };
 }

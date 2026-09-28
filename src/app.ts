@@ -12,7 +12,7 @@ import { registerAuth, authMiddleware, type AuthConfig, type Identity } from "./
 import { monthSpend, potSpend, potInflow, recentTransactions, listTransactions, spendTrend, assignedTotal, rtaCents, potHistory } from "./queries";
 import { applySettlement, contactCredit, contactOwed } from "./settle";
 import { contactBalances, createContact, renameContact, deleteContact } from "./contacts";
-import { createPot, updatePot, deletePot, potExists } from "./pots";
+import { createPot, updatePot, deletePot, potExists, setGroupOrder } from "./pots";
 import { reconcile, suggestClear } from "./reconcile";
 import { closePreview, applyClose } from "./close";
 import { assignToPot, assignedToPot } from "./assign";
@@ -419,7 +419,10 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
       `SELECT p.id, p.name, p.pot_group, p.target_type, p.target_cents, p.is_assignable, p.contact_id, p.share_pct,
               c.name AS contact_name
        FROM pots p LEFT JOIN contacts c ON c.id = p.contact_id AND c.user_id = p.user_id
-       WHERE p.user_id = ? ${includeHidden ? "" : "AND p.hidden = 0 "}ORDER BY p.id`,
+       WHERE p.user_id = ? ${includeHidden ? "" : "AND p.hidden = 0 "}ORDER BY
+         COALESCE((SELECT position FROM group_order g WHERE g.user_id = p.user_id AND g.group_name = p.pot_group),
+                  9223372036854775807),
+         p.id`,
       userId
     );
     const out = [];
@@ -487,6 +490,23 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     try {
       const summary = await deletePot(db, userId, id);
       return c.json({ ok: true, ...summary });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+
+  /** Replace the user's pot-group display order. Body: { groups: string[] }.
+   *  The order lives entirely in the group_order table as user data; nothing
+   *  about groups or their order is hardcoded. Groups the user has but did
+   *  not list keep their relative order after the listed ones. */
+  app.put("/api/groups/order", async (c) => {
+    const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
+    const { ok, body } = await readJson(c);
+    if (!ok) return c.json({ error: "malformed JSON" }, 400);
+    try {
+      const order = await setGroupOrder(db, userId, (body as any)?.groups);
+      return c.json({ ok: true, groups: order });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }

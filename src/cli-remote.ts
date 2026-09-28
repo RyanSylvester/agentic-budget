@@ -230,6 +230,11 @@ async function remotePot(remote: RemoteConfig, rest: string[]): Promise<void> {
       await api(remote, `/api/pots/${potId}`, { method: "PUT", body: { hidden: sub === "retire" ? 1 : 0 } });
       console.log(`${sub === "retire" ? "retired" : "unhid"} pot ${potId}`);
     }
+  } else if (sub === "group-order") {
+    const groups = rest.slice(1);
+    if (groups.length === 0) usage();
+    const data = await api(remote, "/api/groups/order", { method: "PUT", body: { groups } });
+    console.log(`group order: ${(data.groups as string[]).join(", ")}`);
   } else {
     usage();
   }
