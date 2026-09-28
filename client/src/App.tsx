@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { LoginScreen, SignupScreen } from "./AuthScreens";
+import { SettingsTab } from "./SettingsTab";
+import { useApi } from "./api";
 
 /* ---------- types ---------- */
 
@@ -171,38 +173,6 @@ function trendLabel(ym: string): string {
 }
 
 /* ---------- data ---------- */
-
-// Small fetch hook with loading + error states. A failed fetch surfaces a
-// retryable error instead of hanging on a skeleton forever.
-function useApi<T>(url: string | null): { data: T | null; error: boolean; loading: boolean; retry: () => void } {
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState(false);
-  const [nonce, setNonce] = useState(0);
-
-  useEffect(() => {
-    if (!url) return;
-    let live = true;
-    setError(false);
-    fetch(url)
-      .then(async (r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const ct = r.headers.get("content-type") ?? "";
-        if (!ct.includes("json")) throw new Error("not JSON");
-        return (await r.json()) as T;
-      })
-      .then((d) => {
-        if (live) setData(d);
-      })
-      .catch(() => {
-        if (live) setError(true);
-      });
-    return () => {
-      live = false;
-    };
-  }, [url, nonce]);
-
-  return { data, error, loading: data === null && !error, retry: () => setNonce((n) => n + 1) };
-}
 
 /* ---------- primitives ---------- */
 
@@ -2280,7 +2250,7 @@ export function TransactionsTab({ month }: { month: string }) {
 
 /* ---------- app ---------- */
 
-export type Tab = "overview" | "pots" | "transactions" | "sharing" | "review" | "accounts";
+export type Tab = "overview" | "pots" | "transactions" | "sharing" | "review" | "accounts" | "settings";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -2289,6 +2259,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "sharing", label: "Sharing" },
   { id: "review", label: "Review" },
   { id: "accounts", label: "Accounts" },
+  { id: "settings", label: "Settings" },
 ];
 
 const tabLabel = (id: Tab) => TABS.find((t) => t.id === id)?.label ?? id;
@@ -2297,7 +2268,7 @@ const MONTH_TABS: Tab[] = ["overview", "pots", "transactions"];
 
 // Mobile bottom bar: three tabs plus a "More" sheet for the rest.
 const MOBILE_TABS: Tab[] = ["overview", "pots", "transactions"];
-const SHEET_TABS: Tab[] = ["sharing", "review", "accounts"];
+const SHEET_TABS: Tab[] = ["sharing", "review", "accounts", "settings"];
 
 /* Icon-only mobile tab bar: one clean inline SVG per tab, no icon library.
  * Selected renders in dark ink, inactive in muted grey. */
@@ -2325,6 +2296,10 @@ function TabIcon({ id }: { id: Tab | "more" }) {
     case "transactions":
       return (
         <svg {...common}><path d="M6 3.5h12V21l-2.2-1.6-1.8 1.6-2-1.6-2 1.6-1.8-1.6L6 21V3.5Z" /><path d="M9.5 8.5h5M9.5 12h5" /></svg>
+      );
+    case "settings":
+      return (
+        <svg {...common}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.09a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55h.09a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1Z" /></svg>
       );
     default:
       return (
@@ -2438,6 +2413,13 @@ export function AppShell() {
             <div>
               <div className="mb-5 font-serif-d text-[24px] font-medium">Accounts</div>
               <AccountsView />
+            </div>
+          )}
+
+          {tab === "settings" && (
+            <div>
+              <div className="mb-5 font-serif-d text-[24px] font-medium">Settings</div>
+              <SettingsTab />
             </div>
           )}
         </div>

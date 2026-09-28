@@ -74,9 +74,8 @@ function sessionCookie(res: Response): string {
   return set.split(";")[0];
 }
 
-/** First user signs up with no invite code. Signup does not mint a session
- *  (like the old setup): callers log in afterwards for an authenticated
- *  cookie. */
+/** First user signs up with no invite code. Signup mints a session cookie,
+ *  so the response authenticates the new user immediately. */
 async function signupFirst(app: Hono, username = "owner"): Promise<void> {
   const r = await jsonCall(app, "POST", "/api/auth/signup", {
     body: { username, salt: SALT, kdfKey: KDF_KEY },
@@ -206,8 +205,12 @@ describe("auth endpoints", () => {
     });
     expect(r.status).toBe(200);
     expect(((await r.json()) as any).ok).toBe(true);
-    // Like the old setup, signup does not mint a session: the client logs in.
-    expect(r.headers.get("set-cookie")).toBeNull();
+    // Signup mints a session: the new user lands in the app without logging in.
+    const signupCookie = sessionCookie(r);
+    expect(signupCookie).toMatch(/^session=/);
+    const meAfterSignup = await (await call(app, "GET", "/api/auth/me", { cookie: signupCookie })).json();
+    expect(meAfterSignup.authenticated).toBe(true);
+    expect(meAfterSignup.username).toBe("owner");
 
     const row = (await db.get("SELECT salt, verifier, kdf_params FROM users WHERE username = 'owner'")) as any;
     expect(row.salt).toBe(SALT);
@@ -418,6 +421,39 @@ describe("auth endpoints", () => {
     expect((await call(app, "GET", "/api/overview", { headers: { Authorization: `Bearer ${token}` } })).status).toBe(
       401
     );
+  });
+
+  test("agent token list shows only the caller's tokens, never the secret", async () => {
+    const { app } = await setupApp();
+    await signupFirst(app);
+    const cookieA = await loginAs(app);
+    const first = await mintAgentToken(app, cookieA, "cli");
+    await mintAgentToken(app, cookieA, "home");
+    expect(first.id).toBeGreaterThan(0);
+
+    // A second user with their own token must not see user A's tokens.
+    const invite = await mintInvite(app, cookieA);
+    const signupB = await jsonCall(app, "POST", "/api/auth/signup", {
+      body: { username: "second", salt: SALT, kdfKey: KDF_KEY, inviteCode: invite },
+    });
+    expect(signupB.status).toBe(200);
+    const cookieB = await loginAs(app, "second");
+
+    const listA = (await (await call(app, "GET", "/api/auth/agent-tokens", { cookie: cookieA })).json()) as any;
+    expect(listA.tokens.map((t: any) => t.name).sort()).toEqual(["cli", "home"]);
+    for (const t of listA.tokens) {
+      expect(Object.keys(t).sort()).toEqual(["created_at", "id", "name"]);
+    }
+    const listB = (await (await call(app, "GET", "/api/auth/agent-tokens", { cookie: cookieB })).json()) as any;
+    expect(listB.tokens).toEqual([]);
+
+    // Agent identities and anonymous callers get 401, not the list.
+    const agent = await mintAgentToken(app, cookieA, "agent-cant-list");
+    expect(
+      (await call(app, "GET", "/api/auth/agent-tokens", { headers: { Authorization: `Bearer ${agent.token}` } }))
+        .status
+    ).toBe(401);
+    expect((await call(app, "GET", "/api/auth/agent-tokens")).status).toBe(401);
   });
 
   test("invite codes can be minted by a session or an agent token, never anonymously", async () => {

@@ -15,7 +15,8 @@
  *       table is empty the first user may sign up without one (bootstrap).
  *       Codes are single-use: validated, then claimed with a conditional
  *       UPDATE so concurrent signups cannot share one. Signup also creates
- *       the user's Uncategorized pot. The old one-time /api/auth/setup now
+ *       the user's Uncategorized pot and mints a session, so the new user
+ *       lands in the app without a second login. The old one-time /api/auth/setup now
  *       permanently 404s.
  *    5. Agent access: per-user bearer tokens. An authenticated user mints one
  *       via POST /api/auth/agent-tokens (the raw token is shown once; only
@@ -310,6 +311,10 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
       "INSERT INTO pots (user_id, name, pot_group, target_type, target_cents) VALUES (?, 'Uncategorized', 'General', 'fixed', 0)",
       userId
     );
+    // Signup logs the user straight in: same session cookie as login, so the
+    // client lands in the app instead of bouncing back to the login form.
+    const token = await mintSession(config.kv, userId, username);
+    c.header("Set-Cookie", sessionCookie(token, SESSION_TTL_SECONDS));
     return c.json({ ok: true });
   });
 
@@ -351,6 +356,18 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
       return c.json({ authenticated: true, setupRequired: false, username: row?.username ?? null });
     }
     return c.json({ authenticated: false, setupRequired: (await userCount(db)) === 0 });
+  });
+
+  /** List the user's agent tokens (id, name, created_at; never the secret). */
+  app.get("/api/auth/agent-tokens", async (c) => {
+    const db = await getDb();
+    const identity = await identifyRequest(c, config, db);
+    if (!identity || identity.kind !== "user") return c.json({ error: "unauthorized" }, 401);
+    const rows = await db.all<{ id: number; name: string; created_at: string }>(
+      "SELECT id, name, created_at FROM agent_tokens WHERE user_id = ? ORDER BY id",
+      identity.userId
+    );
+    return c.json({ tokens: rows });
   });
 
   /** Mint a per-user agent token. Requires a user session: these are
