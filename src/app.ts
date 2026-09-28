@@ -111,9 +111,10 @@ export function createApp(getDb: () => Promise<Db>): Hono {
     const db = await getDb();
     const id = badId(c, "id");
     if (id === null) return c.json({ error: "bad transaction id" }, 400);
-    if (!(await txnExists(db, id))) return c.json({ error: `no transaction ${id}` }, 404);
+    const row = await db.get<{ voided: number }>("SELECT voided FROM transactions WHERE id = ?", id);
+    if (!row) return c.json({ error: `no transaction ${id}` }, 404);
     await db.run("UPDATE transactions SET voided = 1 WHERE id = ?", id);
-    return c.json({ ok: true });
+    return c.json({ ok: true, alreadyVoided: row.voided === 1 });
   });
 
   /** Assign dollars to a pot for a month. Body: { month: "YYYY-MM", potId, cents }. */
@@ -330,13 +331,20 @@ export function createApp(getDb: () => Promise<Db>): Hono {
   });
 
   /** Record a manually entered transaction. Body: { date, accountId, potId,
-   *  amountCents (signed, nonzero), description, isTransfer?, contactId?, shareCents? }. */
+   *  amountCents (signed, nonzero), description, isTransfer?, contactId?, shareCents?,
+   *  source?, cleared?, reviewReason?, externalId? }. A repeat externalId
+   *  returns the existing id with duplicate: true (idempotent record). */
   app.post("/api/transactions", async (c) => {
     const db = await getDb();
     const { ok, body } = await readJson(c);
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     try {
-      const id = await createTransaction(db, body ?? {});
+      const b = body ?? {};
+      if (b.externalId) {
+        const dup = await db.get<{ id: number }>("SELECT id FROM transactions WHERE external_id = ?", b.externalId);
+        if (dup) return c.json({ ok: true, id: dup.id, duplicate: true });
+      }
+      const id = await createTransaction(db, b);
       return c.json({ ok: true, id });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);

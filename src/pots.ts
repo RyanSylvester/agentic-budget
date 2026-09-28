@@ -16,6 +16,8 @@ export interface PotInput {
   contactId?: number | null;
   /** The contact's percentage share (0-100), or null. Requires contactId. */
   sharePct?: number | null;
+  /** 1 to retire the pot, 0 to unhide it. */
+  hidden?: number | null;
 }
 
 const TARGET_TYPES: TargetType[] = ["fixed", "average_3mo", "savings"];
@@ -118,6 +120,12 @@ export async function updatePot(db: Db, id: number, input: PotInput): Promise<vo
   if (input.targetCents !== undefined) {
     sets.push("target_cents = ?");
     params.push(needTargetCents(input.targetCents));
+  }
+  if (input.hidden !== undefined && input.hidden !== null) {
+    const h = Number(input.hidden);
+    if (h !== 0 && h !== 1) throw new Error(`bad hidden "${input.hidden}"; expected 0 or 1`);
+    sets.push("hidden = ?");
+    params.push(h);
   }
   if (input.contactId !== undefined || input.sharePct !== undefined) {
     const cur = (await db.get<{ contact_id: number | null; share_pct: number | null }>(

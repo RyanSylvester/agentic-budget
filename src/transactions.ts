@@ -15,6 +15,14 @@ export interface TransactionInput {
   contactId?: number | null;
   /** The contact's share, same sign as amountCents. 0/undefined = no split. */
   shareCents?: number;
+  /** Where the entry came from: "gmail" | "mention" | "manual" (default). */
+  source?: string;
+  /** "cleared" | "uncleared" (default). */
+  cleared?: string;
+  /** When set, the transaction is created pending_review with this reason. */
+  reviewReason?: string | null;
+  /** Idempotency key: the record route no-ops on a repeat external id. */
+  externalId?: string | null;
 }
 
 async function needAccount(db: Db, accountId: unknown): Promise<number> {
@@ -64,6 +72,10 @@ async function normalizeInput(db: Db, input: TransactionInput): Promise<{
   isTransfer: boolean;
   contactId: number | null;
   shareCents: number;
+  source: string;
+  cleared: string;
+  reviewReason: string | null;
+  externalId: string | null;
 }> {
   if (!input || typeof input !== "object") throw new Error("transaction body required");
   if (!validDate(input.date ?? "")) throw new Error(`bad date "${input.date}"; expected YYYY-MM-DD`);
@@ -87,7 +99,15 @@ async function normalizeInput(db: Db, input: TransactionInput): Promise<{
     contactId = await needContact(db, input.contactId);
   }
   checkShareCents(amountCents, shareCents);
-  return { date: input.date as string, accountId, potId, amountCents, description, isTransfer, contactId, shareCents };
+  const source = input.source ?? "manual";
+  if (!["gmail", "mention", "manual"].includes(source)) {
+    throw new Error(`bad source "${input.source}"; expected gmail, mention, or manual`);
+  }
+  const cleared = input.cleared ?? "uncleared";
+  if (!["cleared", "uncleared"].includes(cleared)) {
+    throw new Error(`bad cleared "${input.cleared}"; expected cleared or uncleared`);
+  }
+  return { date: input.date as string, accountId, potId, amountCents, description, isTransfer, contactId, shareCents, source, cleared, reviewReason: input.reviewReason ?? null, externalId: input.externalId ?? null };
 }
 
 /** Insert the user (+ optional contact) splits for a transaction. */
@@ -112,14 +132,20 @@ async function insertSplits(
  *  writer, so the read-then-write sequence cannot interleave. */
 export async function createTransaction(db: Db, input: TransactionInput): Promise<number> {
   const f = await normalizeInput(db, input);
+  const status = f.reviewReason ? "pending_review" : "confirmed";
   const t = await db.get<{ id: number }>(
-    `INSERT INTO transactions (date, account_id, amount_cents, description, source, entered_by, status, cleared, is_transfer)
-     VALUES (?, ?, ?, ?, 'manual', 'user', 'confirmed', 'uncleared', ?) RETURNING id`,
+    `INSERT INTO transactions (date, account_id, amount_cents, description, source, entered_by, status, cleared, review_reason, is_transfer, external_id)
+     VALUES (?, ?, ?, ?, ?, 'user', ?, ?, ?, ?, ?) RETURNING id`,
     f.date,
     f.accountId,
     f.amountCents,
     f.description,
-    f.isTransfer ? 1 : 0
+    f.source,
+    status,
+    f.cleared,
+    f.reviewReason,
+    f.isTransfer ? 1 : 0,
+    f.externalId
   );
   await insertSplits(db, t!.id, f.potId, f.amountCents, f.contactId, f.shareCents);
   await assertSplitsSum(db, t!.id);
