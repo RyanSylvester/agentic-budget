@@ -42,7 +42,7 @@ import { applySettlement, contactOwed } from "./settle";
 import { closePreview, applyClose } from "./close";
 import { assignToPot } from "./assign";
 import { contactBalances, createContact, deleteContact, listContacts, renameContact } from "./contacts";
-import { createPot, deletePot, updatePot, setGroupOrder } from "./pots";
+import { createPot, deletePot, updatePot, setGroupOrder, uncategorizedPotId } from "./pots";
 import { createSchedule, listSchedules, markPaid, removeSchedule, sinkingStatus } from "./sinking";
 import { createMigration } from "./migrations";
 import { assertSplitsSum, resolvePotId, validDate, validMonth, fmtCents } from "./money";
@@ -145,7 +145,9 @@ async function main() {
     const accountId = parseInt(flag("account") ?? "NaN", 10);
     const source = (flag("source") ?? "manual") as "gmail" | "mention" | "manual";
     const cleared = rest.includes("--cleared") ? "cleared" : "uncleared";
-    const potId = flag("pot") ? await mustResolvePot(db, userId, flag("pot")!) : null;
+    // No --pot means Uncategorized, exactly like remote mode: splits always
+    // carry a real pot, never NULL.
+    const potId = flag("pot") ? await mustResolvePot(db, userId, flag("pot")!) : await uncategorizedPotId(db, userId);
     const isTransfer = rest.includes("--transfer") ? 1 : 0;
     const date = flag("date") ?? new Date().toISOString().slice(0, 10);
     const externalId = flag("external-id") ?? null;
