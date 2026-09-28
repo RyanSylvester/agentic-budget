@@ -16,7 +16,7 @@ function flag(rest: string[], name: string): string | undefined {
 }
 
 function usage(): never {
-  console.error("usage: budget <record|assign|recategorize|void|pot|contact|settle|review|reconcile|close|sinking|invite|migration|migrate-remote|serve|login> [options]");
+  console.error("usage: budget <record|assign|recategorize|void|pot|contact|settle|reconcile|close|sinking|invite|migration|migrate-remote|serve|login> [options]");
   process.exit(2);
 }
 
@@ -305,13 +305,6 @@ async function remoteReconcile(remote: RemoteConfig, rest: string[]): Promise<vo
   }
 }
 
-async function remoteReview(remote: RemoteConfig): Promise<void> {
-  const data = await api(remote, "/api/review");
-  const rows = data.transactions as { id: number; date: string; amount_cents: number; description: string; source: string }[];
-  if (rows.length === 0) console.log("nothing pending review");
-  else for (const r of rows) console.log(`${r.id}  ${r.date}  $${fmtCents(r.amount_cents)}  ${r.description}  [${r.source}]`);
-}
-
 async function remoteClose(remote: RemoteConfig, rest: string[]): Promise<void> {
   const month = flag(rest, "month") ?? new Date().toISOString().slice(0, 7);
   if (!validMonth(month)) fail(`bad --month "${month}"; expected YYYY-MM`);
@@ -395,9 +388,15 @@ export async function runRemote(remote: RemoteConfig, cmd: string, rest: string[
   } else if (cmd === "pot") await remotePot(remote, rest);
   else if (cmd === "contact") await remoteContact(remote, rest);
   else if (cmd === "settle") await remoteSettle(remote, rest);
-  else if (cmd === "review") await remoteReview(remote);
   else if (cmd === "reconcile") await remoteReconcile(remote, rest);
   else if (cmd === "close") await remoteClose(remote, rest);
   else if (cmd === "sinking") await remoteSinking(remote, rest);
+  else if (cmd === "migrate-remote") {
+    // Mode-independent: pushes local budget.db to D1 directly, never through
+    // the Worker API.
+    const { migrateRemote, ensureRemoteSchemaOnly } = await import("./migrate-remote");
+    if (rest.includes("--schema-only")) await ensureRemoteSchemaOnly();
+    else await migrateRemote();
+  }
   else usage();
 }
