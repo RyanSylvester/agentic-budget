@@ -787,7 +787,10 @@ export function ContactCard({ contact, accounts }: { contact: ContactBalance; ac
   );
   const info = fresh?.contacts.find((c) => c.id === contact.id) ?? contact;
 
-  const settled = info.totalOwedCents === 0 && info.creditCents === 0;
+  // The headline is the NET balance: gross owed minus credit. A ledger
+  // written off to zero (gross and credit equal) is settled, not owed.
+  const netCents = info.totalOwedCents - info.creditCents;
+  const settled = netCents === 0;
   const dest = accounts.find((a) => a.type === "chequing") ?? accounts[0] ?? null;
 
   const settle = async () => {
@@ -816,12 +819,14 @@ export function ContactCard({ contact, accounts }: { contact: ContactBalance; ac
   return (
     <div className="card p-5">
       <div className="text-[17px] font-semibold">{contact.name}</div>
-      <div className="text-[13px] text-[var(--muted)]">{settled ? "Settled up" : "owes you"}</div>
-      {settled ? (
-        <div className="t-nums mt-1.5 text-[32px] font-light tracking-tight">$0.00</div>
-      ) : (
+      <div className="text-[13px] text-[var(--muted)]">
+        {settled ? "Settled up" : netCents > 0 ? "owes you" : "you owe"}
+      </div>
+      <div className="t-nums mt-1.5 text-[32px] font-light tracking-tight">
+        {settled ? "$0.00" : money(Math.abs(netCents))}
+      </div>
+      {info.totalOwedCents > 0 && (
         <>
-          <div className="t-nums mt-1.5 text-[32px] font-light tracking-tight">{money(info.totalOwedCents)}</div>
           {info.oldest && <div className="mt-1 text-[13px] text-[var(--muted)]">oldest since {fmtDate(info.oldest)}</div>}
           <ul className="mt-3 space-y-1">
             {info.byPot.map((b) => (

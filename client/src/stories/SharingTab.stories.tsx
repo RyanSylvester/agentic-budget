@@ -48,6 +48,65 @@ export const SingleContactWithCredit: Story = {
   },
 };
 
+export const SettledViaCredit: Story = {
+  parameters: {
+    mockApi: {
+      get: {
+        "/api/contacts": {
+          contacts: [
+            makeContactBalance({
+              id: 3,
+              name: "Jordan",
+              totalOwedCents: 25000,
+              creditCents: 25000,
+              byPot: [
+                { pot: "Rent share", cents: 20000 },
+                { pot: "Groceries", cents: 5000 },
+              ],
+              oldest: "2026-08-15",
+            }),
+          ],
+        },
+        "/api/accounts": accounts,
+      },
+    } satisfies MockApiConfig,
+    docs: {
+      description: {
+        story:
+          "Gross owed fully offset by credit (net $0): the headline reads Settled up at $0.00, with the gross per-pot breakdown and the credit line kept as detail below.",
+      },
+    },
+  },
+};
+
+export const OverpaidBeyondOwed: Story = {
+  parameters: {
+    mockApi: {
+      get: {
+        "/api/contacts": {
+          contacts: [
+            makeContactBalance({
+              id: 4,
+              name: "Taylor",
+              totalOwedCents: 10000,
+              creditCents: 15000,
+              byPot: [{ pot: "Rent share", cents: 10000 }],
+              oldest: "2026-09-10",
+            }),
+          ],
+        },
+        "/api/accounts": accounts,
+      },
+    } satisfies MockApiConfig,
+    docs: {
+      description: {
+        story:
+          "Credit exceeds gross owed (negative net): the headline reads 'you owe' with the absolute amount instead of a negative 'owes you'.",
+      },
+    },
+  },
+};
+
 export const NoContacts: Story = {
   parameters: {
     mockApi: {
