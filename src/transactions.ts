@@ -23,6 +23,9 @@ export interface TransactionInput {
   reviewReason?: string | null;
   /** Idempotency key: the record route no-ops on a repeat external id. */
   externalId?: string | null;
+  /** Who made the entry: "agent" or "user". The API route derives this from
+   *  the auth identity; defaults to "user" (direct local calls). */
+  enteredBy?: "agent" | "user";
 }
 
 async function needAccount(db: Db, accountId: unknown): Promise<number> {
@@ -133,14 +136,17 @@ async function insertSplits(
 export async function createTransaction(db: Db, input: TransactionInput): Promise<number> {
   const f = await normalizeInput(db, input);
   const status = f.reviewReason ? "pending_review" : "confirmed";
+  const enteredBy = input.enteredBy ?? "user";
+  if (enteredBy !== "agent" && enteredBy !== "user") throw new Error("bad enteredBy");
   const t = await db.get<{ id: number }>(
     `INSERT INTO transactions (date, account_id, amount_cents, description, source, entered_by, status, cleared, review_reason, is_transfer, external_id)
-     VALUES (?, ?, ?, ?, ?, 'user', ?, ?, ?, ?, ?) RETURNING id`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
     f.date,
     f.accountId,
     f.amountCents,
     f.description,
     f.source,
+    enteredBy,
     status,
     f.cleared,
     f.reviewReason,

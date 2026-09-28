@@ -21,10 +21,26 @@ interface D1Database {
   exec(sql: string): Promise<unknown>;
 }
 
+/* Minimal KV binding shape, declared locally so this file needs no
+ * @cloudflare/workers-types dependency. */
+interface KVNamespace {
+  get(key: string): Promise<string | null>;
+  put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>;
+  delete(key: string): Promise<void>;
+}
+
 interface Env {
   DB: D1Database;
-  /* SESSIONS (KVNamespace): Phase 5 auth. Not wired yet; creating the
-   * namespace needs Workers KV Storage:Edit on the deploy token. */
+  /* SESSIONS: session tokens + per-IP login rate limits (rl: prefix). */
+  SESSIONS: KVNamespace;
+  /* PEPPER: HMAC pepper for the password verifier. Set with
+   *   wrangler secret put PEPPER   (production, Phase 7)
+   * AGENT_TOKEN: bearer token for the agent write path. Set with
+   *   wrangler secret put AGENT_TOKEN   (production, Phase 7)
+   * For local `wrangler dev`, put dev-only values in `.dev.vars`
+   * (gitignored, never committed). */
+  PEPPER: string;
+  AGENT_TOKEN: string;
 }
 
 /** D1 rejects bigint bindings; the app passes money as numbers, but coerce
@@ -61,7 +77,9 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/")) {
-      const app = createApp(async () => new D1Db(env.DB));
+      const app = createApp(async () => new D1Db(env.DB), {
+        auth: { kv: env.SESSIONS, pepper: env.PEPPER, agentToken: env.AGENT_TOKEN },
+      });
       return app.fetch(request);
     }
     // Non-API requests are served as static assets by the platform (see

@@ -3,6 +3,7 @@ client/node_modules/
 client/dist/
 budget.db
 budget.db-*
+.dev.vars
 *.local
 .DS_Store
 client/storybook-static/

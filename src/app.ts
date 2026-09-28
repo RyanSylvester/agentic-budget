@@ -8,6 +8,7 @@
  *  no `node:fs`, no `bun:sqlite` as a value. Keep it that way. */
 import { Hono } from "hono";
 import type { Db } from "./db-interface";
+import { registerAuth, authMiddleware, type AuthConfig, type Identity } from "./auth";
 import { monthSpend, potSpend, potInflow, recentTransactions, listTransactions, spendTrend, assignedTotal, rtaCents, potHistory } from "./queries";
 import { applySettlement, contactCredit, contactOwed } from "./settle";
 import { contactBalances, createContact, renameContact, deleteContact } from "./contacts";
@@ -39,10 +40,27 @@ async function txnExists(db: Db, id: number): Promise<boolean> {
   return !!(await db.get("SELECT 1 FROM transactions WHERE id = ?", id));
 }
 
+/** Identity recorded on writes: "agent" for the bearer-token write path,
+ *  "user" for cookie sessions. Defaults to "user" when auth is not
+ *  configured (local Bun dev, where the agent writes through the CLI). */
+function requestIdentity(c: any): Identity {
+  return (c.get("identity") as Identity | undefined) ?? "user";
+}
+
 /** Build the API app. getDb supplies the database per request; the Bun entry
- *  passes openDb, the Worker entry will pass a D1-backed Db. */
-export function createApp(getDb: () => Promise<Db>): Hono {
+ *  passes openDb, the Worker entry passes a D1-backed Db. opts.auth wires
+ *  the session middleware and the /api/auth/* routes (Worker only); without
+ *  it the API is unauthenticated and /api/auth/me reports an authenticated
+ *  local session so the frontend gate passes. */
+export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }): Hono {
   const app = new Hono();
+
+  if (opts?.auth) {
+    app.use("/api/*", authMiddleware(opts.auth));
+    registerAuth(app, getDb, opts.auth);
+  } else {
+    app.get("/api/auth/me", (c) => c.json({ authenticated: true, setupRequired: false }));
+  }
 
   app.get("/api/overview", async (c) => {
     const db = await getDb();
@@ -344,7 +362,7 @@ export function createApp(getDb: () => Promise<Db>): Hono {
         const dup = await db.get<{ id: number }>("SELECT id FROM transactions WHERE external_id = ?", b.externalId);
         if (dup) return c.json({ ok: true, id: dup.id, duplicate: true });
       }
-      const id = await createTransaction(db, b);
+      const id = await createTransaction(db, { ...b, enteredBy: requestIdentity(c) });
       return c.json({ ok: true, id });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
@@ -559,7 +577,7 @@ export function createApp(getDb: () => Promise<Db>): Hono {
     if (!contactId) return c.json({ error: "contactId required" }, 400);
     if (!(await db.get("SELECT 1 FROM accounts WHERE id = ?", accountId))) return c.json({ error: `no account ${accountId}` }, 404);
     try {
-      const summary = await applySettlement(db, { contactId, accountId, amountCents, note: body?.note, enteredBy: "user" });
+      const summary = await applySettlement(db, { contactId, accountId, amountCents, note: body?.note, enteredBy: requestIdentity(c) });
       return c.json(summary);
     } catch (e) {
       const msg = (e as Error).message;
