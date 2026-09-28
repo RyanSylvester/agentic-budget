@@ -34,6 +34,12 @@ const CF_API = join(process.env.HOME ?? "/home/hatch", "workspace/skills/cloudfl
 // Not a secret. From ~/workspace/skills/cloudflare/SKILL.md.
 const ACCOUNT_ID = "1af804e6c3520a49f4ec595bea0041f2";
 
+/** Identity tables: never wiped or imported. A push replaces the budget
+ *  data, not who may sign in: wiping users (or their invite codes / agent
+ *  tokens) would strand or delete remote identities the local database
+ *  knows nothing about. */
+const PRESERVED = ["users", "invite_codes", "agent_tokens"];
+
 /** Data tables in wipe order: children before parents (FK-safe for DELETE).
  *  schema_migrations is intentionally absent: it is managed, not data. */
 const WIPE_ORDER = [
@@ -125,6 +131,19 @@ async function ensureRemoteSchema(d1: (sql: string) => Promise<D1Result[]>): Pro
   }
 }
 
+/** Schema-only entry point: bring the remote D1 up to date (schema.sql +
+ *  pending migrations) without touching any data. Used for deploys where the
+ *  remote must stay empty (multi-user cutover) or already holds live data
+ *  that a wipe would destroy. */
+export async function ensureRemoteSchemaOnly(): Promise<void> {
+  const dbId = readDatabaseId();
+  const d1 = (sql: string) => d1query(dbId, sql);
+  console.log(`target D1: ${dbId}`);
+  console.log("ensuring remote schema (no data changes)...");
+  await ensureRemoteSchema(d1);
+  console.log("remote schema is up to date.");
+}
+
 export async function migrateRemote(): Promise<void> {
   const dbId = readDatabaseId();
   const d1 = (sql: string) => d1query(dbId, sql);
@@ -138,7 +157,7 @@ export async function migrateRemote(): Promise<void> {
     const localTables = (local
       .query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != '_cf_KV' ORDER BY name`)
       .all() as { name: string }[]).map((r) => r.name);
-    const known = new Set([...WIPE_ORDER, "schema_migrations"]);
+    const known = new Set([...WIPE_ORDER, ...PRESERVED, "schema_migrations"]);
     const drift = localTables.filter((t) => !known.has(t));
     if (drift.length > 0) {
       throw new Error(`local has tables outside the known wipe order: ${drift.join(", ")} — update WIPE_ORDER first`);

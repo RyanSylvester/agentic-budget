@@ -27,6 +27,7 @@
  *    bun src/cli.ts sinking remove --pot "Property tax"
  *    bun src/cli.ts migration new add_water_bill   # stamp a new timestamped migration file (version comes from the clock)
  *    bun src/cli.ts migrate-remote    # ensure D1 schema, wipe remote data, re-import local budget.db (re-runnable; read-only on local)
+ *    bun src/cli.ts migrate-remote --schema-only  # ensure D1 schema only; remote data untouched
  *    bun src/cli.ts serve             # start the dashboard
  *    bun src/cli.ts login --api-url https://daybook.example.workers.dev   # store the agent token for remote mode
  *
@@ -493,8 +494,12 @@ async function main() {
       usage();
     }
   } else if (cmd === "migrate-remote") {
-    const { migrateRemote } = await import("./migrate-remote");
-    await migrateRemote();
+    const { migrateRemote, ensureRemoteSchemaOnly } = await import("./migrate-remote");
+    if (rest.includes("--schema-only")) {
+      await ensureRemoteSchemaOnly();
+    } else {
+      await migrateRemote();
+    }
   } else if (cmd === "serve") {
     const { startServer } = await import("./server");
     startServer();
