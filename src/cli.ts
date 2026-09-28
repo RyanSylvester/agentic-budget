@@ -4,6 +4,7 @@
  *  Usage:
  *    bun src/cli.ts record --account 1 --amount -12.50 --description "Voila groceries" --source mention [--date 2026-09-26] [--cleared] [--pot 5] [--contact-id 1] [--share-cents 625] [--uncertain "unsure which pot"] [--transfer] [--external-id stmt-abc123]
  *    bun src/cli.ts assign --month 2026-09 --pot Groceries --cents 60000
+ *    bun src/cli.ts assign scaffold --month 2026-10 [--strategy average_3mo|last_month] [--dry-run]
  *    bun src/cli.ts recategorize --id 42 --pot Groceries
  *    bun src/cli.ts void --id 42
  *    bun src/cli.ts pot create --name "Nova" --group Life [--target-type savings] [--contact-id 1 --share-pct 50]
@@ -27,6 +28,11 @@
  *    bun src/cli.ts migration new add_water_bill   # stamp a new timestamped migration file (version comes from the clock)
  *    bun src/cli.ts migrate-remote    # ensure D1 schema, wipe remote data, re-import local budget.db (re-runnable; read-only on local)
  *    bun src/cli.ts serve             # start the dashboard
+ *    bun src/cli.ts login --api-url https://daybook.example.workers.dev   # store the agent token for remote mode
+ *
+ *  Remote mode: with BUDGET_API_URL set (or ~/.config/agentic-budget/config.json
+ *  written by `login`), every command above except `migration new` and `serve`
+ *  runs against the hosted Worker instead of the local budget.db.
  */
 import { openDb } from "./db";
 import type { Db } from "./db-interface";
@@ -39,9 +45,12 @@ import { createPot, deletePot, updatePot } from "./pots";
 import { createSchedule, listSchedules, markPaid, removeSchedule, sinkingStatus } from "./sinking";
 import { createMigration } from "./migrations";
 import { assertSplitsSum, resolvePotId, validDate, validMonth, fmtCents } from "./money";
+import { scaffoldMonth, type ScaffoldStrategy } from "./scaffold";
+import { loadRemoteConfig, saveRemoteConfig, promptHidden, configPath } from "./remote";
+import { runRemote, printScaffold, printClosePreview } from "./cli-remote";
 
 function usage(): never {
-  console.error("usage: budget <record|assign|recategorize|void|pot|contact|settle|review|reconcile|close|sinking|migration|migrate-remote|serve> [options]");
+  console.error("usage: budget <record|assign|recategorize|void|pot|contact|settle|review|reconcile|close|sinking|migration|migrate-remote|serve|login> [options]");
   process.exit(2);
 }
 
@@ -67,6 +76,25 @@ async function mustResolvePot(db: Db, ref: string): Promise<number> {
 }
 
 async function main() {
+  if (cmd === "login") {
+    const apiUrl = flag("api-url") ?? loadRemoteConfig()?.apiUrl;
+    if (!apiUrl) fail(`usage: budget login --api-url <worker-url>`);
+    const token = await promptHidden("agent token: ");
+    if (!token) fail("no token entered; nothing saved");
+    saveRemoteConfig(apiUrl, token);
+    console.log(`saved remote config for ${apiUrl} (${configPath()})`);
+    return;
+  }
+  const remote = loadRemoteConfig();
+  if (remote) {
+    // migrate-remote is mode-independent (it pushes local budget.db to D1
+    // directly, never through the Worker API), so it stays available.
+    if (cmd === "migration" || cmd === "serve") {
+      fail(`"${cmd}" is local-only: it works on files on this machine, not the hosted Worker. Unset BUDGET_API_URL to run it locally.`);
+    }
+    await runRemote(remote, cmd, rest);
+    return;
+  }
   if (cmd === "record") {
     const db = await openDb();
     const amount = Math.round(parseFloat(flag("amount") ?? "NaN") * 100);
@@ -132,6 +160,23 @@ async function main() {
     }
   } else if (cmd === "assign") {
     const db = await openDb();
+    if (rest[0] === "scaffold") {
+      const srest = rest.slice(1);
+      const sflag = (name: string): string | undefined => {
+        const i = srest.indexOf(`--${name}`);
+        return i >= 0 ? srest[i + 1] : undefined;
+      };
+      const month = sflag("month") ?? new Date().toISOString().slice(0, 7);
+      const strategy = (sflag("strategy") ?? "average_3mo") as ScaffoldStrategy;
+      const dryRun = srest.includes("--dry-run");
+      try {
+        const lines = await scaffoldMonth(db, month, strategy, dryRun);
+        printScaffold(month, strategy, dryRun, lines);
+      } catch (e) {
+        fail((e as Error).message);
+      }
+      return;
+    }
     const month = flag("month") ?? new Date().toISOString().slice(0, 7);
     const pot = flag("pot");
     const cents = Math.round(parseFloat(flag("cents") ?? "NaN"));
@@ -308,19 +353,7 @@ async function main() {
     const month = flag("month") ?? new Date().toISOString().slice(0, 7);
     if (!validMonth(month)) fail(`bad --month "${month}"; expected YYYY-MM`);
     const p = await closePreview(db, month);
-    const $ = (c: number) => `$${fmtCents(c)}`;
-    console.log(`close preview: ${p.month}  (applies wireframe for ${p.nextMonth})`);
-    console.log(`  inflows (user)     ${$(p.inflowsCents)}`);
-    console.log(`  assigned to pots   ${$(p.assignedCents)}`);
-    console.log(`  spent (user)       ${$(p.spentCents)}`);
-    console.log(`  RTA before close   ${$(p.rtaBeforeCents)}`);
-    console.log(`  -> moves to savings ${$(p.movedToSavingsCents)}, RTA ends $0.00`);
-    console.log(`  shared owed total  ${$(p.sharedOwedCents)}`);
-    console.log(`  per-pot wireframe:`);
-    for (const l of p.pots) {
-      const next = l.wireframeSkipped ? `schedule $${fmtCents(l.wireframeCents)} (target not written)` : `next $${fmtCents(l.wireframeCents)}`;
-      console.log(`    ${l.name} (${l.targetType}${l.assignable ? "" : ", income, no wireframe"}): spent $${fmtCents(l.spentCents)} / target $${fmtCents(l.targetCents)} -> ${next}`);
-    }
+    printClosePreview(p);
     if (rest.includes("--apply")) {
       try {
         await applyClose(db, p);

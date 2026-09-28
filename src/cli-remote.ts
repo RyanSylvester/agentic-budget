@@ -36,16 +36,31 @@ async function api(remote: RemoteConfig, path: string, opts: { method?: string; 
 }
 
 /** Resolve a pot ref (id or case-insensitive name) to its id using the
- *  visible pot list. Numeric refs pass through; the server validates them. */
+ *  visible pot list. Numeric refs pass through; the server validates them.
+ *  Hidden (retired) pots resolve by name too, matching local mode. */
 async function resolvePotRemote(remote: RemoteConfig, ref: string): Promise<number> {
   const n = parseInt(ref, 10);
   if (Number.isFinite(n) && String(n) === ref.trim()) return n;
-  const data = await api(remote, "/api/pots");
+  const data = await api(remote, "/api/pots?includeHidden=1");
   const pots = data.pots as { id: number; name: string }[];
   const matches = pots.filter((p) => p.name.toLowerCase() === ref.trim().toLowerCase());
   if (matches.length === 0) fail(`no pot named "${ref}"`);
   if (matches.length > 1) fail(`ambiguous pot name "${ref}"`);
   return matches[0].id;
+}
+
+/** The Uncategorized pot id, creating it on demand exactly like the
+ *  server-side ensureUncategorizedPotId does for local mode. */
+async function uncategorizedPotRemote(remote: RemoteConfig): Promise<number> {
+  const data = await api(remote, "/api/pots");
+  const pots = data.pots as { id: number; name: string }[];
+  const found = pots.find((p) => p.name === "Uncategorized");
+  if (found) return found.id;
+  const created = await api(remote, "/api/pots", {
+    method: "POST",
+    body: { name: "Uncategorized", group: "General", targetType: "fixed", targetCents: 0 },
+  });
+  return created.id;
 }
 
 /** Resolve a pot ref to its sinking schedule id. */
@@ -108,7 +123,7 @@ async function remoteRecord(remote: RemoteConfig, rest: string[]): Promise<void>
   if (!validDate(date)) fail(`bad --date "${date}"; expected YYYY-MM-DD`);
   if (!["gmail", "mention", "manual"].includes(source)) fail(`bad --source "${source}"; expected gmail, mention, or manual`);
 
-  const potId = potRef ? await resolvePotRemote(remote, potRef) : null;
+  const potId = potRef ? await resolvePotRemote(remote, potRef) : await uncategorizedPotRemote(remote);
   // Splits: same defaults as local mode, read from the pot's share config.
   let contactId = flag(rest, "contact-id") ? parseInt(flag(rest, "contact-id")!, 10) : null;
   let share = flag(rest, "share-cents") ? Math.round(parseFloat(flag(rest, "share-cents")!) * 100) : 0;

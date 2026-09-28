@@ -56,13 +56,17 @@ export function saveRemoteConfig(apiUrl: string, token: string): void {
 export async function promptHidden(question: string): Promise<string> {
   const { createInterface } = await import("node:readline");
   const { spawnSync } = await import("node:child_process");
+  const { readFileSync: readStdin } = await import("node:fs");
   process.stdout.write(question);
-  const isTty = !!process.stdin.isTTY;
-  if (isTty) {
-    spawnSync("stty", ["-echo"], { stdio: "inherit" });
-  } else {
+  if (!process.stdin.isTTY) {
+    // Piped stdin: readline's line/close ordering is unreliable here, so read
+    // to EOF and take the first line.
     process.stderr.write("(warning: input will be visible; stdin is not a TTY)\n");
+    const line = readStdin(0, "utf8").split("\n")[0].trim();
+    process.stdout.write("\n");
+    return line;
   }
+  spawnSync("stty", ["-echo"], { stdio: "inherit" });
   try {
     const rl = createInterface({ input: process.stdin, terminal: false });
     const line = await new Promise<string>((resolve) => {
@@ -74,7 +78,7 @@ export async function promptHidden(question: string): Promise<string> {
     });
     return line.trim();
   } finally {
-    if (isTty) spawnSync("stty", ["echo"], { stdio: "inherit" });
+    spawnSync("stty", ["echo"], { stdio: "inherit" });
     process.stdout.write("\n");
   }
 }

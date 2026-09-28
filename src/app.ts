@@ -381,11 +381,13 @@ export function createApp(getDb: () => Promise<Db>): Hono {
   app.get("/api/pots", async (c) => {
     const db = await getDb();
     const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
+    // includeHidden=1 lets the CLI resolve retired pots by name (unhide).
+    const includeHidden = c.req.query("includeHidden") === "1";
     const pots = await db.all<any>(
       `SELECT p.id, p.name, p.pot_group, p.target_type, p.target_cents, p.is_assignable, p.contact_id, p.share_pct,
               c.name AS contact_name
        FROM pots p LEFT JOIN contacts c ON c.id = p.contact_id
-       WHERE p.hidden = 0 ORDER BY p.id`
+       ${includeHidden ? "" : "WHERE p.hidden = 0 "}ORDER BY p.id`
     );
     const out = [];
     for (const p of pots) {
