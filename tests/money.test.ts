@@ -16,7 +16,7 @@ async function seed(): Promise<Db> {
 
 async function addTxn(db: Db, date: string, amountCents: number, userCents: number, contactCents: number, potId: number | null, voided = 0) {
   const t = (await db.get<{ id: number }>(
-    "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared, voided) VALUES (1, ?, 1, ?, 't', 'manual', 'agent', 'confirmed', 'cleared', ?) RETURNING id",
+    "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, cleared, voided) VALUES (1, ?, 1, ?, 't', 'manual', 'agent', 'cleared', ?) RETURNING id",
     date, amountCents, voided
   ))!;
   await db.run("INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (1, ?, ?, ?, ?, ?)", t.id, potId, "user", null, userCents);
@@ -34,7 +34,7 @@ describe("assertSplitsSum", () => {
   test("unbalanced splits throw", async () => {
     const db = await seed();
     const t = (await db.get<{ id: number }>(
-      "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared) VALUES (1, '2026-09-01', 1, -10000, 't', 'manual', 'agent', 'confirmed', 'cleared') RETURNING id"
+      "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, cleared) VALUES (1, '2026-09-01', 1, -10000, 't', 'manual', 'agent', 'cleared') RETURNING id"
     ))!;
     await db.run("INSERT INTO splits (user_id, transaction_id, owner, amount_cents) VALUES (1, ?, 'user', -6000)", t.id);
     await expect(assertSplitsSum(db, 1, t.id)).rejects.toThrow("sum to -6000, expected -10000");
@@ -70,7 +70,7 @@ describe("void", () => {
 describe("external_id idempotency", () => {
   test("duplicate external_id violates the unique index", async () => {
     const db = await seed();
-    const sql = "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared, external_id) VALUES (1, '2026-09-01', 1, -1000, 't', 'gmail', 'agent', 'confirmed', 'cleared', 'stmt-1')";
+    const sql = "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, cleared, external_id) VALUES (1, '2026-09-01', 1, -1000, 't', 'gmail', 'agent', 'cleared', 'stmt-1')";
     await db.run(sql);
     await expect(db.run(sql)).rejects.toThrow();
   });

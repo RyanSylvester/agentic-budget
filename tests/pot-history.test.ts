@@ -13,7 +13,7 @@ async function seed(): Promise<Db> {
     (1, 'Groceries','essentials','average_3mo',120000)`);
   const txn = async (date: string, amount: number, pot: number | null) => {
     const t = (await db.get<{ id: number }>(
-      "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared) VALUES (1, ?, 1, ?, 't', 'manual', 'agent', 'confirmed', 'cleared') RETURNING id",
+      "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, cleared) VALUES (1, ?, 1, ?, 't', 'manual', 'agent', 'cleared') RETURNING id",
       date, amount
     ))!;
     await db.run("INSERT INTO splits (user_id, transaction_id, pot_id, owner, amount_cents) VALUES (1, ?, ?, 'user', ?)", t.id, pot, amount);

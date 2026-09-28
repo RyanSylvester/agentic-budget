@@ -56,7 +56,7 @@ describe("pot management", () => {
   test("delete moves transactions, splits, and assignments to Uncategorized", async () => {
     const db = await seed();
     const id = await createPot(db, 1, { name: "Dining out", group: "Food", targetCents: 60000 });
-    await db.run("INSERT INTO transactions (user_id, date, account_id, pot_id, amount_cents, description, source, entered_by, status, cleared) VALUES (1, '2026-09-10', 1, ?, -5000, 'dinner', 'manual', 'agent', 'confirmed', 'cleared')", id);
+    await db.run("INSERT INTO transactions (user_id, date, account_id, pot_id, amount_cents, description, source, entered_by, cleared) VALUES (1, '2026-09-10', 1, ?, -5000, 'dinner', 'manual', 'agent', 'cleared')", id);
     const t = (await db.get<{ id: number }>("SELECT id FROM transactions WHERE pot_id = ?", id))!;
     await db.run("INSERT INTO splits (user_id, transaction_id, pot_id, owner, amount_cents) VALUES (1, ?, ?, 'user', -5000)", t.id, id);
     await db.run("INSERT INTO assignments (user_id, month, pot_id, cents) VALUES (1, '2026-09', ?, 60000)", id);

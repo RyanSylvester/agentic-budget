@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { argon2id } from "hash-wasm";
 
-/* Login and first-run setup screens for in-app auth.
+/* Login and signup screens for in-app auth.
  *
  * The password never leaves the device: the client derives
  * K = argon2id(password, salt) and only K (as hex) is sent to the server,
@@ -61,8 +61,9 @@ async function postJson(url: string, body: unknown): Promise<Response> {
   });
 }
 
-export function LoginScreen({ onAuthenticated, deriveKey = deriveKdfKey }: {
+export function LoginScreen({ onAuthenticated, onSignup, deriveKey = deriveKdfKey }: {
   onAuthenticated: () => void;
+  onSignup?: () => void;
   deriveKey?: DeriveKey;
 }) {
   const [username, setUsername] = useState("");
@@ -136,6 +137,11 @@ export function LoginScreen({ onAuthenticated, deriveKey = deriveKdfKey }: {
           {busy ? "Checking…" : "Log in"}
         </button>
       </form>
+      {onSignup && (
+        <button onClick={onSignup} className="mt-4 w-full text-center text-[13px] text-[var(--ink-2)] underline underline-offset-2">
+          Need an account? Sign up
+        </button>
+      )}
       <p className="mt-4 text-[12px] text-[var(--muted)]">
         Your password never leaves this device. Only a verification code derived from it is sent to the server.
       </p>
@@ -143,13 +149,15 @@ export function LoginScreen({ onAuthenticated, deriveKey = deriveKdfKey }: {
   );
 }
 
-export function SetupScreen({ onSetup, deriveKey = deriveKdfKey }: {
-  onSetup: () => void;
+export function SignupScreen({ onSignup, onBackToLogin, deriveKey = deriveKdfKey }: {
+  onSignup: () => void;
+  onBackToLogin?: () => void;
   deriveKey?: DeriveKey;
 }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -164,13 +172,22 @@ export function SetupScreen({ onSetup, deriveKey = deriveKdfKey }: {
     try {
       const salt = randomSaltHex();
       const kdfKey = await deriveKey(password, salt, "m=19456,t=2,p=1");
-      const r = await postJson("/api/auth/setup", { username: username.trim(), salt, kdfKey });
-      if (r.status === 404) {
-        setError("Setup is already done. Log in instead.");
+      const code = inviteCode.trim();
+      const r = await postJson("/api/auth/signup", {
+        username: username.trim(),
+        salt,
+        kdfKey,
+        ...(code ? { inviteCode: code } : {}),
+      });
+      if (r.status === 400) {
+        const body = (await r.json().catch(() => null)) as { error?: string } | null;
+        setError(body?.error ?? "Couldn't create the account.");
+      } else if (r.status === 429) {
+        setError("Too many signups. Wait a few minutes and try again.");
       } else if (!r.ok) {
-        throw new Error("setup");
+        throw new Error("signup");
       } else {
-        onSetup();
+        onSignup();
       }
     } catch {
       setError("Couldn't reach the server. Try again.");
@@ -180,8 +197,8 @@ export function SetupScreen({ onSetup, deriveKey = deriveKdfKey }: {
 
   return (
     <Shell>
-      <div className="mb-1.5 text-[17px] font-semibold">Set up Daybook</div>
-      <p className="mb-5 text-[14px] text-[var(--muted)]">Choose a password for this budget.</p>
+      <div className="mb-1.5 text-[17px] font-semibold">Create your account</div>
+      <p className="mb-5 text-[14px] text-[var(--muted)]">Choose a username and password for this budget.</p>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -190,9 +207,9 @@ export function SetupScreen({ onSetup, deriveKey = deriveKdfKey }: {
         className="space-y-4"
       >
         <div>
-          <label className={labelCls} htmlFor="setup-username">Username</label>
+          <label className={labelCls} htmlFor="signup-username">Username</label>
           <input
-            id="setup-username"
+            id="signup-username"
             type="text"
             autoComplete="username"
             value={username}
@@ -201,9 +218,9 @@ export function SetupScreen({ onSetup, deriveKey = deriveKdfKey }: {
           />
         </div>
         <div>
-          <label className={labelCls} htmlFor="setup-password">Password</label>
+          <label className={labelCls} htmlFor="signup-password">Password</label>
           <input
-            id="setup-password"
+            id="signup-password"
             type="password"
             autoComplete="new-password"
             value={password}
@@ -212,9 +229,9 @@ export function SetupScreen({ onSetup, deriveKey = deriveKdfKey }: {
           />
         </div>
         <div>
-          <label className={labelCls} htmlFor="setup-confirm">Confirm password</label>
+          <label className={labelCls} htmlFor="signup-confirm">Confirm password</label>
           <input
-            id="setup-confirm"
+            id="signup-confirm"
             type="password"
             autoComplete="new-password"
             value={confirm}
@@ -222,15 +239,38 @@ export function SetupScreen({ onSetup, deriveKey = deriveKdfKey }: {
             className={inputCls}
           />
         </div>
+        <div>
+          <label className={labelCls} htmlFor="signup-invite">Invite code</label>
+          <input
+            id="signup-invite"
+            type="text"
+            autoComplete="off"
+            value={inviteCode}
+            onChange={(e) => setInviteCode(e.target.value)}
+            className={inputCls}
+            placeholder="Leave blank for the very first account"
+          />
+          <p className="mt-1.5 text-[12px] text-[var(--muted)]">
+            Once an account exists, a code from an existing user is required.
+          </p>
+        </div>
         {error && (
           <div role="alert" className="text-[13px] text-[var(--danger)]">
             {error}
           </div>
         )}
         <button type="submit" disabled={busy || !username.trim() || !password} className="btn-ink w-full py-2.5 text-[15px]">
-          {busy ? "Creating…" : "Create password"}
+          {busy ? "Creating…" : "Create account"}
         </button>
       </form>
+      {onBackToLogin && (
+        <button onClick={onBackToLogin} className="mt-4 w-full text-center text-[13px] text-[var(--ink-2)] underline underline-offset-2">
+          Already have an account? Log in
+        </button>
+      )}
+      <p className="mt-4 text-[12px] text-[var(--muted)]">
+        Your password never leaves this device. Only a verification code derived from it is sent to the server.
+      </p>
     </Shell>
   );
 }

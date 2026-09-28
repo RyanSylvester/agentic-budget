@@ -28,7 +28,7 @@ async function testDb(): Promise<Db> {
 async function spend(db: Db, potId: number, date: string, cents: number): Promise<void> {
   // cents negative (outflow), like the CLI's record path
   const t = (await db.get<{ id: number }>(
-    "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared) VALUES (1, ?, 1, ?, 'bill', 'manual', 'agent', 'confirmed', 'cleared') RETURNING id",
+    "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, cleared) VALUES (1, ?, 1, ?, 'bill', 'manual', 'agent', 'cleared') RETURNING id",
     date, cents
   ))!;
   await db.run("INSERT INTO splits (user_id, transaction_id, pot_id, owner, amount_cents) VALUES (1, ?, ?, 'user', ?)", t.id, potId, cents);

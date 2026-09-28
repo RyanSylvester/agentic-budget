@@ -44,7 +44,7 @@ describe("contacts", () => {
 
     // now a split references the contact
     await db.run(
-      "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared) VALUES (1, '2026-09-01', 1, -10000, 't', 'manual', 'agent', 'confirmed', 'cleared')"
+      "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, cleared) VALUES (1, '2026-09-01', 1, -10000, 't', 'manual', 'agent', 'cleared')"
     );
     const t = (await db.get<{ id: number }>("SELECT id FROM transactions"))!;
     await db.run("INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (1, ?, 1, 'user', NULL, -5000)", t.id);
@@ -57,7 +57,7 @@ describe("contacts", () => {
     const alex = await createContact(db, 1, "Alex");
     const sam = await createContact(db, 1, "Sam");
     await db.run(
-      "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, status, cleared) VALUES (1, '2026-09-01', 1, -334000, 'rent', 'manual', 'agent', 'confirmed', 'cleared')"
+      "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, cleared) VALUES (1, '2026-09-01', 1, -334000, 'rent', 'manual', 'agent', 'cleared')"
     );
     const t = (await db.get<{ id: number }>("SELECT id FROM transactions"))!;
     await db.run("INSERT INTO splits (user_id, transaction_id, pot_id, owner, contact_id, amount_cents) VALUES (1, ?, 1, ?, ?, ?)", t.id, "user", null, -167000);
