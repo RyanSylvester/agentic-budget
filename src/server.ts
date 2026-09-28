@@ -26,11 +26,11 @@ if (existsSync(dist)) {
  *  default-export auto-serve, which only fires when this file is the entrypoint). */
 export function startServer() {
   const port = parseInt(process.env.PORT ?? "3111", 10);
-  const server = Bun.serve({ port, fetch: app.fetch });
+  const server = Bun.serve({ port, hostname: "127.0.0.1", fetch: app.fetch });
   console.log(`agentic-budget at http://localhost:${server.port}`);
   return server;
 }
 
 // `bun src/server.ts` still works via Bun's default-export auto-serve.
 const defaultPort = parseInt(process.env.PORT ?? "3111", 10);
-export default { port: defaultPort, fetch: app.fetch };
+export default { port: defaultPort, hostname: "127.0.0.1", fetch: app.fetch };
