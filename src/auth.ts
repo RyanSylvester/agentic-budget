@@ -34,7 +34,7 @@
  *  Workers, in browsers, and in Bun. */
 
 import { Hono } from "hono";
-import type { Db } from "./db-interface";
+import type { Db, BatchStatement, BatchResult } from "./db-interface";
 
 /** Minimal KV surface used by auth. Cloudflare's KVNamespace satisfies this
  *  structurally; tests use a Map-backed double. */
@@ -142,7 +142,11 @@ async function mintSession(kv: KVStore, userId: number, username: string): Promi
 
 /** True when this IP has exhausted its budget for the scope. Counts every
  *  attempt (success or failure); the window is fixed at 10 minutes.
- *  Scopes ("login", "signup") get independent buckets under `rl:<scope>:`. */
+ *  Scopes ("login", "signup") get independent buckets under `rl:<scope>:`.
+ *  (Review L2, accepted risk: the KV read-modify-write is not atomic, so
+ *  under a concurrent burst the limit is approximate, not a hard cap. It
+ *  bounds abuse well enough for a low-traffic app; a distributed counter
+ *  would be over-engineering here.) */
 export async function rateLimitHit(kv: KVStore, ip: string, scope = "login"): Promise<boolean> {
   const key = `rl:${scope}:${ip}`;
   const now = Date.now();
@@ -166,6 +170,10 @@ export async function rateLimitHit(kv: KVStore, ip: string, scope = "login"): Pr
 }
 
 function clientIp(c: any): string {
+  // (Review L3, accepted risk: clients behind the same NAT / CGNAT share one
+  // bucket, so one network's heavy traffic can burn the budget for everyone
+  // behind it. Fail-closed per bucket is the safe direction, and the window
+  // is only 10 minutes.)
   return (
     c.req.header("CF-Connecting-IP") ??
     c.req.header("X-Forwarded-For")?.split(",")[0]?.trim() ??
@@ -255,11 +263,14 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
 
   /** Signup with an invite code. The code is required once any user exists;
    *  while the users table is empty the first user may sign up without one
-   *  (bootstrap, like the old setup). The code is single-use: it is
-   *  validated, the user row is inserted, then the code is claimed with a
-   *  conditional UPDATE so concurrent signups cannot share one. Losing the
-   *  race rolls the fresh user row back. Signup also provisions the user's
-   *  Uncategorized pot (deletePot's move target). */
+   *  (bootstrap, like the old setup). The user insert, the code claim, and
+   *  the Uncategorized-pot provision run as ONE atomic batch: any failure
+   *  rolls all three back, so a failed signup can never leave an orphaned
+   *  user row or a half-claimed code (review L4). The code claim is still a
+   *  conditional UPDATE, so concurrent signups cannot share one code: the
+   *  loser sees zero claimed rows and its orphaned user row is deleted.
+   *  Signup also provisions the user's Uncategorized pot (deletePot's move
+   *  target). */
   app.post("/api/auth/signup", async (c) => {
     if (!config.pepper) return c.json({ error: "auth not configured" }, 500);
     const body = await c.req.json().catch(() => null);
@@ -280,37 +291,49 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
       if (!ok) return c.json({ error: "invalid or already-used invite code" }, 400);
     }
     const verifier = bytesToHex(await computeVerifier(config.pepper, kdfKey));
-    let userId: number;
-    try {
-      const row = await db.get<{ id: number }>(
-        "INSERT INTO users (username, salt, verifier, kdf_params, created_at) VALUES (?, ?, ?, ?, ?) RETURNING id",
-        username,
-        salt,
-        verifier,
-        DEFAULT_KDF_PARAMS,
-        new Date().toISOString()
-      );
-      userId = row!.id;
-    } catch {
-      // Username is UNIQUE: the invite code stays unused so the client can retry.
-      return c.json({ error: "that username is taken" }, 400);
-    }
+    const now = new Date().toISOString();
+    // Batch statements cannot reference each other's results, so the code
+    // claim and pot provision locate the new user through the UNIQUE
+    // username instead of a returned id.
+    const stmts: BatchStatement[] = [
+      {
+        sql: "INSERT INTO users (username, salt, verifier, kdf_params, created_at) VALUES (?, ?, ?, ?, ?)",
+        params: [username, salt, verifier, DEFAULT_KDF_PARAMS, now],
+      },
+    ];
     if (inviteCode) {
-      const claimed = await db.run(
-        "UPDATE invite_codes SET used_by = ?, used_at = ? WHERE code = ? AND used_by IS NULL",
-        userId,
-        new Date().toISOString(),
-        inviteCode
-      );
-      if (claimed.changes === 0) {
-        await db.run("DELETE FROM users WHERE id = ?", userId);
-        return c.json({ error: "invalid or already-used invite code" }, 400);
-      }
+      stmts.push({
+        sql: "UPDATE invite_codes SET used_by = (SELECT id FROM users WHERE username = ?), used_at = ? WHERE code = ? AND used_by IS NULL",
+        params: [username, now, inviteCode],
+      });
     }
-    await db.run(
-      "INSERT INTO pots (user_id, name, pot_group, target_type, target_cents) VALUES (?, 'Uncategorized', 'General', 'fixed', 0)",
-      userId
-    );
+    stmts.push({
+      sql: "INSERT INTO pots (user_id, name, pot_group, target_type, target_cents) VALUES ((SELECT id FROM users WHERE username = ?), 'Uncategorized', 'General', 'fixed', 0)",
+      params: [username],
+    });
+    let results: BatchResult[];
+    try {
+      results = await db.batch(stmts);
+    } catch (e) {
+      // The batch is atomic: a UNIQUE violation on the username rolls the
+      // whole batch back, so the invite code stays unused and the client can
+      // retry with another name. Anything else is a server error.
+      // (Review L1, accepted risk: learning that a username is taken
+      // requires a valid unused invite code — or the bootstrap window —
+      // and is per-IP rate-limited.)
+      if (/UNIQUE constraint failed/i.test(e instanceof Error ? e.message : "")) {
+        return c.json({ error: "that username is taken" }, 400);
+      }
+      throw e;
+    }
+    const userId = results[0].lastRowId;
+    if (inviteCode && results[1].changes === 0) {
+      // Lost the claim race: the batch committed a user row whose code claim
+      // hit an already-used code. Delete the orphan; the code belongs to the
+      // winner.
+      await db.run("DELETE FROM users WHERE id = ?", userId);
+      return c.json({ error: "invalid or already-used invite code" }, 400);
+    }
     // Signup logs the user straight in: same session cookie as login, so the
     // client lands in the app instead of bouncing back to the login form.
     const token = await mintSession(config.kv, userId, username);
@@ -389,13 +412,17 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
     return c.json({ ok: true, id: row!.id, token });
   });
 
-  /** Revoke one of the user's agent tokens. */
+  /** Revoke one of the user's agent tokens. The id is validated as pure
+   *  digits before parsing: parseInt would silently accept "12abc" as 12
+   *  (review L5). */
   app.delete("/api/auth/agent-tokens/:id", async (c) => {
     const db = await getDb();
     const identity = await identifyRequest(c, config, db);
     if (!identity || identity.kind !== "user") return c.json({ error: "unauthorized" }, 401);
-    const tokenId = parseInt(c.req.param("id"), 10);
-    if (!Number.isInteger(tokenId) || tokenId <= 0) return c.json({ error: "bad token id" }, 400);
+    const idParam = c.req.param("id");
+    if (!/^\d+$/.test(idParam)) return c.json({ error: "bad token id" }, 400);
+    const tokenId = parseInt(idParam, 10);
+    if (tokenId <= 0) return c.json({ error: "bad token id" }, 400);
     const r = await db.run("DELETE FROM agent_tokens WHERE id = ? AND user_id = ?", tokenId, identity.userId);
     if (r.changes === 0) return c.json({ error: "no such token" }, 404);
     return c.json({ ok: true });

@@ -306,6 +306,32 @@ describe("auth endpoints", () => {
     expect(((await db.get("SELECT used_by FROM invite_codes WHERE code = ?", fresh)) as any).used_by).toBeNull();
   });
 
+  test("a mid-signup pot failure rolls back the user row and the code claim", async () => {
+    const { app, db } = await setupApp();
+    await signupFirst(app);
+    const cookie = await loginAs(app);
+    const code = await mintInvite(app, cookie);
+    const usersBefore = ((await db.get("SELECT COUNT(*) AS n FROM users")) as any).n;
+    // Simulate the L4 failure: the Uncategorized-pot insert aborts.
+    await db.exec(
+      "CREATE TRIGGER abort_pot BEFORE INSERT ON pots BEGIN SELECT RAISE(ABORT, 'boom'); END;"
+    );
+    const r = await jsonCall(app, "POST", "/api/auth/signup", {
+      body: { username: "second", salt: SALT, kdfKey: KDF_KEY, inviteCode: code },
+    });
+    expect(r.status).toBe(500);
+    // Atomic batch: no orphaned user row, and the code is still unused.
+    expect(((await db.get("SELECT COUNT(*) AS n FROM users")) as any).n).toBe(usersBefore);
+    expect(((await db.get("SELECT used_by FROM invite_codes WHERE code = ?", code)) as any).used_by).toBeNull();
+    // Without the trigger the same signup succeeds and consumes the code.
+    await db.exec("DROP TRIGGER abort_pot");
+    const ok = await jsonCall(app, "POST", "/api/auth/signup", {
+      body: { username: "second", salt: SALT, kdfKey: KDF_KEY, inviteCode: code },
+    });
+    expect(ok.status).toBe(200);
+    expect(((await db.get("SELECT used_by FROM invite_codes WHERE code = ?", code)) as any).used_by).not.toBeNull();
+  });
+
   test("sixth rapid signup attempt is rate-limited", async () => {
     const { app } = await setupApp();
     await signupFirst(app);

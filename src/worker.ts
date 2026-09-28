@@ -5,7 +5,7 @@
  *
  *  Worker-safe: imports only ./app (hono + type-only db-interface + domain
  *  modules) and ./db-interface. Never imports ./server or ./db. */
-import type { Db, DbValue, RunResult } from "./db-interface";
+import type { Db, DbValue, RunResult, BatchStatement, BatchResult } from "./db-interface";
 import { createApp } from "./app";
 
 /* Minimal Cloudflare binding shapes, declared locally so this file needs no
@@ -19,6 +19,7 @@ interface D1PreparedStatement {
 interface D1Database {
   prepare(sql: string): D1PreparedStatement;
   exec(sql: string): Promise<unknown>;
+  batch(stmts: D1PreparedStatement[]): Promise<Array<{ meta: { changes?: number; last_row_id?: number | string } }>>;
 }
 
 /* Minimal KV binding shape, declared locally so this file needs no
@@ -67,6 +68,14 @@ class D1Db implements Db {
   async exec(sql: string): Promise<void> {
     // Multi-statement exec on D1 is atomic (proven in the Phase 1 spike).
     await this.db.exec(sql);
+  }
+
+  async batch(stmts: BatchStatement[]): Promise<BatchResult[]> {
+    // D1 executes the whole list atomically: any statement failure rolls
+    // every statement back. Statements cannot reference each other's
+    // results, so callers use subqueries (see the signup handler).
+    const rs = await this.db.batch(stmts.map((s) => this.db.prepare(s.sql).bind(...s.params.map(bindable))));
+    return rs.map((r) => ({ changes: r.meta.changes ?? 0, lastRowId: Number(r.meta.last_row_id ?? 0) }));
   }
 }
 

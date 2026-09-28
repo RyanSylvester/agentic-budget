@@ -15,6 +15,18 @@ export interface RunResult {
   lastRowId: number;
 }
 
+/** One statement inside a batch: SQL plus its bound parameters. */
+export interface BatchStatement {
+  sql: string;
+  params: DbValue[];
+}
+
+/** Per-statement outcome of a batch, in statement order. */
+export interface BatchResult {
+  changes: number;
+  lastRowId: number;
+}
+
 export interface Db {
   /** First row of the query, or null when it returns no rows. */
   get<T = any>(sql: string, ...params: DbValue[]): Promise<T | null>;
@@ -24,6 +36,12 @@ export interface Db {
   run(sql: string, ...params: DbValue[]): Promise<RunResult>;
   /** One or more statements with no parameters (schema, PRAGMA). */
   exec(sql: string): Promise<void>;
+  /** Atomic multi-statement write: every statement commits or none does.
+   *  D1 executes this natively; the Bun adapter wraps it in a transaction.
+   *  Statements cannot reference each other's results: use subqueries
+   *  (e.g. on a UNIQUE column) when a later statement needs an id produced
+   *  by an earlier one. */
+  batch(stmts: BatchStatement[]): Promise<BatchResult[]>;
 }
 
 /** Portable schema-introspection helper: pure SQL over the Db interface, so

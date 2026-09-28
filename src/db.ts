@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Db, DbValue, RunResult } from "./db-interface";
+import type { Db, DbValue, RunResult, BatchStatement, BatchResult } from "./db-interface";
 import { tableExists } from "./db-interface";
 import { runMigrations } from "./migrations";
 
@@ -33,6 +33,28 @@ export class BunDb implements Db {
     // too (D1 is atomic per the Phase 1 spike). No caller passes its own
     // BEGIN/COMMIT, so wrapping unconditionally is safe.
     this.raw.exec(`BEGIN; ${sql}; COMMIT;`);
+  }
+
+  async batch(stmts: BatchStatement[]): Promise<BatchResult[]> {
+    // D1 executes batch() natively; here we emulate it with an explicit
+    // transaction so a mid-batch failure rolls every statement back.
+    const results: BatchResult[] = [];
+    this.raw.exec("BEGIN");
+    try {
+      for (const s of stmts) {
+        const r = this.raw.query(s.sql).run(...s.params);
+        results.push({ changes: Number(r.changes), lastRowId: Number(r.lastInsertRowid) });
+      }
+      this.raw.exec("COMMIT");
+    } catch (e) {
+      try {
+        this.raw.exec("ROLLBACK");
+      } catch {
+        // Already rolled back (e.g. a trigger ABORT): nothing to undo.
+      }
+      throw e;
+    }
+    return results;
   }
 }
 
