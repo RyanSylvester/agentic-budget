@@ -2319,6 +2319,15 @@ const TABS: { id: Tab; label: string }[] = [
 
 const tabLabel = (id: Tab) => TABS.find((t) => t.id === id)?.label ?? id;
 
+const TAB_IDS: Tab[] = TABS.map((t) => t.id);
+
+/* Read the initial tab from the URL (?tab=pots). Missing or unknown values
+ * fall back to overview, so a bare URL always opens on the home tab. */
+export function tabFromUrl(search: string = window.location.search): Tab {
+  const raw = new URLSearchParams(search).get("tab");
+  return TAB_IDS.includes(raw as Tab) ? (raw as Tab) : "overview";
+}
+
 const MONTH_TABS: Tab[] = ["overview", "pots", "transactions"];
 
 /* Icon-only mobile tab bar: one clean inline SVG per tab, no icon library.
@@ -2407,10 +2416,18 @@ export function MobileTabBar({ tab, onGo, closeAlert }: { tab: Tab; onGo: (t: Ta
 }
 
 export function AppShell() {
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>(tabFromUrl);
   const [refreshKey, setRefreshKey] = useState(0);
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const { data: attention } = useApi<Attention>("/api/attention");
+
+  // Keep the tab in the URL (?tab=pots) so a refresh lands back on the
+  // current tab, and browser back/forward moves between tabs.
+  useEffect(() => {
+    const onPopState = () => setTab(tabFromUrl());
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   // Near month-end with money still unassigned, the Pots tab earns a dot:
   // the close card now lives there.
@@ -2420,6 +2437,9 @@ export function AppShell() {
 
   const go = (t: Tab) => {
     setTab(t);
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", t);
+    window.history.pushState(null, "", url);
     window.scrollTo(0, 0);
   };
 

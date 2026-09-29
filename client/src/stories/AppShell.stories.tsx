@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { userEvent, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 import { AppShell } from "../App";
 import {
   fixtureAccounts,
@@ -96,5 +96,37 @@ export const Accounts: Story = {
   play: async ({ canvasElement }) => {
     await goToTab(canvasElement, "Accounts");
     await within(canvasElement).findByText("Mock Credit Card");
+  },
+};
+
+export const DeepLinkedTab: Story = {
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "Opening the app with ?tab=sharing lands on the Sharing tab instead of Overview, and switching tabs writes the new tab back to the URL. (Interaction test.)",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const original = window.location.href;
+    try {
+      // Simulate arriving with ?tab=sharing in the URL, the way a refresh
+      // or a shared link would.
+      const deep = new URL(original);
+      deep.searchParams.set("tab", "sharing");
+      window.history.replaceState(null, "", deep);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      await within(canvasElement).findByText("Alex");
+
+      // Switching tabs writes the new tab back to the URL.
+      await goToTab(canvasElement, "Pots");
+      await within(canvasElement).findByText("Rent share");
+      expect(new URLSearchParams(window.location.search).get("tab")).toBe("pots");
+    } finally {
+      // Clean up so other stories still open on Overview.
+      window.history.replaceState(null, "", original);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }
   },
 };
