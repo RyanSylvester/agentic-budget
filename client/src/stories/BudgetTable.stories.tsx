@@ -29,7 +29,7 @@ export const Full: Story = {
     docs: {
       description: {
         story:
-          "Group containers with summed totals, 50% and contact-share tags, an overspent pot (red Available), income section at the bottom.",
+          "Group containers with summed totals, each header showing its share of total spend next to the spent figure (66/28/6/0 here), 50% and contact-share tags, an overspent pot (red Available), income section at the bottom.",
       },
     },
   },
@@ -97,5 +97,60 @@ export const SinglePot: Story = {
   },
   parameters: {
     docs: { description: { story: "A single pot row: Assigned, Spent, Available with an inline editor." } },
+  },
+};
+
+export const ShareOfSpend: Story = {
+  args: { pots: fixturePots },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "Each group header shows its share of total spend next to the spent figure: Joint Living 66%, Food 28%, Transport 6%, Savings 0%. Income pots never count toward the total. (Interaction test: asserts the rendered percentages.)",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(within(canvas.getByRole("button", { name: /Joint Living/ })).getByText("· 66%")).toBeInTheDocument();
+    await expect(within(canvas.getByRole("button", { name: /Food/ })).getByText("· 28%")).toBeInTheDocument();
+    await expect(within(canvas.getByRole("button", { name: /Transport/ })).getByText("· 6%")).toBeInTheDocument();
+    await expect(within(canvas.getByRole("button", { name: /Savings/ })).getByText("· 0%")).toBeInTheDocument();
+  },
+};
+
+export const ShareOfSpendEdges: Story = {
+  args: {
+    pots: [
+      makePot({ name: "Rent", group: "Housing", spentCents: 200000, assignedCents: 200000 }),
+      makePot({ name: "Gum", group: "Tiny", spentCents: 50, assignedCents: 100 }),
+      makePot({ name: "Buffer", group: "Savings", spentCents: 0, assignedCents: 50000 }),
+    ],
+  },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "Edge cases: a nonzero sliver of total spend reads <1%, a group with no spend reads 0%. When nothing was spent at all, no percentage is shown. (Interaction test: asserts the edge-case labels.)",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(within(canvas.getByRole("button", { name: /Housing/ })).getByText("· 100%")).toBeInTheDocument();
+    await expect(within(canvas.getByRole("button", { name: /Tiny/ })).getByText("· <1%")).toBeInTheDocument();
+    await expect(within(canvas.getByRole("button", { name: /Savings/ })).getByText("· 0%")).toBeInTheDocument();
+  },
+};
+
+export const ShareOfSpendNone: Story = {
+  args: { pots: [makePot({ name: "Buffer", group: "Savings", spentCents: 0, assignedCents: 50000 })] },
+  parameters: {
+    docs: { description: { story: "With no spend in the month, group headers show no percentage at all." } },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const header = canvas.getByRole("button", { name: /Savings/ });
+    await expect(within(header).queryByText(/·/)).toBeNull();
   },
 };

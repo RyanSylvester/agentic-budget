@@ -3,7 +3,7 @@ import { LoginScreen, SignupScreen } from "./AuthScreens";
 import { SettingsTab } from "./SettingsTab";
 import { useApi, prime } from "./api";
 import { MoneyInput } from "./MoneyInput";
-import { expressionToCents, evaluateExpression } from "./money";
+import { expressionToCents, evaluateExpression, spendShareLabel } from "./money";
 
 /* ---------- types ---------- */
 
@@ -450,6 +450,9 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
   }
 
   const sum = (ps: Pot[], f: (p: Pot) => number) => ps.reduce((a, p) => a + f(p), 0);
+  // Share-of-spend percentages in group headers use earners only, matching
+  // the grouping above; income pots never count toward the total.
+  const totalSpent = sum(earners, (p) => p.spentCents);
 
   return (
     <div>
@@ -482,6 +485,11 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
                 <span className="t-nums text-[14px] text-[var(--ink-2)]">
                   <span className="mr-1.5 text-[12px] text-[var(--muted)]">spent</span>
                   {money(spent)}
+                  {totalSpent > 0 && (
+                    <span className="ml-1.5 text-[12px] text-[var(--muted)]">
+                      · {spendShareLabel(spent, totalSpent)}
+                    </span>
+                  )}
                 </span>
                 <Available assignedCents={assigned} spentCents={spent} className="text-[14px]" />
               </span>
