@@ -16,7 +16,7 @@ const meta: Meta<typeof AssignCell> = {
     docs: {
       description: {
         component:
-          "The inline editor inside the Assigned column. Click a value to type a new one; Enter commits, Escape cancels.",
+          "The inline editor inside the Assigned column. Click a value to type a new one; Enter commits, Escape cancels. Opening the editor fetches last month's assignment and the 3-month average as one-tap quick-fills, and the field accepts math (25+30) with a live result hint.",
       },
     },
   },
@@ -100,5 +100,37 @@ export const EscapeCancels: Story = {
     await userEvent.keyboard("{Escape}");
     await expect(canvas.queryByLabelText("Assign money to Groceries")).toBeNull();
     await expect(args.onAssigned).not.toHaveBeenCalled();
+  },
+};
+
+export const QuickFill: Story = {
+  args: {
+    pot: makePot({ id: 7, name: "Groceries", assignedCents: 0 }),
+  },
+  parameters: {
+    mockApi: {
+      get: {
+        "/api/pots/7/assign-history?month=2026-09": {
+          potId: 7,
+          month: "2026-09",
+          lastMonth: { month: "2026-08", cents: 75000 },
+          avg3moCents: 80000,
+        },
+      },
+    } satisfies MockApiConfig,
+    docs: {
+      description: {
+        story:
+          "Opening the editor fetches last month's assignment and the 3-month average; either button fills the field. (Interaction test.)",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: /Assign to Groceries/ }));
+    const fill = await canvas.findByRole("button", { name: /3-mo avg/ });
+    await userEvent.click(fill);
+    const input = canvas.getByLabelText("Assign money to Groceries") as HTMLInputElement;
+    expect(input.value).toBe("800.00");
   },
 };

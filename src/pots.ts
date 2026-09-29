@@ -240,15 +240,23 @@ export interface PotDeleteSummary {
   movedAssignments: number;
 }
 
-/** The catch-all pot for a user's deleted pots' history. Created on demand. */
+/** The catch-all pot for a user's deleted pots' history. Created on demand.
+ *  It lands in the user's most-used group (never a hardcoded "General"),
+ *  so no stray group section appears from a pot the user never placed. */
 export async function uncategorizedPotId(db: Db, userId: number): Promise<number> {
   const found = await db.get<{ id: number }>("SELECT id FROM pots WHERE user_id = ? AND name = 'Uncategorized' AND hidden = 0", userId);
   if (found) return found.id;
-  const row = await db.get<{ id: number }>(
-    `INSERT INTO pots (user_id, name, pot_group, target_type, target_cents) VALUES (?, 'Uncategorized', 'General', 'fixed', 0) RETURNING id`,
+  const common = await db.get<{ pot_group: string }>(
+    `SELECT pot_group FROM pots WHERE user_id = ? AND hidden = 0
+     GROUP BY pot_group ORDER BY COUNT(*) DESC LIMIT 1`,
     userId
   );
-  await ensureGroupOrderRow(db, userId, "General");
+  const group = common?.pot_group ?? "General";
+  const row = await db.get<{ id: number }>(
+    `INSERT INTO pots (user_id, name, pot_group, target_type, target_cents) VALUES (?, 'Uncategorized', ?, 'average_3mo', 0) RETURNING id`,
+    userId, group
+  );
+  await ensureGroupOrderRow(db, userId, group);
   return row!.id;
 }
 

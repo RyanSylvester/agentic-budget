@@ -53,8 +53,7 @@ describe("pot management", () => {
     await expect(updatePot(db, 1, 4242, { name: "x" })).rejects.toThrow("no pot 4242");
   });
 
-  test("delete moves transactions, splits, and assignments to Uncategorized", async () => {
-    const db = await seed();
+  test("delete moves transactions, splits, and assignments to Uncategorized", async () => {    const db = await seed();
     const id = await createPot(db, 1, { name: "Dining out", group: "Food", targetCents: 60000 });
     await db.run("INSERT INTO transactions (user_id, date, account_id, pot_id, amount_cents, description, source, entered_by, cleared) VALUES (1, '2026-09-10', 1, ?, -5000, 'dinner', 'manual', 'agent', 'cleared')", id);
     const t = (await db.get<{ id: number }>("SELECT id FROM transactions WHERE pot_id = ?", id))!;
@@ -71,7 +70,9 @@ describe("pot management", () => {
     expect(await db.get("SELECT cents FROM assignments WHERE month = '2026-09' AND pot_id = ?", uncat) as any).toEqual({ cents: 60000 });
     expect(await db.get("SELECT COUNT(*) AS n FROM pots WHERE id = ?", id) as any).toEqual({ n: 0 });
     const uncatRow = await db.get("SELECT name, pot_group FROM pots WHERE id = ?", uncat) as any;
-    expect(uncatRow).toEqual({ name: "Uncategorized", pot_group: "General" });
+    // The deleted pot was the only pot, so Uncategorized took its group ("Food")
+    // instead of a hardcoded "General".
+    expect(uncatRow).toEqual({ name: "Uncategorized", pot_group: "Food" });
   });
 
   test("delete merges assignments when Uncategorized already has some", async () => {
@@ -88,5 +89,23 @@ describe("pot management", () => {
     const db = await seed();
     await expect(deletePot(db, 1, await uncategorizedPotId(db, 1))).rejects.toThrow("cannot be deleted");
     await expect(deletePot(db, 1, 4242)).rejects.toThrow("no pot 4242");
+  });
+
+  test("Uncategorized lands in the user's most-used group, not a hardcoded General", async () => {
+    const db = await seed();
+    await createPot(db, 1, { name: "Rent", group: "Home" });
+    await createPot(db, 1, { name: "Mortgage", group: "Home" });
+    await createPot(db, 1, { name: "Coffee", group: "Food" });
+    const id = await uncategorizedPotId(db, 1);
+    const p = await db.get("SELECT pot_group, target_type FROM pots WHERE id = ?", id) as any;
+    expect(p.pot_group).toBe("Home");
+    expect(p.target_type).toBe("average_3mo");
+  });
+
+  test("Uncategorized falls back to General only when the user has no other pots", async () => {
+    const db = await seed();
+    const id = await uncategorizedPotId(db, 1);
+    const p = await db.get("SELECT pot_group FROM pots WHERE id = ?", id) as any;
+    expect(p.pot_group).toBe("General");
   });
 });

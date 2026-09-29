@@ -142,11 +142,13 @@ describe("setGroupOrder", () => {
     ]);
   });
 
-  test("deleting the last pot of a group prunes it", async () => {
+  test("deleting the last pot of a group prunes it without conjuring a General group", async () => {
     const db = await dbWithGroups();
     const p2 = (await db.get<{ id: number }>("SELECT id FROM pots WHERE name = 'P2'"))!.id;
     await deletePot(db, 1, p2);
-    expect((await orderRows(db)).map(([g]) => g).sort()).toEqual(["General", "Juniper", "Zebra"]);
+    // Quilt is gone, and the on-demand Uncategorized pot landed in an
+    // existing group instead of inventing a "General" one.
+    expect((await orderRows(db)).map(([g]) => g).sort()).toEqual(["Juniper", "Zebra"]);
   });
 });
 

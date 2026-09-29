@@ -14,8 +14,8 @@ import { applySettlement, contactCredit, contactOwed, allContactCredit } from ".
 import { contactBalances, createContact, renameContact, deleteContact } from "./contacts";
 import { createPot, updatePot, deletePot, potExists, setGroupOrder } from "./pots";
 import { reconcile, suggestClear } from "./reconcile";
-import { closePreview, applyClose } from "./close";
-import { assignToPot, allPotAssigned } from "./assign";
+import { closePreview, applyClose, shiftMonth } from "./close";
+import { assignToPot, allPotAssigned, allPotAssignedMonths } from "./assign";
 import { scaffoldMonth, type ScaffoldStrategy } from "./scaffold";
 import { createTransaction, updateTransaction } from "./transactions";
 import { createSchedule, getScheduleById, listSchedules, markPaid, removeSchedule, sinkingStatuses } from "./sinking";
@@ -158,6 +158,24 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }
+  });
+
+  /** Per-pot assignment history for the Assigned quick-fill: last month's
+   *  assigned and the 3-month average before ?month. One GROUP BY query. */
+  app.get("/api/pots/:id/assign-history", async (c) => {
+    const db = await getDb();
+    const userId = await requestReaderId(c, db, authed);
+    const id = badId(c, "id");
+    if (id === null) return c.json({ error: "bad pot id" }, 400);
+    if (!(await potExists(db, userId, id))) return c.json({ error: `no pot ${id}` }, 404);
+    const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
+    if (!validMonth(month)) return c.json({ error: `bad month "${month}"` }, 400);
+    const prev = [shiftMonth(month, -3), shiftMonth(month, -2), shiftMonth(month, -1)];
+    const byPot = await allPotAssignedMonths(db, userId, prev, [id]);
+    const byMonth = byPot.get(id) ?? new Map<string, number>();
+    const lastCents = byMonth.get(prev[2]) ?? 0;
+    const avg3moCents = Math.round(prev.reduce((s, m) => s + (byMonth.get(m) ?? 0), 0) / 3);
+    return c.json({ potId: id, month, lastMonth: { month: prev[2], cents: lastCents }, avg3moCents });
   });
 
   /** Sinking schedules (agent-managed; the UI only reads). Query param month

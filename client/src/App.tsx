@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { LoginScreen, SignupScreen } from "./AuthScreens";
 import { SettingsTab } from "./SettingsTab";
-import { useApi } from "./api";
+import { useApi, prime } from "./api";
+import { MoneyInput } from "./MoneyInput";
+import { expressionToCents, evaluateExpression } from "./money";
 
 /* ---------- types ---------- */
 
@@ -245,13 +247,30 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
   const [editing, setEditing] = useState(false);
   const [amt, setAmt] = useState("");
   const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [hist, setHist] = useState<{ lastMonth: { month: string; cents: number }; avg3moCents: number } | null>(null);
+
+  // Fetch last-month / 3-month-average assignments when the editor opens,
+  // for the quick-fill buttons. One cheap GROUP BY query.
+  useEffect(() => {
+    if (!editing) return;
+    setHist(null);
+    fetch(`/api/pots/${pot.id}/assign-history?month=${month}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((h) => {
+        if (h) setHist(h);
+      })
+      .catch(() => {});
+  }, [editing, pot.id, month]);
 
   const commit = async () => {
-    const cents = Math.round(parseFloat(amt) * 100);
-    if (!Number.isFinite(cents) || cents < 0 || busy) return;
+    const cents = expressionToCents(amt);
+    if (cents === null || busy) {
+      if (!busy) setFailed("Enter a number, or math like 25+30.");
+      return;
+    }
     setBusy(true);
-    setFailed(false);
+    setFailed(null);
     try {
       const r = await fetch("/api/assign", {
         method: "POST",
@@ -263,7 +282,7 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
       setAmt("");
       onAssigned();
     } catch {
-      setFailed(true);
+      setFailed("Couldn't save.");
     }
     setBusy(false);
   };
@@ -282,31 +301,53 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
       </button>
     );
   }
+  const showQuick = hist !== null && (hist.lastMonth.cents > 0 || hist.avg3moCents > 0);
   return (
-    <span className="inline-flex items-center gap-2">
-      <input
-        autoFocus
-        type="text"
-        inputMode="decimal"
-        aria-label={purpose === "planned" ? `Planned income for ${pot.name}` : `Assign money to ${pot.name}`}
-        value={amt}
-        onChange={(e) => setAmt(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commit();
-          if (e.key === "Escape") {
-            setEditing(false);
-            setFailed(false);
-          }
-        }}
-        onBlur={() => {
-          if (!busy) {
-            setEditing(false);
-            setFailed(false);
-          }
-        }}
-        className="field t-nums w-24 px-2 py-1.5 text-[15px]"
-      />
-      {failed && <span className="text-[13px] text-[var(--danger)]">Couldn't save.</span>}
+    <span className="inline-flex flex-col items-start gap-1.5">
+      <span className="inline-flex items-center gap-2">
+        <MoneyInput
+          autoFocus
+          ariaLabel={purpose === "planned" ? `Planned income for ${pot.name}` : `Assign money to ${pot.name}`}
+          value={amt}
+          onChange={(v) => {
+            setAmt(v);
+            setFailed(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit();
+            if (e.key === "Escape") {
+              setEditing(false);
+              setFailed(null);
+            }
+          }}
+          onBlur={() => {
+            if (!busy) {
+              setEditing(false);
+              setFailed(null);
+            }
+          }}
+          className="w-24 py-1.5 text-[15px]"
+        />
+        {failed && <span className="text-[13px] text-[var(--danger)]">{failed}</span>}
+      </span>
+      {showQuick && (
+        <span className="flex gap-1.5">
+          <button
+            type="button"
+            onClick={() => setAmt((hist.lastMonth.cents / 100).toFixed(2))}
+            className="t-nums rounded-full border border-[var(--hairline-strong)] px-2 py-0.5 text-[12px] text-[var(--ink-2)] transition hover:bg-[var(--bg-sunken)] active:scale-95"
+          >
+            Last month · {money(hist.lastMonth.cents)}
+          </button>
+          <button
+            type="button"
+            onClick={() => setAmt((hist.avg3moCents / 100).toFixed(2))}
+            className="t-nums rounded-full border border-[var(--hairline-strong)] px-2 py-0.5 text-[12px] text-[var(--ink-2)] transition hover:bg-[var(--bg-sunken)] active:scale-95"
+          >
+            3-mo avg · {money(hist.avg3moCents)}
+          </button>
+        </span>
+      )}
     </span>
   );
 }
@@ -350,13 +391,7 @@ export function PotNameCell({ p, onEdit }: { p: Pot; onEdit?: () => void }) {
           </button>
         )}
       </div>
-      {p.sinking ? (
-        <SinkingLine sinking={p.sinking} />
-      ) : (
-        p.targetCents > 0 && (
-          <div className="mt-0.5 text-[12px] text-[var(--muted)]">target {money(p.targetCents)}</div>
-        )
-      )}
+      {p.sinking && <SinkingLine sinking={p.sinking} />}
     </div>
   );
 }
@@ -637,7 +672,7 @@ export function CloseSummaryCard({ month, onClosed }: { month: string; onClosed:
             confirming ? (
               <div>
                 <p className="text-[14px] text-[var(--ink-2)]">
-                  Close {monthLabel(month)}? This records the close and sets next month's pot targets.
+                  Close {monthLabel(month)}? This records the close and sets next month's fill amounts.
                 </p>
                 <div className="mt-3 flex gap-2">
                   <button
@@ -797,8 +832,8 @@ export function ContactCard({ contact, accounts }: { contact: ContactBalance; ac
   const dest = accounts.find((a) => a.type === "chequing") ?? accounts[0] ?? null;
 
   const settle = async () => {
-    const cents = Math.round(parseFloat(amount) * 100);
-    if (!cents || cents <= 0 || busy || !dest) return;
+    const cents = expressionToCents(amount);
+    if (cents === null || cents <= 0 || busy || !dest) return;
     setBusy(true);
     setSettleError(false);
     try {
@@ -847,17 +882,15 @@ export function ContactCard({ contact, accounts }: { contact: ContactBalance; ac
       <div className="mt-4">
         <div className="mb-2 text-[13px] font-medium text-[var(--ink-2)]">Record a payment</div>
         <div className="flex gap-2">
-          <input
-            type="text"
-            inputMode="decimal"
+          <MoneyInput
             placeholder="Amount received"
-            aria-label="Payment amount received"
+            ariaLabel="Payment amount received"
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
+            onChange={setAmount}
             onKeyDown={(e) => {
               if (e.key === "Enter") settle();
             }}
-            className="field t-nums w-44 px-3 py-2 text-[15px]"
+            className="w-44 py-2 text-[15px]"
           />
           <button onClick={settle} disabled={busy || !dest} className="btn-ink px-4 py-2 text-[15px]">
             {busy ? "Settling…" : "Settle up"}
@@ -890,9 +923,9 @@ export function ContactCard({ contact, accounts }: { contact: ContactBalance; ac
 
 /* ---------- tabs: pots / close / sharing ---------- */
 
-/* Add or edit a pot: name, group, target, and who it's shared with (which
- *  contact and their percentage). Deleting moves the pot's history to the
- *  Uncategorized pot instead of destroying it. */
+/* Add or edit a pot: name, group, next-month fill rule, and who it's shared
+ *  with (which contact and their percentage). Deleting moves the pot's
+ *  history to the Uncategorized pot instead of destroying it. */
 export function PotSheet({ pot, groups, onClose, onSaved }: {
   pot: Pot | null;
   groups: string[];
@@ -902,13 +935,16 @@ export function PotSheet({ pot, groups, onClose, onSaved }: {
   const { data: contactsData } = useApi<{ contacts: ContactBalance[] }>("/api/contacts");
   const contacts = contactsData?.contacts ?? [];
   const [name, setName] = useState(pot?.name ?? "");
-  const [group, setGroup] = useState(pot?.group ?? groups[0] ?? "");
+  // New pots start in the last-used group (remembered across sessions), so
+  // strays never land in a "General" bucket the user didn't ask for.
+  const [group, setGroup] = useState(
+    pot?.group ?? (typeof localStorage !== "undefined" ? localStorage.getItem("daybook:lastGroup") : null) ?? ""
+  );
   const [targetType, setTargetType] = useState<"fixed" | "average_3mo" | "savings">(
     pot && ["fixed", "average_3mo", "savings"].includes(pot.targetType)
       ? (pot.targetType as "fixed" | "average_3mo" | "savings")
-      : "fixed"
+      : "average_3mo"
   );
-  const [target, setTarget] = useState(pot ? String((pot.targetCents / 100).toFixed(2)) : "");
   const [shared, setShared] = useState(pot?.contactId != null);
   const [contactId, setContactId] = useState<string>(pot?.contactId != null ? String(pot.contactId) : "");
   const [sharePct, setSharePct] = useState<string>(pot?.sharePct != null ? String(pot.sharePct) : "50");
@@ -930,11 +966,14 @@ export function PotSheet({ pot, groups, onClose, onSaved }: {
     }
     setBusy(true);
     setError(null);
+    const finalGroup =
+      group.trim() || (typeof localStorage !== "undefined" ? localStorage.getItem("daybook:lastGroup") : null) || "General";
+    if (typeof localStorage !== "undefined") localStorage.setItem("daybook:lastGroup", finalGroup);
     const body = {
       name: n,
-      group: group.trim() || "General",
+      group: finalGroup,
       targetType,
-      targetCents: Math.round((parseFloat(target) || 0) * 100),
+      targetCents: pot ? pot.targetCents : 0,
       contactId: shared ? Number(contactId) : null,
       sharePct: shared ? pct : null,
     };
@@ -985,20 +1024,22 @@ export function PotSheet({ pot, groups, onClose, onSaved }: {
           </datalist>
         </div>
         <div>
-          <span className="mb-1.5 block text-[13px] font-medium text-[var(--ink-2)]">Target</span>
+          <span className="mb-1.5 block text-[13px] font-medium text-[var(--ink-2)]">Next month fills with</span>
           <Segmented
-            ariaLabel="Target type"
+            ariaLabel="Next month fill rule"
             value={targetType}
             onChange={setTargetType}
             options={[
-              { value: "fixed", label: "Fixed" },
-              { value: "average_3mo", label: "3-month avg" },
-              { value: "savings", label: "Savings" },
+              { value: "fixed", label: "Last month" },
+              { value: "average_3mo", label: "3-mo average" },
+              { value: "savings", label: "Leftovers" },
             ]}
           />
-          <input type="text" inputMode="decimal" value={target} onChange={(e) => setTarget(e.target.value)}
-            placeholder="0.00" aria-label="Target amount"
-            className="field t-nums mt-2 w-36 px-3 py-2 text-[15px]" />
+          <p className="mt-1.5 text-[12px] text-[var(--muted)]">
+            {targetType === "fixed" && "The bulk fill copies what you assigned last month."}
+            {targetType === "average_3mo" && "The bulk fill uses your 3-month average assignment."}
+            {targetType === "savings" && "Skipped by the bulk fill; only month-end leftovers land here."}
+          </p>
         </div>
         <div className="rounded-[var(--r-md)] bg-[var(--bg-sunken)] p-4">
           <label className="flex cursor-pointer items-center gap-2.5 text-[15px] font-medium">
@@ -1535,8 +1576,11 @@ export function AccountsView() {
   const load = () => retry();
 
   const reconcile = async (id: number) => {
-    const cents = Math.round(parseFloat(actual[id] ?? "NaN") * 100);
-    if (!Number.isFinite(cents)) return;
+    // Balances can be negative (credit cards), so evaluate directly instead
+    // of expressionToCents, which rejects negatives.
+    const dollars = evaluateExpression(actual[id] ?? "");
+    if (dollars === null) return;
+    const cents = Math.round(dollars * 100);
     const r = await fetch(`/api/accounts/${id}/reconcile`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1584,13 +1628,12 @@ export function AccountsView() {
             {a.lastReconciledAt ? ` · reconciled ${a.lastReconciledAt.slice(0, 10)}` : " · never reconciled"}
           </div>
           <div className="mt-4 flex gap-2">
-            <input
-              type="text"
-              inputMode="decimal"
+            <MoneyInput
               placeholder="Actual balance"
+              ariaLabel={`Actual balance for ${a.name}`}
               value={actual[a.id] ?? ""}
-              onChange={(e) => setActual((p) => ({ ...p, [a.id]: e.target.value }))}
-              className="field t-nums w-36 px-3 py-2 text-[15px]"
+              onChange={(v) => setActual((p) => ({ ...p, [a.id]: v }))}
+              className="w-36 py-2 text-[15px]"
             />
             <button onClick={() => reconcile(a.id)} className="btn-ink px-4 py-2 text-[15px]">
               Reconcile
@@ -1733,8 +1776,8 @@ export function TransactionSheet({ txn, pots, accounts, onClose, onSaved }: {
         if (cid != null) setContactId(String(cid));
       }
       if (!shareAmount) {
-        const cents = Math.round(parseFloat(amount) * 100);
-        if (Number.isFinite(cents) && cents > 0) {
+        const cents = expressionToCents(amount);
+        if (cents !== null && cents > 0) {
           const pct = pot?.sharePct ?? 50;
           setShareAmount(((cents * pct) / 100 / 100).toFixed(2));
         }
@@ -1743,12 +1786,12 @@ export function TransactionSheet({ txn, pots, accounts, onClose, onSaved }: {
   };
 
   const save = async () => {
-    const cents = Math.round(parseFloat(amount) * 100);
+    const cents = expressionToCents(amount);
     if (!description.trim()) {
       setError("Add a description.");
       return;
     }
-    if (!Number.isFinite(cents) || cents <= 0) {
+    if (cents === null || cents <= 0) {
       setError("Enter an amount greater than zero.");
       return;
     }
@@ -1767,11 +1810,12 @@ export function TransactionSheet({ txn, pots, accounts, onClose, onSaved }: {
     let sCents = 0;
     let sContactId: number | null = null;
     if (split && !isTransfer) {
-      sCents = Math.round(parseFloat(shareAmount) * 100);
-      if (!Number.isFinite(sCents) || sCents <= 0 || sCents >= cents) {
+      const parsed = expressionToCents(shareAmount);
+      if (parsed === null || parsed <= 0 || parsed >= cents) {
         setError("The contact's share must be less than the full amount.");
         return;
       }
+      sCents = parsed;
       sContactId = contactId ? Number(contactId) : null;
       if (!sContactId) {
         setError("Pick a contact to split with.");
@@ -1851,14 +1895,12 @@ export function TransactionSheet({ txn, pots, accounts, onClose, onSaved }: {
                 { value: "in", label: "In" },
               ]}
             />
-            <input
-              type="text"
-              inputMode="decimal"
+            <MoneyInput
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={setAmount}
               placeholder="0.00"
-              aria-label="Amount"
-              className="field t-nums min-w-0 flex-1 px-3 py-2.5 text-[15px]"
+              ariaLabel="Amount"
+              className="min-w-0 flex-1 py-2.5 text-[15px]"
             />
           </div>
         </div>
@@ -1959,14 +2001,12 @@ export function TransactionSheet({ txn, pots, accounts, onClose, onSaved }: {
                 </div>
                 <div>
                   <FormLabel>Their share</FormLabel>
-                  <input
-                    type="text"
-                    inputMode="decimal"
+                  <MoneyInput
                     value={shareAmount}
-                    onChange={(e) => setShareAmount(e.target.value)}
+                    onChange={setShareAmount}
                     placeholder="0.00"
-                    aria-label="Contact's share"
-                    className="field t-nums w-40 px-3 py-2.5 text-[15px]"
+                    ariaLabel="Contact's share"
+                    className="w-40 py-2.5 text-[15px]"
                   />
                 </div>
               </div>
@@ -2421,12 +2461,27 @@ export default function App() {
 
   const load = () => {
     setFailed(false);
+    // Warm the data cache in parallel with the auth check: the five hot
+    // endpoints start fetching before the shell even renders, so the first
+    // paint already has real data instead of skeletons popping in one by
+    // one. A failed prime is harmless; the tab's own fetch surfaces it.
+    const month = new Date().toISOString().slice(0, 7);
+    const primes = Promise.allSettled([
+      prime("/api/attention"),
+      prime(`/api/pots?month=${month}`),
+      prime("/api/accounts"),
+      prime(`/api/overview?month=${month}`),
+      prime("/api/trend"),
+    ]);
     fetch("/api/auth/me")
       .then(async (r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return (await r.json()) as AuthState;
       })
-      .then(setAuth)
+      .then(async (a) => {
+        await primes;
+        setAuth(a);
+      })
       .catch(() => setFailed(true));
   };
 

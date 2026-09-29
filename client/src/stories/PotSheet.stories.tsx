@@ -11,7 +11,7 @@ const meta: Meta<typeof PotSheet> = {
     docs: {
       description: {
         component:
-          "Add or edit a pot: name, group, target, and which contact it is shared with (and their percentage). Deleting moves the pot's history to Uncategorized instead of destroying it.",
+          "Add or edit a pot: name, group, the rule that fills it next month, and which contact it is shared with (and their percentage). New pots default to the last-used group and the 3-month-average fill rule. Deleting moves the pot's history to Uncategorized instead of destroying it.",
       },
     },
   },
@@ -32,7 +32,7 @@ export const EditShared: Story = {
   args: { pot: sharedPot, groups, onClose: () => {}, onSaved: () => {} },
   parameters: {
     mockApi: contactsApi,
-    docs: { description: { story: "Editing a shared pot: name, group, target, and the contact share config." } },
+    docs: { description: { story: "Editing a shared pot: name, group, fill rule, and the contact share config." } },
   },
 };
 
@@ -49,6 +49,23 @@ export const AddNew: Story = {
   parameters: {
     mockApi: contactsApi,
     docs: { description: { story: "Adding a pot from scratch; the share checkbox is off by default." } },
+  },
+};
+
+export const FillRuleLeftovers: Story = {
+  args: { pot: null, groups, onClose: () => {}, onSaved: () => {} },
+  parameters: {
+    mockApi: contactsApi,
+    docs: {
+      description: {
+        story: "The old fixed-dollar target is gone. The sheet now asks how next month's fill should be computed: last month's assignment, the 3-month average, or leftovers only (skipped by the bulk fill). (Interaction test.)",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: "Leftovers" }));
+    await canvas.findByText("Skipped by the bulk fill; only month-end leftovers land here.");
   },
 };
 

@@ -308,7 +308,7 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
       });
     }
     stmts.push({
-      sql: "INSERT INTO pots (user_id, name, pot_group, target_type, target_cents) VALUES ((SELECT id FROM users WHERE username = ?), 'Uncategorized', 'General', 'fixed', 0)",
+      sql: "INSERT INTO pots (user_id, name, pot_group, target_type, target_cents) VALUES ((SELECT id FROM users WHERE username = ?), 'Uncategorized', 'General', 'average_3mo', 0)",
       params: [username],
     });
     // The signup pot is the user's first group, so it takes position 0 in
