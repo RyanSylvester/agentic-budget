@@ -36,10 +36,10 @@ export function closeMonth(input: CloseInput): { rtaEndCents: number; movedToSav
 /* Live-data wiring: build the close preview from the database. */
 
 import type { Db } from "./db-interface";
-import { monthSpend, monthInflows, potSpend, assignedTotal, rtaCents } from "./queries";
+import { monthSpend, monthInflows, assignedTotal, rtaCents, allPotSpendHistory } from "./queries";
 import { contactOwed } from "./settle";
 import { fmtCents } from "./money";
-import { sinkingStatus } from "./sinking";
+import { sinkingStatuses } from "./sinking";
 
 /** Shift a YYYY-MM month by delta months. */
 export function shiftMonth(month: string, delta: number): string {
@@ -98,15 +98,30 @@ export async function closePreview(db: Db, userId: number, month: string): Promi
   );
 
   const nextMonth = shiftMonth(month, 1);
+  // Batched per-pot data: the 3-month spend history plus current-month spend
+  // in one GROUP BY (pot_id, month) query, and all sinking schedule states
+  // in one call. The old loop cost 4 potSpend queries + up to 3 sinking
+  // queries per pot; on D1 every round trip is an HTTPS request.
+  const potIds = pots.map((p) => p.id);
+  const histMonths = [shiftMonth(month, -3), shiftMonth(month, -2), shiftMonth(month, -1)];
+  const [spendHist, sinkingByPot] = await Promise.all([
+    allPotSpendHistory(db, userId, potIds, [...histMonths, month]),
+    sinkingStatuses(
+      db,
+      userId,
+      pots.filter((p) => p.is_assignable).map((p) => p.id),
+      nextMonth
+    ),
+  ]);
   const lines: PotCloseLine[] = [];
   for (const p of pots) {
-    const historyCents: number[] = [];
-    for (const i of [3, 2, 1]) historyCents.push((await potSpend(db, userId, p.id, shiftMonth(month, -i))).userCents);
-    const spentCents = (await potSpend(db, userId, p.id, month)).userCents;
+    const hist = spendHist.get(p.id);
+    const historyCents = histMonths.map((m) => hist?.get(m) ?? 0);
+    const spentCents = hist?.get(month) ?? 0;
     // Income-group pots receive money; they get no wireframe target.
     // Scheduled pots keep the schedule as source of truth: no target write,
     // and the preview shows the schedule's next-month contribution instead.
-    const sched = p.is_assignable ? await sinkingStatus(db, userId, p.id, nextMonth) : null;
+    const sched = p.is_assignable ? sinkingByPot.get(p.id) ?? null : null;
     const wireframeCents = sched
       ? sched.contributionCents
       : p.is_assignable
@@ -155,8 +170,18 @@ export async function applyClose(db: Db, userId: number, preview: ClosePreview):
     preview.rtaBeforeCents,
     preview.movedToSavingsCents
   );
-  for (const p of preview.pots) {
-    if (!p.assignable || p.wireframeSkipped) continue; // income pots get no wireframe target; scheduled pots keep the schedule
-    await db.run(`UPDATE pots SET target_cents = ? WHERE id = ? AND user_id = ?`, p.wireframeCents, p.potId, userId);
+  const targets = preview.pots.filter((p) => p.assignable && !p.wireframeSkipped);
+  // One UPDATE with CASE instead of one per pot: on D1 every round trip is
+  // an HTTPS request. Income pots get no wireframe target; scheduled pots
+  // keep the schedule.
+  if (targets.length > 0) {
+    const cases = targets.map(() => "WHEN ? THEN ?").join(" ");
+    const ids = targets.map(() => "?").join(",");
+    await db.run(
+      `UPDATE pots SET target_cents = CASE id ${cases} END WHERE id IN (${ids}) AND user_id = ?`,
+      ...targets.flatMap((p) => [p.potId, p.wireframeCents]),
+      ...targets.map((p) => p.potId),
+      userId
+    );
   }
 }

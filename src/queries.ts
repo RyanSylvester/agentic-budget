@@ -76,6 +76,44 @@ export async function allPotSpend(
   return out;
 }
 
+/** Batched multi-month user spend for many pots: one GROUP BY (pot_id,
+ *  month) query instead of one potSpend per pot per month. Powers the
+ *  close-preview history columns. Months with no rows are absent from the
+ *  inner map, so callers zero-fill in JS; filters match potSpend exactly. */
+export async function allPotSpendHistory(
+  db: Db,
+  userId: number,
+  potIds: number[],
+  months: string[]
+): Promise<Map<number, Map<string, number>>> {
+  const out = new Map<number, Map<string, number>>();
+  if (potIds.length === 0 || months.length === 0) return out;
+  const potPh = potIds.map(() => "?").join(",");
+  const monthPh = months.map(() => "?").join(",");
+  const rows = await db.all<{ potId: number; month: string; user: number }>(
+    `SELECT s.pot_id AS potId, substr(t.date, 1, 7) AS month,
+       COALESCE(SUM(CASE WHEN s.owner = 'user' THEN -s.amount_cents ELSE 0 END), 0) AS user
+     FROM splits s JOIN transactions t ON t.id = s.transaction_id
+     WHERE s.pot_id IN (${potPh}) AND substr(t.date, 1, 7) IN (${monthPh})
+       AND t.is_transfer = 0 AND t.voided = 0 AND s.amount_cents < 0
+       AND s.user_id = ? AND t.user_id = ?
+     GROUP BY s.pot_id, month`,
+    ...potIds,
+    ...months,
+    userId,
+    userId
+  );
+  for (const r of rows) {
+    let m = out.get(r.potId);
+    if (!m) {
+      m = new Map();
+      out.set(r.potId, m);
+    }
+    m.set(r.month, r.user);
+  }
+  return out;
+}
+
 /** Shift a YYYY-MM month back by n months. */
 function shiftBack(month: string, n: number): string {
   const [y, m] = month.split("-").map(Number);

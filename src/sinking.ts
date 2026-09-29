@@ -150,17 +150,85 @@ export function monthsUntil(from: string, due: string): number {
   return Math.max(1, (dy - fy) * 12 + (dm - fm));
 }
 
-/** The derived schedule state for a pot in a month. Null when the pot has
- *  no schedule. */
-export async function sinkingStatus(db: Db, userId: number, potId: number, month: string): Promise<SinkingStatus | null> {
-  const s = await getSchedule(db, userId, potId);
-  if (!s) return null;
+/** Batched pot balances: cumulative assigned minus cumulative user spend up
+ *  to and including `month`, for many pots at once. Two GROUP BY queries;
+ *  pots with no rows are absent from the map, so callers zero-fill in JS.
+ *  Filters match potBalance exactly. */
+export async function potBalances(
+  db: Db,
+  userId: number,
+  potIds: number[],
+  month: string
+): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  if (potIds.length === 0) return out;
+  const placeholders = potIds.map(() => "?").join(",");
+  const assigned = await db.all<{ potId: number; t: number }>(
+    `SELECT pot_id AS potId, COALESCE(SUM(cents), 0) AS t FROM assignments
+     WHERE pot_id IN (${placeholders}) AND month <= ? AND user_id = ?
+     GROUP BY pot_id`,
+    ...potIds,
+    month,
+    userId
+  );
+  const spent = await db.all<{ potId: number; t: number }>(
+    `SELECT s.pot_id AS potId, COALESCE(SUM(-s.amount_cents), 0) AS t
+     FROM splits s JOIN transactions t ON t.id = s.transaction_id
+     WHERE s.pot_id IN (${placeholders}) AND substr(t.date, 1, 7) <= ?
+       AND t.is_transfer = 0 AND t.voided = 0
+       AND s.owner = 'user' AND s.amount_cents < 0
+       AND s.user_id = ? AND t.user_id = ?
+     GROUP BY s.pot_id`,
+    ...potIds,
+    month,
+    userId,
+    userId
+  );
+  const spentByPot = new Map(spent.map((r) => [r.potId, r.t]));
+  for (const r of assigned) out.set(r.potId, r.t - (spentByPot.get(r.potId) ?? 0));
+  for (const r of spent) if (!out.has(r.potId)) out.set(r.potId, -(r.t));
+  return out;
+}
+
+/** Batched schedule states for many pots in a month: one schedule query plus
+ *  the two potBalances GROUP BYs, then the same pure derivation as
+ *  sinkingStatus. Pots without a schedule are absent from the map. On D1
+ *  every round trip is an HTTPS request, so this collapses the /api/pots
+ *  per-pot sinkingStatus loop (one pot = 2-3 queries) into 3 queries total. */
+export async function sinkingStatuses(
+  db: Db,
+  userId: number,
+  potIds: number[],
+  month: string
+): Promise<Map<number, SinkingStatus>> {
+  const out = new Map<number, SinkingStatus>();
   if (!validMonth(month)) throw new Error(`bad month "${month}"; expected YYYY-MM`);
-  const balanceCents = await potBalance(db, userId, potId, month);
+  if (potIds.length === 0) return out;
+  if (!(await tableExists(db, "sinking_schedules"))) return out;
+  const placeholders = potIds.map(() => "?").join(",");
+  const schedules = await db.all<SinkingSchedule>(
+    `${ROW} WHERE s.pot_id IN (${placeholders}) AND s.user_id = ? AND p.user_id = ?`,
+    ...potIds,
+    userId,
+    userId
+  );
+  const balances = await potBalances(db, userId, potIds, month);
+  for (const s of schedules) out.set(s.potId, deriveStatus(s, balances.get(s.potId) ?? 0, month));
+  return out;
+}
+
+/** The pure derivation shared by sinkingStatus and sinkingStatuses. */
+function deriveStatus(s: SinkingSchedule, balanceCents: number, month: string): SinkingStatus {
   const remainingCents = Math.max(0, s.expectedCents - balanceCents);
   const monthsLeft = monthsUntil(month, s.dueMonth);
   const contributionCents = remainingCents === 0 ? 0 : Math.ceil(remainingCents / monthsLeft);
   const state: SinkingState =
     balanceCents >= s.expectedCents ? "funded" : month >= s.dueMonth ? "overdue" : "funding";
   return { ...s, balanceCents, remainingCents, monthsLeft, contributionCents, state };
+}
+/** The derived schedule state for one pot in a month. Null when the pot has
+ *  no schedule. Thin wrapper over sinkingStatuses, kept for CLI and
+ *  single-pot callers. */
+export async function sinkingStatus(db: Db, userId: number, potId: number, month: string): Promise<SinkingStatus | null> {
+  return (await sinkingStatuses(db, userId, [potId], month)).get(potId) ?? null;
 }

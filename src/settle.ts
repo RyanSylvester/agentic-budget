@@ -155,12 +155,42 @@ export async function applySettlement(
     leftoverCents,
     opts.note ?? null
   );
-  for (const a of allocations) {
-    await db.run(`INSERT INTO settlement_allocations (user_id, settlement_id, split_id, amount_cents) VALUES (?, ?, ?, ?)`, userId, st!.id, a.splitId, a.amountCents);
+  // One multi-row INSERT instead of one per allocation.
+  if (allocations.length > 0) {
+    const values = allocations.map(() => "(?, ?, ?, ?)").join(",");
+    const params: DbValue[] = [];
+    for (const a of allocations) params.push(userId, st!.id, a.splitId, a.amountCents);
+    await db.run(
+      `INSERT INTO settlement_allocations (user_id, settlement_id, split_id, amount_cents) VALUES ${values}`,
+      ...params
+    );
   }
 
   await assertSplitsSum(db, userId, txn!.id);
   return { contactId: contact.id, contactName: contact.name, allocations, creditAllocations, creditConsumedCents, leftoverCents };
+}
+
+/** Batched per-contact credit: one GROUP BY query joining settlements to
+ *  their transactions' contact splits. Matches contactCredit(db, userId, id)
+ *  per contact (the DISTINCT keeps one settlement counted once per contact
+ *  even when the transaction has several splits for that contact, exactly
+ *  like the EXISTS in the single-contact version). Contacts with no credit
+ *  are absent from the map. */
+export async function allContactCredit(db: Db, userId: number): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  const rows = await db.all<{ contactId: number; total: number }>(
+    `SELECT sc.contact_id AS contactId, COALESCE(SUM(st.leftover_cents), 0) AS total
+     FROM settlements st
+     JOIN (SELECT DISTINCT transaction_id, contact_id FROM splits
+           WHERE owner = 'contact' AND user_id = ?) sc
+       ON sc.transaction_id = st.transaction_id
+     WHERE st.user_id = ?
+     GROUP BY sc.contact_id`,
+    userId,
+    userId
+  );
+  for (const r of rows) out.set(r.contactId, r.total);
+  return out;
 }
 
 /** Total credit from a contact's overpaid settlements not yet consumed.

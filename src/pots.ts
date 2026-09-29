@@ -135,9 +135,11 @@ export async function setGroupOrder(db: Db, userId: number, groups: unknown): Pr
   const ordered = [...clean];
   for (const e of existing) if (!ordered.includes(e.group_name)) ordered.push(e.group_name);
   await db.run("DELETE FROM group_order WHERE user_id = ?", userId);
-  for (let i = 0; i < ordered.length; i++) {
-    await db.run("INSERT INTO group_order (user_id, group_name, position) VALUES (?, ?, ?)", userId, ordered[i], i);
-  }
+  // One multi-row INSERT instead of one per group.
+  const values = ordered.map(() => "(?, ?, ?)").join(",");
+  const params: DbValue[] = [];
+  ordered.forEach((g, i) => params.push(userId, g, i));
+  await db.run(`INSERT INTO group_order (user_id, group_name, position) VALUES ${values}`, ...params);
   return ordered;
 }
 
@@ -263,17 +265,17 @@ export async function deletePot(db: Db, userId: number, id: number): Promise<Pot
   if (uncat === id) throw new Error("the Uncategorized pot cannot be deleted");
   const txns = await db.run("UPDATE transactions SET pot_id = ? WHERE pot_id = ? AND user_id = ?", uncat, id, userId);
   await db.run("UPDATE splits SET pot_id = ? WHERE pot_id = ? AND user_id = ?", uncat, id, userId);
-  const rows = await db.all<{ month: string; cents: number }>("SELECT month, cents FROM assignments WHERE pot_id = ? AND user_id = ?", id, userId);
-  for (const r of rows) {
-    await db.run(
-      `INSERT INTO assignments (user_id, month, pot_id, cents) VALUES (?, ?, ?, ?)
-       ON CONFLICT (user_id, month, pot_id) DO UPDATE SET cents = cents + excluded.cents`,
-      userId,
-      r.month,
-      uncat,
-      r.cents
-    );
-  }
+  // Move the pot's assignments to Uncategorized in one statement: the
+  // ON CONFLICT clause adds to any existing month row, exactly like the
+  // old per-month loop.
+  const moved = await db.run(
+    `INSERT INTO assignments (user_id, month, pot_id, cents)
+     SELECT user_id, month, ? AS pot_id, cents FROM assignments WHERE pot_id = ? AND user_id = ?
+     ON CONFLICT (user_id, month, pot_id) DO UPDATE SET cents = cents + excluded.cents`,
+    uncat,
+    id,
+    userId
+  );
   await db.run("DELETE FROM assignments WHERE pot_id = ? AND user_id = ?", id, userId);
   // A sinking schedule is configuration, not history: it goes with the pot.
   // (Guarded for hand-built databases that never ran migrations.)
@@ -282,5 +284,5 @@ export async function deletePot(db: Db, userId: number, id: number): Promise<Pot
   }
   await db.run("DELETE FROM pots WHERE id = ? AND user_id = ?", id, userId);
   await pruneEmptyGroup(db, userId, pot.pot_group);
-  return { uncategorizedPotId: uncat, movedTransactions: txns.changes, movedAssignments: rows.length };
+  return { uncategorizedPotId: uncat, movedTransactions: txns.changes, movedAssignments: moved.changes };
 }

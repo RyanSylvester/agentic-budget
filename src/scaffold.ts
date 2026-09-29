@@ -5,10 +5,10 @@
  *  is actively wrong for annual bills: ~$0 for 11 months, then a spike).
  *  Reuses assignToPot per pot, so all the usual validation applies. */
 import type { Db } from "./db-interface";
-import { assignToPot, assignedToPot } from "./assign";
+import { assignManyToPot, allPotAssignedMonths } from "./assign";
 import { shiftMonth } from "./close";
 import { validMonth } from "./money";
-import { sinkingStatus } from "./sinking";
+import { sinkingStatuses } from "./sinking";
 
 export type ScaffoldStrategy = "average_3mo" | "last_month";
 
@@ -44,33 +44,51 @@ export async function scaffoldMonth(
     userId
   );
 
+  // Batched per-pot reads: assigned totals for the three prior months in one
+  // GROUP BY query, and all sinking schedule states in one call. The old
+  // loop cost up to 4 assignedToPot queries + 3 sinking queries per pot;
+  // on D1 every round trip is an HTTPS request.
+  const potIds = pots.map((p) => p.id);
+  const prevMonths = [shiftMonth(month, -1), shiftMonth(month, -2), shiftMonth(month, -3)];
+  const [assignedHist, sinkingByPot] = await Promise.all([
+    allPotAssignedMonths(db, userId, prevMonths, potIds),
+    sinkingStatuses(db, userId, potIds, month),
+  ]);
+
   const lines: ScaffoldLine[] = [];
   for (const p of pots) {
     const income = p.is_assignable === 0;
+    const hist = assignedHist.get(p.id);
     let cents: number;
     let scheduled = false;
     if (income) {
       // Income pots hold planned income: carry last month's plan forward.
-      cents = await assignedToPot(db, userId, shiftMonth(month, -1), p.id);
+      cents = hist?.get(prevMonths[0]) ?? 0;
     } else {
       // A sinking schedule takes precedence over the history strategies.
-      const sched = await sinkingStatus(db, userId, p.id, month);
+      const sched = sinkingByPot.get(p.id);
       if (sched) {
         cents = sched.contributionCents;
         scheduled = true;
       } else if (strategy === "last_month") {
-        cents = await assignedToPot(db, userId, shiftMonth(month, -1), p.id);
+        cents = hist?.get(prevMonths[0]) ?? 0;
       } else {
-        const hist: number[] = [];
-        for (const i of [1, 2, 3]) hist.push(await assignedToPot(db, userId, shiftMonth(month, -i), p.id));
-        cents = Math.round(hist.reduce((a, b) => a + b, 0) / hist.length);
+        const vals = prevMonths.map((m) => hist?.get(m) ?? 0);
+        cents = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
       }
     }
     lines.push({ potId: p.id, name: p.name, cents, income, scheduled });
   }
 
   if (!dryRun) {
-    for (const l of lines) await assignToPot(db, userId, month, l.potId, l.cents);
+    // One multi-row upsert for the whole month instead of one assignToPot
+    // (3 queries) per line.
+    await assignManyToPot(
+      db,
+      userId,
+      month,
+      lines.map((l) => ({ potId: l.potId, cents: l.cents }))
+    );
   }
   return lines;
 }

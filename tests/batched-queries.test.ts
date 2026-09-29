@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { potSpend, potInflow, allPotSpend, allPotInflow, recentTransactions } from "../src/queries";
-import { assignedToPot, allPotAssigned, assignToPot } from "../src/assign";
+import { potSpend, potInflow, allPotSpend, allPotInflow, recentTransactions, allPotSpendHistory } from "../src/queries";
+import { assignedToPot, allPotAssigned, assignToPot, allPotAssignedMonths, assignManyToPot } from "../src/assign";
+import { sinkingStatus, sinkingStatuses, potBalance, potBalances, createSchedule } from "../src/sinking";
+import { contactCredit, allContactCredit } from "../src/settle";
 import { tableExists, clearTableExistsCache } from "../src/db-interface";
 import type { Db } from "../src/db-interface";
 import { testDb } from "./helpers";

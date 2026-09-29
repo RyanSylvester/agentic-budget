@@ -10,7 +10,7 @@ import { Hono } from "hono";
 import type { Db } from "./db-interface";
 import { registerAuth, authMiddleware, type AuthConfig, type Identity } from "./auth";
 import { monthSpend, allPotSpend, allPotInflow, recentTransactions, listTransactions, spendTrend, assignedTotal, rtaCents, potHistory } from "./queries";
-import { applySettlement, contactCredit, contactOwed } from "./settle";
+import { applySettlement, contactCredit, contactOwed, allContactCredit } from "./settle";
 import { contactBalances, createContact, renameContact, deleteContact } from "./contacts";
 import { createPot, updatePot, deletePot, potExists, setGroupOrder } from "./pots";
 import { reconcile, suggestClear } from "./reconcile";
@@ -18,7 +18,7 @@ import { closePreview, applyClose } from "./close";
 import { assignToPot, allPotAssigned } from "./assign";
 import { scaffoldMonth, type ScaffoldStrategy } from "./scaffold";
 import { createTransaction, updateTransaction } from "./transactions";
-import { createSchedule, getScheduleById, listSchedules, markPaid, removeSchedule, sinkingStatus } from "./sinking";
+import { createSchedule, getScheduleById, listSchedules, markPaid, removeSchedule, sinkingStatuses } from "./sinking";
 import { validMonth } from "./money";
 
 /* Input validation helpers: 400 for bad input, 404 when the row is missing. */
@@ -167,8 +167,10 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const userId = await requestReaderId(c, db, authed);
     const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
     if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
-    const schedules = [];
-    for (const s of await listSchedules(db, userId)) schedules.push((await sinkingStatus(db, userId, s.potId, month))!);
+    const list = await listSchedules(db, userId);
+    // One batched sinkingStatuses call, not one sinkingStatus per schedule.
+    const byPot = await sinkingStatuses(db, userId, list.map((s) => s.potId), month);
+    const schedules = list.map((s) => byPot.get(s.potId)!);
     return c.json({ month, schedules });
   });
 
@@ -229,19 +231,39 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
     if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
     const accounts = await db.all<{ id: number; name: string }>("SELECT id, name FROM accounts WHERE user_id = ? ORDER BY id", userId);
+    // Batched per-account reconciliation state: one query for the latest
+    // reconciliation row per account, one for the cleared sums. The old
+    // per-account loop cost two round trips per account; on D1 each is an
+    // HTTPS request.
+    const accountIds = accounts.map((a) => a.id);
+    const [lastRows, clearedRows] =
+      accountIds.length === 0
+        ? [[], []]
+        : await Promise.all([
+            db.all<{ accountId: number; bal: number }>(
+              `SELECT r.account_id AS accountId, r.actual_balance_cents AS bal
+               FROM reconciliations r
+               JOIN (SELECT account_id, MAX(id) AS id FROM reconciliations WHERE user_id = ? GROUP BY account_id) m
+                 ON m.id = r.id
+               WHERE r.user_id = ?`,
+              userId,
+              userId
+            ),
+            db.all<{ accountId: number; total: number }>(
+              `SELECT account_id AS accountId, COALESCE(SUM(amount_cents), 0) AS total
+               FROM transactions
+               WHERE account_id IN (${accountIds.map(() => "?").join(",")})
+                 AND cleared IN ('cleared','reconciled') AND voided = 0 AND user_id = ?
+               GROUP BY account_id`,
+              ...accountIds,
+              userId
+            ),
+          ]);
+    const lastBal = new Map((lastRows as { accountId: number; bal: number }[]).map((r) => [r.accountId, r.bal]));
+    const clearedByAcct = new Map((clearedRows as { accountId: number; total: number }[]).map((r) => [r.accountId, r.total]));
     const unreconciledAccounts = [];
     for (const a of accounts) {
-      const last = await db.get<{ actual_balance_cents: number }>(
-        "SELECT actual_balance_cents FROM reconciliations WHERE account_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1",
-        a.id,
-        userId
-      );
-      const cleared = (await db.get<{ total: number }>(
-        "SELECT COALESCE(SUM(amount_cents), 0) AS total FROM transactions WHERE account_id = ? AND cleared IN ('cleared','reconciled') AND voided = 0 AND user_id = ?",
-        a.id,
-        userId
-      ))!;
-      const diffCents = cleared.total - (last?.actual_balance_cents ?? 0);
+      const diffCents = (clearedByAcct.get(a.id) ?? 0) - (lastBal.get(a.id) ?? 0);
       if (diffCents !== 0) unreconciledAccounts.push({ id: a.id, name: a.name, diffCents });
     }
     const owed = await contactOwed(db, userId);
@@ -252,10 +274,12 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
       byContact.set(o.contactId, e);
     }
     const sharedOwedBy: { contactId: number; name: string; cents: number; netCents: number }[] = [];
+    // One batched credit query for all contacts instead of one per contact.
+    const creditByContact = await allContactCredit(db, userId);
     for (const [contactId, v] of [...byContact.entries()].sort((a, b) => b[1].cents - a[1].cents)) {
       // Per-contact net: gross owed minus this contact's unsettled credit, so
       // consumers never have to re-derive it (and never show gross as owed).
-      const credit = await contactCredit(db, userId, contactId);
+      const credit = creditByContact.get(contactId) ?? 0;
       sharedOwedBy.push({ contactId, ...v, netCents: Math.max(0, v.cents - credit) });
     }
     const sharedOwedCents = sharedOwedBy.reduce((a, o) => a + o.cents, 0);
@@ -281,18 +305,46 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const db = await getDb();
     const userId = await requestReaderId(c, db, authed);
     const accounts = await db.all<any>("SELECT id, name, type, last4 FROM accounts WHERE user_id = ? ORDER BY id", userId);
+    // Batched per-account state: latest reconciliation row, working balance,
+    // and cleared balance, each one GROUP BY query instead of three queries
+    // per account.
+    const accountIds = accounts.map((a: any) => a.id);
+    const [lastRows, balRows] =
+      accountIds.length === 0
+        ? [[], []]
+        : await Promise.all([
+            db.all<{ accountId: number; at: string }>(
+              `SELECT r.account_id AS accountId, r.created_at AS at
+               FROM reconciliations r
+               JOIN (SELECT account_id, MAX(id) AS id FROM reconciliations WHERE user_id = ? GROUP BY account_id) m
+                 ON m.id = r.id
+               WHERE r.user_id = ?`,
+              userId,
+              userId
+            ),
+            db.all<{ accountId: number; working: number; cleared: number }>(
+              `SELECT account_id AS accountId,
+                      COALESCE(SUM(amount_cents), 0) AS working,
+                      COALESCE(SUM(CASE WHEN cleared IN ('cleared','reconciled') THEN amount_cents ELSE 0 END), 0) AS cleared
+               FROM transactions
+               WHERE account_id IN (${accountIds.map(() => "?").join(",")}) AND voided = 0 AND user_id = ?
+               GROUP BY account_id`,
+              ...accountIds,
+              userId
+            ),
+          ]);
+    const lastAt = new Map((lastRows as { accountId: number; at: string }[]).map((r) => [r.accountId, r.at]));
+    const bals = new Map(
+      (balRows as { accountId: number; working: number; cleared: number }[]).map((r) => [r.accountId, r])
+    );
     const out = [];
     for (const a of accounts) {
-      const last = await db.get<{ created_at: string }>(
-        "SELECT created_at FROM reconciliations WHERE account_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1",
-        a.id,
-        userId
-      );
+      const b = bals.get(a.id) ?? { working: 0, cleared: 0 };
       out.push({
         ...a,
-        workingBalanceCents: await balanceOf(db, userId, a.id, false),
-        clearedBalanceCents: await balanceOf(db, userId, a.id, true),
-        lastReconciledAt: last?.created_at ?? null,
+        workingBalanceCents: b.working,
+        clearedBalanceCents: b.cleared,
+        lastReconciledAt: lastAt.get(a.id) ?? null,
       });
     }
     return c.json({ accounts: out });
@@ -432,16 +484,17 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const out = [];
     const potIds = pots.map((p: any) => p.id);
     // One GROUP BY query per metric for all pots, not one query per pot:
-    // on D1 every round trip is an HTTPS request. sinkingStatus stays
-    // per-pot (cheap config lookup; its table guard is memoized).
-    const [spendByPot, inflowByPot, assignedByPot] = await Promise.all([
+    // on D1 every round trip is an HTTPS request. The sinking schedule
+    // states come from the same batched call.
+    const [spendByPot, inflowByPot, assignedByPot, sinkingByPot] = await Promise.all([
       allPotSpend(db, userId, potIds, month),
       allPotInflow(db, userId, potIds, month),
       allPotAssigned(db, userId, month, potIds),
+      sinkingStatuses(db, userId, potIds, month),
     ]);
     for (const p of pots) {
       const sp = spendByPot.get(p.id) ?? { userCents: 0, sharedCents: 0 };
-      const sched = await sinkingStatus(db, userId, p.id, month);
+      const sched = sinkingByPot.get(p.id) ?? null;
       out.push({
         id: p.id, name: p.name, group: p.pot_group, targetType: p.target_type, targetCents: p.target_cents,
         spentCents: sp.userCents, sharedCents: sp.sharedCents,
