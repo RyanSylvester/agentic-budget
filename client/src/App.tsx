@@ -2298,13 +2298,9 @@ const tabLabel = (id: Tab) => TABS.find((t) => t.id === id)?.label ?? id;
 
 const MONTH_TABS: Tab[] = ["overview", "pots", "transactions"];
 
-// Mobile bottom bar: three tabs plus a "More" sheet for the rest.
-const MOBILE_TABS: Tab[] = ["overview", "pots", "transactions"];
-const SHEET_TABS: Tab[] = ["sharing", "accounts", "settings"];
-
 /* Icon-only mobile tab bar: one clean inline SVG per tab, no icon library.
  * Selected renders in dark ink, inactive in muted grey. */
-function TabIcon({ id }: { id: Tab | "more" }) {
+function TabIcon({ id }: { id: Tab }) {
   const common = {
     width: 24,
     height: 24,
@@ -2329,17 +2325,17 @@ function TabIcon({ id }: { id: Tab | "more" }) {
       return (
         <svg {...common}><path d="M6 3.5h12V21l-2.2-1.6-1.8 1.6-2-1.6-2 1.6-1.8-1.6L6 21V3.5Z" /><path d="M9.5 8.5h5M9.5 12h5" /></svg>
       );
+    case "sharing":
+      return (
+        <svg {...common}><circle cx="9" cy="8" r="3.2" /><path d="M3.5 19.5c.7-3.4 2.9-5.2 5.5-5.2s4.8 1.8 5.5 5.2" /><circle cx="16.8" cy="9" r="2.6" /><path d="M16 14.4c2.4.4 4.1 1.9 4.6 4.6" /></svg>
+      );
+    case "accounts":
+      return (
+        <svg {...common}><rect x="3.5" y="6" width="17" height="12" rx="2.5" /><path d="M3.5 10h17" /><path d="M7 14.5h4" /></svg>
+      );
     case "settings":
       return (
         <svg {...common}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.09a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55h.09a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1Z" /></svg>
-      );
-    default:
-      return (
-        <svg {...common}>
-          <circle cx="5.5" cy="12" r="1.7" fill="currentColor" stroke="none" />
-          <circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none" />
-          <circle cx="18.5" cy="12" r="1.7" fill="currentColor" stroke="none" />
-        </svg>
       );
   }
 }
@@ -2354,9 +2350,41 @@ export function CountBadge({ n, className = "" }: { n: number; className?: strin
 
 /** The full app shell: tabs, sidebar, and content. Rendered only once the
  *  auth gate below has confirmed a session. Also the Storybook entry point. */
+/* Mobile bottom tab bar: icon-only, all six tabs in the same order, no
+ * "More" sheet. The active dot is absolutely positioned (out of flow) so the
+ * 24px icon stays optically centered in the 64px button. Dark ink when
+ * active, muted grey when inactive. */
+export function MobileTabBar({ tab, onGo, closeAlert }: { tab: Tab; onGo: (t: Tab) => void; closeAlert: boolean }) {
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--hairline)] bg-[var(--surface)] pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Primary">
+      <div className="grid grid-cols-6">
+        {TABS.map(({ id }) => {
+          const active = tab === id;
+          return (
+            <button
+              key={id}
+              onClick={() => onGo(id)}
+              aria-label={tabLabel(id)}
+              aria-current={active ? "page" : undefined}
+              className={`relative flex min-h-[64px] items-center justify-center transition active:scale-95 ${
+                active ? "text-[var(--ink)]" : "text-[var(--muted)]"
+              }`}
+            >
+              <span className={`absolute left-1/2 top-2 h-1.5 w-1.5 -translate-x-1/2 rounded-full ${active ? "bg-[var(--ink)]" : "bg-transparent"}`} />
+              <TabIcon id={id} />
+              {id === "pots" && closeAlert && (
+                <span className="absolute right-4 top-3 h-2 w-2 rounded-full bg-[var(--warning)]" />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
 export function AppShell() {
   const [tab, setTab] = useState<Tab>("overview");
-  const [sheetOpen, setSheetOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const { data: attention } = useApi<Attention>("/api/attention");
@@ -2369,7 +2397,6 @@ export function AppShell() {
 
   const go = (t: Tab) => {
     setTab(t);
-    setSheetOpen(false);
     window.scrollTo(0, 0);
   };
 
@@ -2438,60 +2465,8 @@ export function AppShell() {
         </div>
       </div>
 
-      {/* mobile bottom tab bar: icon-only, same tabs in the same order */}
-      <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--hairline)] bg-[var(--surface)] pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Primary">
-        <div className="grid grid-cols-4">
-          {MOBILE_TABS.map((id) => {
-            const active = tab === id;
-            return (
-              <button
-                key={id}
-                onClick={() => go(id)}
-                aria-label={tabLabel(id)}
-                aria-current={active ? "page" : undefined}
-                className={`relative flex min-h-[64px] flex-col items-center justify-center gap-1 transition active:scale-95 ${
-                  active ? "text-[var(--ink)]" : "text-[var(--muted)]"
-                }`}
-              >
-                <span className={`h-1.5 w-1.5 rounded-full ${active ? "bg-[var(--ink)]" : "bg-transparent"}`} />
-                <TabIcon id={id} />
-                {id === "pots" && closeAlert && (
-                  <span className="absolute right-4 top-3 h-2 w-2 rounded-full bg-[var(--warning)]" />
-                )}
-              </button>
-            );
-          })}
-          <button
-            onClick={() => setSheetOpen(true)}
-            aria-label="More"
-            aria-expanded={sheetOpen}
-            className={`relative flex min-h-[64px] flex-col items-center justify-center gap-1 transition active:scale-95 ${
-              SHEET_TABS.includes(tab) ? "text-[var(--ink)]" : "text-[var(--muted)]"
-            }`}
-          >
-            <span className={`h-1.5 w-1.5 rounded-full ${SHEET_TABS.includes(tab) ? "bg-[var(--ink)]" : "bg-transparent"}`} />
-            <TabIcon id="more" />
-          </button>
-        </div>
-      </nav>
-
-      {/* mobile "More" bottom sheet */}
-      {sheetOpen && (
-        <div className="fixed inset-0 z-30 md:hidden" role="dialog" aria-label="More">
-          <div className="absolute inset-0 cursor-pointer bg-black/30" onClick={() => setSheetOpen(false)} />
-          <div className="absolute inset-x-0 bottom-0 rounded-t-[var(--r-lg)] border-t border-[var(--hairline)] bg-[var(--surface)] p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
-            {SHEET_TABS.map((id) => (
-              <button
-                key={id}
-                onClick={() => go(id)}
-                className="flex min-h-[52px] w-full items-center justify-between rounded-[var(--r-md)] px-3 text-left text-[16px] transition active:bg-[var(--bg-sunken)]"
-              >
-                <span className={tab === id ? "font-medium" : undefined}>{tabLabel(id)}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* mobile bottom tab bar */}
+      <MobileTabBar tab={tab} onGo={go} closeAlert={closeAlert} />
     </div>
   );
 }
