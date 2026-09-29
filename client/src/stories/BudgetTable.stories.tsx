@@ -29,7 +29,7 @@ export const Full: Story = {
     docs: {
       description: {
         story:
-          "Group containers with summed totals, each header showing its share of total spend next to the spent figure (66/28/6/0 here), 50% and contact-share tags, an overspent pot (red Available), income section at the bottom.",
+          "Group containers with summed totals, each header showing assigned plus its share of total assigned (57/25/4/14 here), 50% and contact-share tags, an overspent pot (red Available), income section at the bottom.",
       },
     },
   },
@@ -100,26 +100,26 @@ export const SinglePot: Story = {
   },
 };
 
-export const ShareOfSpend: Story = {
+export const ShareOfAssigned: Story = {
   args: { pots: fixturePots },
   parameters: {
     docs: {
       description: {
         story:
-          "Each group header shows its share of total spend next to the spent figure: Joint Living 66%, Food 28%, Transport 6%, Savings 0%. Income pots never count toward the total. (Interaction test: asserts the rendered percentages.)",
+          "Each group header shows assigned plus its share of total assigned: Joint Living 57%, Food 25%, Transport 4%, Savings 14%. Income pots never count toward the total. (Interaction test: asserts the rendered percentages.)",
       },
     },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(within(canvas.getByRole("button", { name: /Joint Living/ })).getByText("· 66%")).toBeInTheDocument();
-    await expect(within(canvas.getByRole("button", { name: /Food/ })).getByText("· 28%")).toBeInTheDocument();
-    await expect(within(canvas.getByRole("button", { name: /Transport/ })).getByText("· 6%")).toBeInTheDocument();
-    await expect(within(canvas.getByRole("button", { name: /Savings/ })).getByText("· 0%")).toBeInTheDocument();
+    await expect(within(canvas.getByRole("button", { name: /Joint Living/ })).getByText("· 57%")).toBeInTheDocument();
+    await expect(within(canvas.getByRole("button", { name: /Food/ })).getByText("· 25%")).toBeInTheDocument();
+    await expect(within(canvas.getByRole("button", { name: /Transport/ })).getByText("· 4%")).toBeInTheDocument();
+    await expect(within(canvas.getByRole("button", { name: /Savings/ })).getByText("· 14%")).toBeInTheDocument();
   },
 };
 
-export const ShareOfSpendEdges: Story = {
+export const ShareOfAssignedEdges: Story = {
   args: {
     pots: [
       makePot({ name: "Rent", group: "Housing", spentCents: 200000, assignedCents: 200000 }),
@@ -131,22 +131,22 @@ export const ShareOfSpendEdges: Story = {
     docs: {
       description: {
         story:
-          "Edge cases: a nonzero sliver of total spend reads <1%, a group with no spend reads 0%. When nothing was spent at all, no percentage is shown. (Interaction test: asserts the edge-case labels.)",
+          "Edge cases: a nonzero sliver of total assigned reads <1%. When nothing was assigned at all, no percentage is shown. (Interaction test: asserts the edge-case labels.)",
       },
     },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(within(canvas.getByRole("button", { name: /Housing/ })).getByText("· 100%")).toBeInTheDocument();
+    await expect(within(canvas.getByRole("button", { name: /Housing/ })).getByText("· 80%")).toBeInTheDocument();
     await expect(within(canvas.getByRole("button", { name: /Tiny/ })).getByText("· <1%")).toBeInTheDocument();
-    await expect(within(canvas.getByRole("button", { name: /Savings/ })).getByText("· 0%")).toBeInTheDocument();
+    await expect(within(canvas.getByRole("button", { name: /Savings/ })).getByText("· 20%")).toBeInTheDocument();
   },
 };
 
-export const ShareOfSpendNone: Story = {
-  args: { pots: [makePot({ name: "Buffer", group: "Savings", spentCents: 0, assignedCents: 50000 })] },
+export const ShareOfAssignedNone: Story = {
+  args: { pots: [makePot({ name: "Buffer", group: "Savings", spentCents: 0, assignedCents: 0 })] },
   parameters: {
-    docs: { description: { story: "With no spend in the month, group headers show no percentage at all." } },
+    docs: { description: { story: "With nothing assigned in the month, group headers show no percentage at all." } },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);

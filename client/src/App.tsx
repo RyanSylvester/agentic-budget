@@ -3,7 +3,7 @@ import { LoginScreen, SignupScreen } from "./AuthScreens";
 import { SettingsTab } from "./SettingsTab";
 import { useApi, prime } from "./api";
 import { MoneyInput } from "./MoneyInput";
-import { expressionToCents, evaluateExpression, spendShareLabel } from "./money";
+import { expressionToCents, evaluateExpression, shareLabel } from "./money";
 
 /* ---------- types ---------- */
 
@@ -450,9 +450,9 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
   }
 
   const sum = (ps: Pot[], f: (p: Pot) => number) => ps.reduce((a, p) => a + f(p), 0);
-  // Share-of-spend percentages in group headers use earners only, matching
+  // Share-of-assigned percentages in group headers use earners only, matching
   // the grouping above; income pots never count toward the total.
-  const totalSpent = sum(earners, (p) => p.spentCents);
+  const totalAssigned = sum(earners, (p) => p.assignedCents ?? 0);
 
   return (
     <div>
@@ -465,7 +465,6 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
       <div className="mt-3 space-y-4">
       {groups.map((g) => {
         const assigned = sum(g.pots, (p) => p.assignedCents ?? 0);
-        const spent = sum(g.pots, (p) => p.spentCents);
         const isOpen = open[g.name] ?? true;
         return (
           <section key={g.name} className="overflow-hidden rounded-[12px] bg-[var(--bg-sunken)]">
@@ -481,17 +480,12 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
                 <span className="t-nums text-[14px] text-[var(--ink-2)]">
                   <span className="mr-1.5 text-[12px] text-[var(--muted)]">assigned</span>
                   {money(assigned)}
-                </span>
-                <span className="t-nums text-[14px] text-[var(--ink-2)]">
-                  <span className="mr-1.5 text-[12px] text-[var(--muted)]">spent</span>
-                  {money(spent)}
-                  {totalSpent > 0 && (
+                  {totalAssigned > 0 && (
                     <span className="ml-1.5 text-[12px] text-[var(--muted)]">
-                      · {spendShareLabel(spent, totalSpent)}
+                      · {shareLabel(assigned, totalAssigned)}
                     </span>
                   )}
                 </span>
-                <Available assignedCents={assigned} spentCents={spent} className="text-[14px]" />
               </span>
             </button>
             {isOpen && (

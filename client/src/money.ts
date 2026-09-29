@@ -99,11 +99,11 @@ export function expressionToCents(input: string): number | null {
   return Math.round(v * 100);
 }
 
-/** A group's share of total spend, e.g. "34%"; a nonzero sliver reads "<1%".
- *  Empty when there is no spend to divide by. */
-export function spendShareLabel(spentCents: number, totalCents: number): string {
+/** A group's share of a total, e.g. "34%"; a nonzero sliver reads "<1%".
+ *  Empty when there is no total to divide by. */
+export function shareLabel(partCents: number, totalCents: number): string {
   if (totalCents <= 0) return "";
-  const pct = (spentCents / totalCents) * 100;
+  const pct = (partCents / totalCents) * 100;
   if (pct > 0 && pct < 0.5) return "<1%";
   return `${Math.round(pct)}%`;
 }
