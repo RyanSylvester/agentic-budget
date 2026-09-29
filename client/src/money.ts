@@ -107,3 +107,15 @@ export function shareLabel(partCents: number, totalCents: number): string {
   if (pct > 0 && pct < 0.5) return "<1%";
   return `${Math.round(pct)}%`;
 }
+
+/** Cents -> "$12,345.67" with thousand separators, for prominent figures.
+ *  Scoped to display surfaces that need the separators (e.g. group headers);
+ *  the plain money() helper elsewhere is untouched. */
+export function moneyGrouped(cents: number): string {
+  const sign = cents < 0 ? "−" : "";
+  const dollars = (Math.abs(cents) / 100).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return `${sign}$${dollars}`;
+}

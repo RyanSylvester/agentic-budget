@@ -29,7 +29,7 @@ export const Full: Story = {
     docs: {
       description: {
         story:
-          "Group containers with summed totals, each header showing assigned plus its share of total assigned (57/25/4/14 here), 50% and contact-share tags, an overspent pot (red Available), income section at the bottom.",
+          "Group containers with summed totals; each header leads with a prominent assigned total and a share-of-assigned percentage pill (57/25/4/14 here), 50% and contact-share tags, an overspent pot (red Available), income section at the bottom.",
       },
     },
   },
@@ -106,16 +106,52 @@ export const ShareOfAssigned: Story = {
     docs: {
       description: {
         story:
-          "Each group header shows assigned plus its share of total assigned: Joint Living 57%, Food 25%, Transport 4%, Savings 14%. Income pots never count toward the total. (Interaction test: asserts the rendered percentages.)",
+          "Each group header leads with a prominent assigned total (thousand separators) and a share-of-assigned percentage pill: Joint Living $1,950.00 and 57%, Food $850.00 and 25%, Transport $150.00 and 4%, Savings $500.00 and 14%. The word 'assigned' appears nowhere visible; the pill plus the desktop 'Assigned' column header carry the meaning, while screen readers hear the full assigned label. Income pots never count toward the total. (Interaction test: asserts the rendered figures, pills, and accessible names.)",
       },
     },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(within(canvas.getByRole("button", { name: /Joint Living/ })).getByText("· 57%")).toBeInTheDocument();
-    await expect(within(canvas.getByRole("button", { name: /Food/ })).getByText("· 25%")).toBeInTheDocument();
-    await expect(within(canvas.getByRole("button", { name: /Transport/ })).getByText("· 4%")).toBeInTheDocument();
-    await expect(within(canvas.getByRole("button", { name: /Savings/ })).getByText("· 14%")).toBeInTheDocument();
+    const jl = within(canvas.getByRole("button", { name: /Joint Living/ }));
+    await expect(jl.getByText("$1,950.00")).toBeInTheDocument();
+    await expect(jl.getByText("57%")).toBeInTheDocument();
+    const food = within(canvas.getByRole("button", { name: /Food/ }));
+    await expect(food.getByText("$850.00")).toBeInTheDocument();
+    await expect(food.getByText("25%")).toBeInTheDocument();
+    const transport = within(canvas.getByRole("button", { name: /Transport/ }));
+    await expect(transport.getByText("$150.00")).toBeInTheDocument();
+    await expect(transport.getByText("4%")).toBeInTheDocument();
+    const savings = within(canvas.getByRole("button", { name: /Savings/ }));
+    await expect(savings.getByText("$500.00")).toBeInTheDocument();
+    await expect(savings.getByText("14%")).toBeInTheDocument();
+    // Screen-reader rescue: the accessible name restores the word "assigned".
+    await expect(
+      canvas.getByRole("button", { name: /Joint Living: \$1,950\.00 assigned, 57% of total assigned/ })
+    ).toBeInTheDocument();
+  },
+};
+
+export const ShareOfAssignedMobile: Story = {
+  args: { pots: fixturePots },
+  parameters: {
+    viewport: {
+      viewports: {
+        iphone390: { name: "iPhone 14 (390px)", styles: { width: "390px", height: "844px" } },
+      },
+      defaultViewport: "iphone390",
+    },
+    docs: {
+      description: {
+        story:
+          "The prominent header at a 390px phone width: the $1,950.00 figure and 57% pill stay on one line with no wrap or overflow while the group name truncates. (Interaction test: asserts the figure and pill render.)",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const header = within(canvas.getByRole("button", { name: /Joint Living/ }));
+    await expect(header.getByText("$1,950.00")).toBeInTheDocument();
+    await expect(header.getByText("57%")).toBeInTheDocument();
   },
 };
 
@@ -131,26 +167,27 @@ export const ShareOfAssignedEdges: Story = {
     docs: {
       description: {
         story:
-          "Edge cases: a nonzero sliver of total assigned reads <1%. When nothing was assigned at all, no percentage is shown. (Interaction test: asserts the edge-case labels.)",
+          "Edge cases: a nonzero sliver of total assigned reads <1% in its pill. Housing shows 80%, Tiny <1%, Savings 20%. (Interaction test: asserts the edge-case labels.)",
       },
     },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(within(canvas.getByRole("button", { name: /Housing/ })).getByText("· 80%")).toBeInTheDocument();
-    await expect(within(canvas.getByRole("button", { name: /Tiny/ })).getByText("· <1%")).toBeInTheDocument();
-    await expect(within(canvas.getByRole("button", { name: /Savings/ })).getByText("· 20%")).toBeInTheDocument();
+    await expect(within(canvas.getByRole("button", { name: /Housing/ })).getByText("80%")).toBeInTheDocument();
+    await expect(within(canvas.getByRole("button", { name: /Tiny/ })).getByText("<1%")).toBeInTheDocument();
+    await expect(within(canvas.getByRole("button", { name: /Savings/ })).getByText("20%")).toBeInTheDocument();
   },
 };
 
 export const ShareOfAssignedNone: Story = {
   args: { pots: [makePot({ name: "Buffer", group: "Savings", spentCents: 0, assignedCents: 0 })] },
   parameters: {
-    docs: { description: { story: "With nothing assigned in the month, group headers show no percentage at all." } },
+    docs: { description: { story: "With nothing assigned in the month, group headers show a muted $0.00 and no percentage pill at all." } },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    const header = canvas.getByRole("button", { name: /Savings/ });
-    await expect(within(header).queryByText(/·/)).toBeNull();
+    const header = within(canvas.getByRole("button", { name: /Savings/ }));
+    await expect(header.getByText("$0.00")).toBeInTheDocument();
+    await expect(header.queryByText(/%/)).toBeNull();
   },
 };

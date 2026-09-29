@@ -3,7 +3,7 @@ import { LoginScreen, SignupScreen } from "./AuthScreens";
 import { SettingsTab } from "./SettingsTab";
 import { useApi, prime } from "./api";
 import { MoneyInput } from "./MoneyInput";
-import { expressionToCents, evaluateExpression, shareLabel } from "./money";
+import { expressionToCents, evaluateExpression, shareLabel, moneyGrouped } from "./money";
 
 /* ---------- types ---------- */
 
@@ -465,27 +465,39 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
       <div className="mt-3 space-y-4">
       {groups.map((g) => {
         const assigned = sum(g.pots, (p) => p.assignedCents ?? 0);
+        const share = shareLabel(assigned, totalAssigned);
         const isOpen = open[g.name] ?? true;
         return (
           <section key={g.name} className="overflow-hidden rounded-[12px] bg-[var(--bg-sunken)]">
+            {/* Group header. The word "assigned" is intentionally absent from the
+              visible UI. The percentage pill is the semantic rescue: no other
+              figure on this screen is ever a percentage, so "$X, N%" can only
+              read as share-of-assigned. The desktop eyebrow's "Assigned" label
+              stays as the visible anchor. Note the stat cluster right-aligns
+              over the Available column track, not the Assigned one; accepted
+              because the header is a full-width sunken section, visually
+              distinct from a table cell, and the pill carries the semantics. */}
             <button
               onClick={() => setOpen((o) => ({ ...o, [g.name]: !isOpen }))}
-              className="flex w-full flex-col items-start gap-1 px-4 py-3.5 text-left sm:flex-row sm:items-baseline sm:justify-between sm:gap-3 sm:px-5"
+              aria-expanded={isOpen}
+              aria-label={`${titleCase(g.name)}: ${moneyGrouped(assigned)} assigned, ${
+                share ? `${share} of total assigned` : "no assigned total yet"
+              }. ${isOpen ? "Expanded" : "Collapsed"}.`}
+              className="flex w-full items-baseline justify-between gap-3 px-4 py-3 text-left sm:px-5"
             >
-              <span className="flex min-w-0 items-baseline gap-2">
-                <span className="truncate font-serif-d text-[20px] font-medium">{titleCase(g.name)}</span>
-                <span className="shrink-0 text-[13px] text-[var(--faint)]">{isOpen ? "▾" : "▸"}</span>
+              <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                <span aria-hidden="true" className="shrink-0 text-[13px] text-[var(--faint)]">{isOpen ? "▾" : "▸"}</span>
+                <span className="truncate font-serif-d text-[18px] font-medium text-[var(--ink)]">{titleCase(g.name)}</span>
               </span>
-              <span className="flex shrink-0 items-baseline gap-5 whitespace-nowrap">
-                <span className="t-nums text-[14px] text-[var(--ink-2)]">
-                  <span className="mr-1.5 text-[12px] text-[var(--muted)]">assigned</span>
-                  {money(assigned)}
-                  {totalAssigned > 0 && (
-                    <span className="ml-1.5 text-[12px] text-[var(--muted)]">
-                      · {shareLabel(assigned, totalAssigned)}
-                    </span>
-                  )}
+              <span className="t-nums flex shrink-0 items-baseline gap-2 whitespace-nowrap">
+                <span className={`text-[22px] font-semibold ${assigned === 0 ? "text-[var(--muted)]" : "text-[var(--ink)]"}`}>
+                  {moneyGrouped(assigned)}
                 </span>
+                {share !== "" && (
+                  <span className="rounded-[var(--r-pill)] border border-[var(--hairline-strong)] px-2 py-0.5 text-[12px] font-semibold text-[var(--ink-2)]">
+                    {share}
+                  </span>
+                )}
               </span>
             </button>
             {isOpen && (
