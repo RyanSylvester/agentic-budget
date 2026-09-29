@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrateDb, wrapDb } from "../src/db";
 import type { Db } from "../src/db-interface";
+import { createApp } from "../src/app";
+import type { KVStore } from "../src/auth";
 import { createPot, deletePot } from "../src/pots";
 import { assignToPot } from "../src/assign";
 import { applyClose, closePreview } from "../src/close";
@@ -221,5 +223,54 @@ describe("sinking schedules", () => {
     await deletePot(db, 1, pot, dest);
     expect(await getSchedule(db, 1, pot)).toBeNull();
     expect(await listSchedules(db, 1)).toEqual([]);
+  });
+});
+
+describe("GET /api/pots sinking payload", () => {
+  // The client renders remaining/months-left from the /api/pots payload, so
+  // the API must carry deriveStatus's full output, not just the headline.
+  test("scheduled pot carries remainingCents and monthsLeft", async () => {
+    class MapKV implements KVStore {
+      private m = new Map<string, string>();
+      async get(k: string): Promise<string | null> { return this.m.get(k) ?? null; }
+      async put(k: string, v: string): Promise<void> { this.m.set(k, v); }
+      async delete(k: string): Promise<void> { this.m.delete(k); }
+    }
+    const db = wrapDb(new Database(":memory:"));
+    await migrateDb(db);
+    await db.exec(`INSERT INTO accounts (user_id, name, type) VALUES (1, 'Chequing','chequing')`);
+    // No users row: signup bootstraps user id 1, which the pots below belong to.
+    const app = createApp(async () => db, { auth: { kv: new MapKV(), pepper: "test-pepper" } });
+    const signup = await app.request("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "sinker", salt: "cd".repeat(16), kdfKey: "ab".repeat(32) }),
+    });
+    expect(signup.status).toBe(200);
+    const login = await app.request("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "sinker", kdfKey: "ab".repeat(32) }),
+    });
+    expect(login.status).toBe(200);
+    const cookie = (login.headers.get("set-cookie") ?? "").split(";")[0];
+
+    const pot = await taxPot(db);
+    await createSchedule(db, 1, pot, 120000, "2027-09");
+    await assignToPot(db, 1, "2026-10", pot, 30000);
+
+    const r = await app.request("/api/pots?month=2026-10", { headers: { cookie } });
+    expect(r.status).toBe(200);
+    const body = await r.json() as { pots: any[] };
+    const row = body.pots.find((p) => p.id === pot)!;
+    expect(row.sinking).toMatchObject({
+      expectedCents: 120000,
+      dueMonth: "2027-09",
+      balanceCents: 30000,
+      remainingCents: 90000,
+      monthsLeft: 11, // 2026-10 -> 2027-09 exclusive
+      contributionCents: Math.ceil(90000 / 11),
+      state: "funding",
+    });
   });
 });

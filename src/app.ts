@@ -521,7 +521,8 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
         receivedCents: inflowByPot.get(p.id) ?? 0,
         sinking: sched ? {
           expectedCents: sched.expectedCents, dueMonth: sched.dueMonth, cadenceMonths: sched.cadenceMonths,
-          contributionCents: sched.contributionCents, balanceCents: sched.balanceCents, state: sched.state,
+          contributionCents: sched.contributionCents, balanceCents: sched.balanceCents,
+          remainingCents: sched.remainingCents, monthsLeft: sched.monthsLeft, state: sched.state,
         } : null,
       });
     }

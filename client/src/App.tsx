@@ -71,6 +71,8 @@ export interface Pot {
     cadenceMonths: number;
     contributionCents: number;
     balanceCents: number;
+    remainingCents: number;
+    monthsLeft: number;
     state: "funding" | "funded" | "overdue";
   } | null;
 }
@@ -396,19 +398,38 @@ export function PotNameCell({ p, onEdit }: { p: Pot; onEdit?: () => void }) {
   );
 }
 
-/** The sinking-schedule readout on a pot row. Replaces the target line for
- *  scheduled pots: the derived monthly contribution and due month while
- *  funding, green "funded" once the balance covers the bill, red when the
- *  due month has arrived (or passed) and the bill is still unpaid. */
+/** The sinking-schedule readout on a pot row: a slim progress bar plus one
+ *  line that tells the full story. Funding shows saved-of-expected, the
+ *  monthly pace, months left, and the due month; funded is green with the
+ *  bill covered; overdue is red with what is still needed. */
 export function SinkingLine({ sinking }: { sinking: NonNullable<Pot["sinking"]> }) {
-  if (sinking.state === "funded") {
-    return <div className="mt-0.5 text-[12px] font-medium text-[var(--success)]">funded</div>;
-  }
-  const color = sinking.state === "overdue" ? "var(--danger)" : "var(--muted)";
-  const label = `${money(sinking.contributionCents)}/mo · due ${shortMonth(sinking.dueMonth)}${sinking.state === "overdue" ? " · overdue" : ""}`;
+  const pct = sinking.expectedCents > 0 ? Math.min(100, (sinking.balanceCents / sinking.expectedCents) * 100) : 0;
+  const fillColor =
+    sinking.state === "funded" ? "var(--success)" : sinking.state === "overdue" ? "var(--danger)" : "var(--ink)";
+  const monthsLabel = sinking.monthsLeft === 1 ? "1 mo left" : `${sinking.monthsLeft} mo left`;
+  const line =
+    sinking.state === "funded"
+      ? `Funded · ${money(sinking.expectedCents)} ready for ${shortMonth(sinking.dueMonth)}`
+      : sinking.state === "overdue"
+        ? `Overdue · ${money(sinking.remainingCents)} still needed · due ${shortMonth(sinking.dueMonth)}`
+        : `${money(sinking.balanceCents)} of ${money(sinking.expectedCents)} · ${money(sinking.contributionCents)}/mo · ${monthsLabel} · due ${shortMonth(sinking.dueMonth)}`;
+  const lineColor =
+    sinking.state === "funded" ? "var(--success)" : sinking.state === "overdue" ? "var(--danger)" : "var(--muted)";
   return (
-    <div className="mt-0.5 text-[12px]" style={{ color }}>
-      {label}
+    <div className="mt-1">
+      <div
+        role="progressbar"
+        aria-valuenow={Math.round(pct)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={`Sinking fund progress: ${line}`}
+        className="h-[5px] w-full overflow-hidden rounded-full bg-[var(--bg-sunken)]"
+      >
+        <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: fillColor }} />
+      </div>
+      <div className="mt-0.5 text-[12px] font-medium" style={{ color: lineColor }}>
+        {line}
+      </div>
     </div>
   );
 }
