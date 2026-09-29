@@ -208,3 +208,62 @@ export async function contactCredit(db: Db, userId: number, contactId?: number):
   );
   return r!.total;
 }
+
+/** Repair settlements that were written without allocations (their leftover
+ *  never flowed through the waterfall). For each of the contact's
+ *  settlements with leftover_cents > 0, oldest first, the remaining
+ *  leftover is run through the SAME allocateSettlement waterfall against
+ *  the contact's current outstanding from contactOwed: settlement_allocations
+ *  rows are inserted and leftover_cents is decremented to the true
+ *  remainder. No new allocation rules, no new money moved.
+ *
+ *  Idempotent: only settlements with leftover_cents > 0 are processed, and
+ *  allocations only ever grow (contactOwed already nets out prior
+ *  allocations), so re-running is a no-op. Sequential awaits like the
+ *  rest of the settlement code (single writer). */
+export async function backfillSettlementAllocations(
+  db: Db,
+  userId: number,
+  contactId: number
+): Promise<{ contactId: number; allocationsWritten: number; creditRemainingCents: number }> {
+  const contact = await db.get<{ id: number }>(
+    "SELECT id FROM contacts WHERE id = ? AND user_id = ?",
+    contactId,
+    userId
+  );
+  if (!contact) throw new Error(`no contact ${contactId}`);
+
+  // Same join as the credit-consumption step of applySettlement: a
+  // settlement's contact is the contact on its transaction's splits.
+  const pending = await db.all<{ id: number; leftover_cents: number }>(
+    `SELECT st.id, st.leftover_cents FROM settlements st
+     JOIN transactions t ON t.id = st.transaction_id
+     JOIN splits s ON s.transaction_id = t.id AND s.owner = 'contact' AND s.contact_id = ? AND s.user_id = ?
+     WHERE st.leftover_cents > 0 AND st.user_id = ? AND t.user_id = ?
+     ORDER BY st.date, st.id`,
+    contactId,
+    userId,
+    userId,
+    userId
+  );
+
+  let allocationsWritten = 0;
+  for (const st of pending) {
+    const owed = await contactOwed(db, userId, contactId);
+    const { allocations, leftoverCents } = allocateSettlement(owed, st.leftover_cents);
+    if (allocations.length > 0) {
+      // One multi-row INSERT instead of one per allocation.
+      const values = allocations.map(() => "(?, ?, ?, ?)").join(",");
+      const params: DbValue[] = [];
+      for (const a of allocations) params.push(userId, st.id, a.splitId, a.amountCents);
+      await db.run(
+        `INSERT INTO settlement_allocations (user_id, settlement_id, split_id, amount_cents) VALUES ${values}`,
+        ...params
+      );
+      allocationsWritten += allocations.length;
+    }
+    await db.run("UPDATE settlements SET leftover_cents = ? WHERE id = ? AND user_id = ?", leftoverCents, st.id, userId);
+  }
+
+  return { contactId, allocationsWritten, creditRemainingCents: await contactCredit(db, userId, contactId) };
+}

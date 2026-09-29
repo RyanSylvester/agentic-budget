@@ -262,10 +262,6 @@ async function remoteContact(remote: RemoteConfig, rest: string[]): Promise<void
 }
 
 async function remoteSettle(remote: RemoteConfig, rest: string[]): Promise<void> {
-  const accountId = parseInt(flag(rest, "account") ?? "NaN", 10);
-  const amountCents = Math.round(parseFloat(flag(rest, "amount") ?? "NaN") * 100);
-  const note = flag(rest, "note") ?? undefined;
-  if (!Number.isFinite(accountId) || !Number.isFinite(amountCents) || amountCents <= 0) usage();
   const contactId = parseInt(flag(rest, "contact") ?? "NaN", 10);
   if (!Number.isFinite(contactId)) usage();
   const contacts = await api(remote, "/api/contacts");
@@ -273,6 +269,18 @@ async function remoteSettle(remote: RemoteConfig, rest: string[]): Promise<void>
     (c) => c.id === contactId
   );
   if (!contact) fail(`no contact ${contactId}`);
+  if (rest.includes("--backfill")) {
+    // Repair settlements written without allocations: the server runs each
+    // one's remaining leftover through the allocation waterfall, oldest first.
+    const r = await api(remote, "/api/settle/backfill", { method: "POST", body: { contactId } });
+    console.log(`backfill for ${contact.name}: ${r.allocationsWritten} allocation(s) written.`);
+    console.log(`${contact.name} credit remaining: $${fmtCents(r.creditRemainingCents)}`);
+    return;
+  }
+  const accountId = parseInt(flag(rest, "account") ?? "NaN", 10);
+  const amountCents = Math.round(parseFloat(flag(rest, "amount") ?? "NaN") * 100);
+  const note = flag(rest, "note") ?? undefined;
+  if (!Number.isFinite(accountId) || !Number.isFinite(amountCents) || amountCents <= 0) usage();
   const before = contact!.totalOwedCents;
   const s = await api(remote, "/api/settle", { method: "POST", body: { contactId, accountId, amountCents, note } });
   console.log(`settlement of $${fmtCents(amountCents)} recorded (cleared, confirmed).`);

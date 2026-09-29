@@ -10,7 +10,7 @@ import { Hono } from "hono";
 import type { Db } from "./db-interface";
 import { registerAuth, authMiddleware, type AuthConfig, type Identity } from "./auth";
 import { monthSpend, allPotSpend, allPotInflow, recentTransactions, listTransactions, spendTrend, assignedTotal, rtaCents, potHistory } from "./queries";
-import { applySettlement, contactCredit, contactOwed, allContactCredit } from "./settle";
+import { applySettlement, backfillSettlementAllocations, contactCredit, contactOwed, allContactCredit } from "./settle";
 import { contactBalances, createContact, renameContact, deleteContact } from "./contacts";
 import { createPot, updatePot, deletePot, potExists, setGroupOrder } from "./pots";
 import { reconcile, suggestClear } from "./reconcile";
@@ -738,6 +738,24 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     try {
       const summary = await applySettlement(db, userId, { contactId, accountId, amountCents, note: body?.note, enteredBy: requestKind(c) });
       return c.json(summary);
+    } catch (e) {
+      const msg = (e as Error).message;
+      return c.json({ error: msg }, msg.startsWith("no contact") ? 404 : 400);
+    }
+  });
+
+  // Repair settlements that were written without allocations: runs each
+  // unallocated settlement's leftover through the allocation waterfall
+  // against current outstanding, oldest first. Idempotent. Body: { contactId }.
+  app.post("/api/settle/backfill", async (c) => {
+    const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
+    const { ok, body } = await readJson(c);
+    if (!ok) return c.json({ error: "malformed JSON" }, 400);
+    const contactId = Number(body?.contactId);
+    if (!contactId) return c.json({ error: "contactId required" }, 400);
+    try {
+      return c.json(await backfillSettlementAllocations(db, userId, contactId));
     } catch (e) {
       const msg = (e as Error).message;
       return c.json({ error: msg }, msg.startsWith("no contact") ? 404 : 400);

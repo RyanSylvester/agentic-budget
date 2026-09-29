@@ -20,6 +20,7 @@
  *    bun src/cli.ts contact rename --contact 1 --name "Alex R."
  *    bun src/cli.ts contact delete --contact 1   # blocked while pots or splits reference them
  *    bun src/cli.ts settle --contact 1 --account 1 --amount 2000 --note "E-transfer"   # their lump sum fills the buckets they owe, oldest first
+ *    bun src/cli.ts settle --backfill --contact 1   # repair settlements written without allocations (idempotent)
  *    bun src/cli.ts reconcile --account 1 --balance 1234.56
  *    bun src/cli.ts close --month 2026-09 [--apply]   # preview (or apply) the month-end close
  *    bun src/cli.ts sinking add --pot "Property tax" --expected 3483.59 --due 2027-07 [--cadence 12]
@@ -39,7 +40,7 @@
 import { openDb } from "./db";
 import type { Db } from "./db-interface";
 import { reconcile, suggestClear } from "./reconcile";
-import { applySettlement, contactOwed } from "./settle";
+import { applySettlement, backfillSettlementAllocations, contactOwed } from "./settle";
 import { closePreview, applyClose } from "./close";
 import { assignToPot } from "./assign";
 import { contactBalances, createContact, deleteContact, listContacts, renameContact } from "./contacts";
@@ -373,14 +374,22 @@ async function main() {
   } else if (cmd === "settle") {
     const db = await openDb();
     const userId = await localUserId(db);
-    const accountId = parseInt(flag("account") ?? "NaN", 10);
-    const amountCents = Math.round(parseFloat(flag("amount") ?? "NaN") * 100);
-    const note = flag("note") ?? undefined;
-    if (!Number.isFinite(accountId) || !Number.isFinite(amountCents) || amountCents <= 0) usage();
     const contactId = parseInt(flag("contact") ?? "NaN", 10);
     if (!Number.isFinite(contactId)) usage();
     const contact = await db.get<{ name: string }>("SELECT name FROM contacts WHERE id = ? AND user_id = ?", contactId, userId);
     if (!contact) fail(`no contact ${contactId}`);
+    if (rest.includes("--backfill")) {
+      // Repair settlements written without allocations: run each one's
+      // remaining leftover through the allocation waterfall, oldest first.
+      const r = await backfillSettlementAllocations(db, userId, contactId);
+      console.log(`backfill for ${contact.name}: ${r.allocationsWritten} allocation(s) written.`);
+      console.log(`${contact.name} credit remaining: $${fmtCents(r.creditRemainingCents)}`);
+      return;
+    }
+    const accountId = parseInt(flag("account") ?? "NaN", 10);
+    const amountCents = Math.round(parseFloat(flag("amount") ?? "NaN") * 100);
+    const note = flag("note") ?? undefined;
+    if (!Number.isFinite(accountId) || !Number.isFinite(amountCents) || amountCents <= 0) usage();
     const before = (await contactOwed(db, userId, contactId)).reduce((a, o) => a + o.owedCents, 0);
     const { allocations, creditAllocations, creditConsumedCents, leftoverCents } = await applySettlement(db, userId, { contactId, accountId, amountCents, note });
     console.log(`settlement of $${fmtCents(amountCents)} recorded (cleared, confirmed).`);
