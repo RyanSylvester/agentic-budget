@@ -5,10 +5,10 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
-/** Local `record` without --pot must land splits on the Uncategorized pot,
- *  exactly like remote mode, never with a NULL pot_id. Drives the real CLI
- *  as a subprocess against a scratch database (BUDGET_DB + an empty
- *  BUDGET_API_URL force local mode regardless of the machine's config). */
+/** Local `record` requires --pot: there is no default pot, and splits always
+ *  carry a real pot_id. Drives the real CLI as a subprocess against a
+ *  scratch database (BUDGET_DB + an empty BUDGET_API_URL force local mode
+ *  regardless of the machine's config). */
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 const tmpDirs: string[] = [];
@@ -68,19 +68,17 @@ async function setupDb(): Promise<string> {
   return dbPath;
 }
 
-describe("local record without --pot", () => {
-  test("splits land on the Uncategorized pot, never NULL", async () => {
+describe("local record --pot", () => {
+  test("record without --pot fails with a clear error and writes nothing", async () => {
     const dbPath = await setupDb();
     const r = await cli(dbPath, [
       "record", "--account", "1", "--amount", "-12.50",
       "--description", "Test spend", "--source", "manual",
     ]);
-    expect(r.code).toBe(0);
-    const uncat = query<{ id: number }>(dbPath, "SELECT id FROM pots WHERE name = 'Uncategorized'")[0];
-    expect(uncat).toBeDefined();
-    const rows = query<{ pot_id: number | null }>(dbPath, "SELECT pot_id FROM splits");
-    expect(rows.length).toBe(1);
-    expect(rows[0].pot_id).toBe(uncat.id);
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(/pot is required/);
+    const txns = query<{ id: number }>(dbPath, "SELECT id FROM transactions");
+    expect(txns.length).toBe(0);
   });
 
   test("record with --pot still uses that pot", async () => {

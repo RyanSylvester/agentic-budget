@@ -1,6 +1,8 @@
 /** Pot management: create, rename, retarget, regroup, share config, delete.
  *  Deleting a pot never destroys history: its transactions, splits, and
- *  month assignments move to an "Uncategorized" pot (created on demand).
+ *  month assignments move to another pot the caller names. There are no
+ *  special pots; every pot is user data and every pot can be deleted
+ *  (except the user's last one, since every transaction needs a home).
  *  Pure DB functions that throw on bad input; routes translate to 400s/404s. */
 import type { Db, DbValue } from "./db-interface";
 import { tableExists } from "./db-interface";
@@ -235,52 +237,56 @@ export async function updatePot(db: Db, userId: number, id: number, input: PotIn
 }
 
 export interface PotDeleteSummary {
-  uncategorizedPotId: number;
+  moveToPotId: number;
+  moveToPotName: string;
   movedTransactions: number;
   movedAssignments: number;
 }
 
-/** The catch-all pot for a user's deleted pots' history. Created on demand.
- *  It lands in the user's most-used group (never a hardcoded "General"),
- *  so no stray group section appears from a pot the user never placed. */
-export async function uncategorizedPotId(db: Db, userId: number): Promise<number> {
-  const found = await db.get<{ id: number }>("SELECT id FROM pots WHERE user_id = ? AND name = 'Uncategorized' AND hidden = 0", userId);
-  if (found) return found.id;
-  const common = await db.get<{ pot_group: string }>(
-    `SELECT pot_group FROM pots WHERE user_id = ? AND hidden = 0
-     GROUP BY pot_group ORDER BY COUNT(*) DESC LIMIT 1`,
-    userId
-  );
-  const group = common?.pot_group ?? "General";
-  const row = await db.get<{ id: number }>(
-    `INSERT INTO pots (user_id, name, pot_group, target_type, target_cents) VALUES (?, 'Uncategorized', ?, 'average_3mo', 0) RETURNING id`,
-    userId, group
-  );
-  await ensureGroupOrderRow(db, userId, group);
-  return row!.id;
-}
-
-/** Delete a pot, moving its history to the user's Uncategorized pot. Never destroys data.
+/** Delete a pot, moving its history to the destination pot the caller names.
+ *  Nothing is destroyed and nothing is left orphaned; every pot_id reference
+ *  is handled explicitly:
+ *  - transactions and splits are re-pointed to the destination,
+ *  - assignments merge into the destination's month rows,
+ *  - a sinking schedule is configuration, not history: it goes with the pot,
+ *  - the emptied group drops from the group order when it has no pots left.
+ *  The destination must be a different pot of the same user. The user's last
+ *  pot cannot be deleted: every transaction needs a home.
  *  Sequential awaits, not a transaction: one writer per user (a single agent
  *  plus the human behind it), and every statement is scoped to that user's
  *  user_id, so two users' sequences never touch the same rows. D1 serializes
  *  concurrent writes on its primary; a second tab of the same user could
  *  already interleave before multi-user, and that has not changed. */
-export async function deletePot(db: Db, userId: number, id: number): Promise<PotDeleteSummary> {
+export async function deletePot(db: Db, userId: number, id: number, moveToPotId: unknown): Promise<PotDeleteSummary> {
   const pot = await db.get<{ id: number; name: string; pot_group: string }>("SELECT id, name, pot_group FROM pots WHERE id = ? AND user_id = ?", id, userId);
   if (!pot) throw new Error(`no pot ${id}`);
-  const uncat = await uncategorizedPotId(db, userId);
-  if (uncat === id) throw new Error("the Uncategorized pot cannot be deleted");
-  const txns = await db.run("UPDATE transactions SET pot_id = ? WHERE pot_id = ? AND user_id = ?", uncat, id, userId);
-  await db.run("UPDATE splits SET pot_id = ? WHERE pot_id = ? AND user_id = ?", uncat, id, userId);
-  // Move the pot's assignments to Uncategorized in one statement: the
+  const destId = Number(moveToPotId);
+  if (!Number.isInteger(destId) || destId <= 0) throw new Error("moveToPotId required: choose the pot that receives this pot's history");
+  if (destId === id) throw new Error("moveToPotId must be a different pot");
+  const dest = await db.get<{ id: number; name: string }>("SELECT id, name FROM pots WHERE id = ? AND user_id = ? AND hidden = 0", destId, userId);
+  if (!dest) throw new Error(`no pot ${destId}`);
+  const total = await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM pots WHERE user_id = ?", userId);
+  if ((total?.n ?? 0) <= 1) throw new Error("Create another pot first: the last pot cannot be deleted because every transaction needs a home");
+  // Splits are the source of truth for a transaction's pot (transactions.pot_id
+  // is a legacy column, always NULL on new rows), so count through them.
+  const txns = await db.get<{ n: number }>(
+    `SELECT COUNT(DISTINCT s.transaction_id) AS n FROM splits s
+     JOIN transactions t ON t.id = s.transaction_id
+     WHERE s.pot_id = ? AND s.user_id = ? AND t.user_id = ?`,
+    id,
+    userId,
+    userId
+  );
+  await db.run("UPDATE transactions SET pot_id = ? WHERE pot_id = ? AND user_id = ?", dest.id, id, userId);
+  await db.run("UPDATE splits SET pot_id = ? WHERE pot_id = ? AND user_id = ?", dest.id, id, userId);
+  // Move the pot's assignments to the destination in one statement: the
   // ON CONFLICT clause adds to any existing month row, exactly like the
   // old per-month loop.
   const moved = await db.run(
     `INSERT INTO assignments (user_id, month, pot_id, cents)
      SELECT user_id, month, ? AS pot_id, cents FROM assignments WHERE pot_id = ? AND user_id = ?
      ON CONFLICT (user_id, month, pot_id) DO UPDATE SET cents = cents + excluded.cents`,
-    uncat,
+    dest.id,
     id,
     userId
   );
@@ -292,5 +298,5 @@ export async function deletePot(db: Db, userId: number, id: number): Promise<Pot
   }
   await db.run("DELETE FROM pots WHERE id = ? AND user_id = ?", id, userId);
   await pruneEmptyGroup(db, userId, pot.pot_group);
-  return { uncategorizedPotId: uncat, movedTransactions: txns.changes, movedAssignments: moved.changes };
+  return { moveToPotId: dest.id, moveToPotName: dest.name, movedTransactions: txns?.n ?? 0, movedAssignments: moved.changes };
 }

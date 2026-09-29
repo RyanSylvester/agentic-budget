@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { userEvent, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 import { PotSheet } from "../App";
 import { fixtureContacts, fixturePots, makePot } from "./fixtures";
 import type { MockApiConfig } from "./mockApi";
@@ -11,7 +11,7 @@ const meta: Meta<typeof PotSheet> = {
     docs: {
       description: {
         component:
-          "Add or edit a pot: name, group, the rule that fills it next month, and which contact it is shared with (and their percentage). New pots default to the last-used group and the 3-month-average fill rule. Deleting moves the pot's history to Uncategorized instead of destroying it.",
+          "Add or edit a pot: name, group, the rule that fills it next month, and which contact it is shared with (and their percentage). New pots default to the last-used group and the 3-month-average fill rule. Deleting asks for a destination pot and moves the history there instead of destroying it.",
       },
     },
   },
@@ -29,7 +29,7 @@ const sharedPot = fixturePots.find((p) => p.name === "Rent share")!;
 const unsharedPot = fixturePots.find((p) => p.name === "Utilities")!;
 
 export const EditShared: Story = {
-  args: { pot: sharedPot, groups, onClose: () => {}, onSaved: () => {} },
+  args: { pot: sharedPot, groups, pots: fixturePots, onClose: () => {}, onSaved: () => {} },
   parameters: {
     mockApi: contactsApi,
     docs: { description: { story: "Editing a shared pot: name, group, fill rule, and the contact share config." } },
@@ -37,7 +37,7 @@ export const EditShared: Story = {
 };
 
 export const EditUnshared: Story = {
-  args: { pot: unsharedPot, groups, onClose: () => {}, onSaved: () => {} },
+  args: { pot: unsharedPot, groups, pots: fixturePots, onClose: () => {}, onSaved: () => {} },
   parameters: {
     mockApi: contactsApi,
     docs: { description: { story: "Editing a pot with no share config: the share section starts off." } },
@@ -45,7 +45,7 @@ export const EditUnshared: Story = {
 };
 
 export const AddNew: Story = {
-  args: { pot: null, groups, onClose: () => {}, onSaved: () => {} },
+  args: { pot: null, groups, pots: fixturePots, onClose: () => {}, onSaved: () => {} },
   parameters: {
     mockApi: contactsApi,
     docs: { description: { story: "Adding a pot from scratch; the share checkbox is off by default." } },
@@ -53,7 +53,7 @@ export const AddNew: Story = {
 };
 
 export const FillRuleLeftovers: Story = {
-  args: { pot: null, groups, onClose: () => {}, onSaved: () => {} },
+  args: { pot: null, groups, pots: fixturePots, onClose: () => {}, onSaved: () => {} },
   parameters: {
     mockApi: contactsApi,
     docs: {
@@ -69,23 +69,39 @@ export const FillRuleLeftovers: Story = {
   },
 };
 
-export const DeleteConfirm: Story = {
-  args: { pot: sharedPot, groups, onClose: () => {}, onSaved: () => {} },
+export const DeleteDestinationPicker: Story = {
+  args: { pot: sharedPot, groups, pots: fixturePots, onClose: () => {}, onSaved: () => {} },
   parameters: {
     mockApi: {
       ...contactsApi,
-      delete: { [`/api/pots/${sharedPot.id}`]: { ok: true, uncategorizedPotId: 99, movedTransactions: 12, movedAssignments: 3 } },
+      get: {
+        "/api/contacts": { contacts: fixtureContacts },
+        [`/api/pots/${sharedPot.id}/delete-preview`]: { potId: sharedPot.id, name: sharedPot.name, transactionCount: 12, assignmentCount: 3 },
+      },
+      delete: {
+        [`/api/pots/${sharedPot.id}`]: (body: unknown) => ({
+          ok: true,
+          moveToPotId: (body as any)?.moveToPotId ?? null,
+          moveToPotName: "Groceries",
+          movedTransactions: 12,
+          movedAssignments: 3,
+        }),
+      },
     } satisfies MockApiConfig,
     docs: {
       description: {
-        story: "Deleting asks first and explains that history moves to Uncategorized. (Interaction test.)",
+        story: "Deleting asks for a destination pot: the dialog names the counts that will move, the confirm button stays disabled until a pot is picked, and it reads \u201cMove & delete\u201d. (Interaction test.)",
       },
     },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole("button", { name: "Delete this pot…" }));
-    await canvas.findByText(/move to the Uncategorized pot/);
+    await canvas.findByText(/12 transactions and 3 assignments will move to the pot you pick/);
+    const confirm = canvas.getByRole("button", { name: "Move & delete" });
+    expect(confirm).toBeDisabled();
+    await userEvent.selectOptions(canvas.getByLabelText("Move history to"), String(fixturePots[3].id));
+    expect(canvas.getByRole("button", { name: "Move & delete" })).toBeEnabled();
   },
 };
 

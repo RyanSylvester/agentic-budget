@@ -14,10 +14,10 @@
  *       The invite code is required once any user exists; while the users
  *       table is empty the first user may sign up without one (bootstrap).
  *       Codes are single-use: validated, then claimed with a conditional
- *       UPDATE so concurrent signups cannot share one. Signup also creates
- *       the user's Uncategorized pot and mints a session, so the new user
- *       lands in the app without a second login. The old one-time /api/auth/setup now
- *       permanently 404s.
+ *       UPDATE so concurrent signups cannot share one. Signup mints a
+ *       session, so the new user lands in the app without a second login.
+ *       It seeds zero pots: the user creates their first pot in the app.
+ *       The old one-time /api/auth/setup now permanently 404s.
  *    5. Agent access: per-user bearer tokens. An authenticated user mints one
  *       via POST /api/auth/agent-tokens (the raw token is shown once; only
  *       its SHA-256 is stored) and revokes via DELETE. Requests present it
@@ -263,14 +263,14 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
 
   /** Signup with an invite code. The code is required once any user exists;
    *  while the users table is empty the first user may sign up without one
-   *  (bootstrap, like the old setup). The user insert, the code claim, and
-   *  the Uncategorized-pot provision run as ONE atomic batch: any failure
-   *  rolls all three back, so a failed signup can never leave an orphaned
-   *  user row or a half-claimed code (review L4). The code claim is still a
-   *  conditional UPDATE, so concurrent signups cannot share one code: the
-   *  loser sees zero claimed rows and its orphaned user row is deleted.
-   *  Signup also provisions the user's Uncategorized pot (deletePot's move
-   *  target). */
+   *  (bootstrap, like the old setup). The user insert and the code claim run
+   *  as ONE atomic batch: any failure rolls both back, so a failed signup
+   *  can never leave an orphaned user row or a half-claimed code (review
+   *  L4). The code claim is still a conditional UPDATE, so concurrent
+   *  signups cannot share one code: the loser sees zero claimed rows and
+   *  its orphaned user row is deleted.
+   *  Signup seeds zero pots: there are no special pots, and the new user
+   *  creates their first pot in the app. */
   app.post("/api/auth/signup", async (c) => {
     if (!config.pepper) return c.json({ error: "auth not configured" }, 500);
     const body = await c.req.json().catch(() => null);
@@ -293,8 +293,8 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
     const verifier = bytesToHex(await computeVerifier(config.pepper, kdfKey));
     const now = new Date().toISOString();
     // Batch statements cannot reference each other's results, so the code
-    // claim and pot provision locate the new user through the UNIQUE
-    // username instead of a returned id.
+    // claim locates the new user through the UNIQUE username instead of a
+    // returned id.
     const stmts: BatchStatement[] = [
       {
         sql: "INSERT INTO users (username, salt, verifier, kdf_params, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -307,16 +307,6 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
         params: [username, now, inviteCode],
       });
     }
-    stmts.push({
-      sql: "INSERT INTO pots (user_id, name, pot_group, target_type, target_cents) VALUES ((SELECT id FROM users WHERE username = ?), 'Uncategorized', 'General', 'average_3mo', 0)",
-      params: [username],
-    });
-    // The signup pot is the user's first group, so it takes position 0 in
-    // the group order (a brand-new user has no other groups or rows).
-    stmts.push({
-      sql: "INSERT INTO group_order (user_id, group_name, position) SELECT id, 'General', 0 FROM users WHERE username = ?",
-      params: [username],
-    });
     let results: BatchResult[];
     try {
       results = await db.batch(stmts);

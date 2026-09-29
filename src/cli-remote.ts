@@ -49,20 +49,6 @@ async function resolvePotRemote(remote: RemoteConfig, ref: string): Promise<numb
   return matches[0].id;
 }
 
-/** The Uncategorized pot id, creating it on demand exactly like the
- *  server-side ensureUncategorizedPotId does for local mode. */
-async function uncategorizedPotRemote(remote: RemoteConfig): Promise<number> {
-  const data = await api(remote, "/api/pots");
-  const pots = data.pots as { id: number; name: string }[];
-  const found = pots.find((p) => p.name === "Uncategorized");
-  if (found) return found.id;
-  const created = await api(remote, "/api/pots", {
-    method: "POST",
-    body: { name: "Uncategorized", group: "General", targetType: "fixed", targetCents: 0 },
-  });
-  return created.id;
-}
-
 /** Resolve a pot ref to its sinking schedule id. */
 async function resolveScheduleRemote(remote: RemoteConfig, ref: string): Promise<{ id: number; potName: string }> {
   const data = await api(remote, "/api/sinking");
@@ -122,7 +108,8 @@ async function remoteRecord(remote: RemoteConfig, rest: string[]): Promise<void>
   if (!validDate(date)) fail(`bad --date "${date}"; expected YYYY-MM-DD`);
   if (!["gmail", "mention", "manual"].includes(source)) fail(`bad --source "${source}"; expected gmail, mention, or manual`);
 
-  const potId = potRef ? await resolvePotRemote(remote, potRef) : await uncategorizedPotRemote(remote);
+  if (!potRef) fail("pot is required: pass --pot <name|id> (no default pot)");
+  const potId = await resolvePotRemote(remote, potRef);
   // Splits: same defaults as local mode, read from the pot's share config.
   let contactId = flag(rest, "contact-id") ? parseInt(flag(rest, "contact-id")!, 10) : null;
   let share = flag(rest, "share-cents") ? Math.round(parseFloat(flag(rest, "share-cents")!) * 100) : 0;
@@ -212,10 +199,13 @@ async function remotePot(remote: RemoteConfig, rest: string[]): Promise<void> {
   } else if (sub === "delete") {
     const potRef = flag(rest, "pot");
     if (!potRef) usage();
+    const moveToRef = flag(rest, "move-to");
+    if (!moveToRef) fail("move-to is required: pass --move-to <name|id> for the pot that receives this pot's history");
     const potId = await resolvePotRemote(remote, potRef);
-    const data = await api(remote, `/api/pots/${potId}`, { method: "DELETE" });
+    const moveToPotId = await resolvePotRemote(remote, moveToRef);
+    const data = await api(remote, `/api/pots/${potId}`, { method: "DELETE", body: { moveToPotId } });
     console.log(
-      `deleted pot ${potId}; ${data.movedTransactions} transactions and ${data.movedAssignments} assignments moved to Uncategorized (pot ${data.uncategorizedPotId})`
+      `deleted pot ${potId}; ${data.movedTransactions} transactions and ${data.movedAssignments} assignments moved to ${data.moveToPotName} (pot ${data.moveToPotId})`
     );
   } else if (sub === "rename" || sub === "retire" || sub === "unhide") {
     const potRef = flag(rest, "pot");
@@ -286,8 +276,8 @@ async function remoteSettle(remote: RemoteConfig, rest: string[]): Promise<void>
   const before = contact!.totalOwedCents;
   const s = await api(remote, "/api/settle", { method: "POST", body: { contactId, accountId, amountCents, note } });
   console.log(`settlement of $${fmtCents(amountCents)} recorded (cleared, confirmed).`);
-  for (const a of s.creditAllocations) console.log(`  credit ${(a.amountCents / 100).toFixed(2)} -> ${a.potName ?? "Uncategorized"}`);
-  for (const a of s.allocations) console.log(`  filled ${(a.amountCents / 100).toFixed(2)} -> ${a.potName ?? "Uncategorized"}`);
+  for (const a of s.creditAllocations) console.log(`  credit ${(a.amountCents / 100).toFixed(2)} -> ${a.potName ?? "(no pot)"}`);
+  for (const a of s.allocations) console.log(`  filled ${(a.amountCents / 100).toFixed(2)} -> ${a.potName ?? "(no pot)"}`);
   if (s.leftoverCents > 0) console.log(`  $${fmtCents(s.leftoverCents)} left over - credit for next time`);
   if (s.creditConsumedCents > 0) console.log(`  $${fmtCents(s.creditConsumedCents)} of prior credit consumed`);
   console.log(`${s.contactName} owed before: $${fmtCents(before)}`);

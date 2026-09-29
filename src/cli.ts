@@ -2,12 +2,13 @@
  *  runs instead of clicking through a UI.
  *
  *  Usage:
- *    bun src/cli.ts record --account 1 --amount -12.50 --description "Voila groceries" --source mention [--date 2026-09-26] [--cleared] [--pot 5] [--contact-id 1] [--share-cents 625] [--transfer] [--external-id stmt-abc123]
+ *    bun src/cli.ts record --account 1 --amount -12.50 --description "Voila groceries" --source mention --pot 5 [--date 2026-09-26] [--cleared] [--contact-id 1] [--share-cents 625] [--transfer] [--external-id stmt-abc123]
  *    bun src/cli.ts assign --month 2026-09 --pot Groceries --cents 60000
  *    bun src/cli.ts assign scaffold --month 2026-10 [--strategy average_3mo|last_month] [--dry-run]
  *    bun src/cli.ts recategorize --id 42 --pot Groceries
  *    bun src/cli.ts void --id 42
  *    bun src/cli.ts pot create --name "Nova" --group Life [--target-type savings] [--contact-id 1 --share-pct 50]
+ *    bun src/cli.ts pot delete --pot 12 --move-to 5   # history moves to pot 5; last pot cannot be deleted
  *    bun src/cli.ts pot rename --pot 12 --name "Nova Fund"
  *    bun src/cli.ts pot share --pot 12 --contact-id 1 [--share-pct 50]   # default 50%
  *    bun src/cli.ts pot unshare --pot 12
@@ -42,7 +43,7 @@ import { applySettlement, contactOwed } from "./settle";
 import { closePreview, applyClose } from "./close";
 import { assignToPot } from "./assign";
 import { contactBalances, createContact, deleteContact, listContacts, renameContact } from "./contacts";
-import { createPot, deletePot, updatePot, setGroupOrder, uncategorizedPotId } from "./pots";
+import { createPot, deletePot, updatePot, setGroupOrder } from "./pots";
 import { createSchedule, listSchedules, markPaid, removeSchedule, sinkingStatus } from "./sinking";
 import { createMigration } from "./migrations";
 import { assertSplitsSum, resolvePotId, validDate, validMonth, fmtCents } from "./money";
@@ -145,9 +146,10 @@ async function main() {
     const accountId = parseInt(flag("account") ?? "NaN", 10);
     const source = (flag("source") ?? "manual") as "gmail" | "mention" | "manual";
     const cleared = rest.includes("--cleared") ? "cleared" : "uncleared";
-    // No --pot means Uncategorized, exactly like remote mode: splits always
-    // carry a real pot, never NULL.
-    const potId = flag("pot") ? await mustResolvePot(db, userId, flag("pot")!) : await uncategorizedPotId(db, userId);
+    // --pot is required: splits always carry a real pot, never NULL, and
+    // there is no default pot to fall back to.
+    if (!flag("pot")) fail("pot is required: pass --pot <name|id> (no default pot)");
+    const potId = await mustResolvePot(db, userId, flag("pot")!);
     const isTransfer = rest.includes("--transfer") ? 1 : 0;
     const date = flag("date") ?? new Date().toISOString().slice(0, 10);
     const externalId = flag("external-id") ?? null;
@@ -295,10 +297,13 @@ async function main() {
     } else if (sub === "delete") {
       const potRef = flag("pot");
       if (!potRef) usage();
+      const moveToRef = flag("move-to");
+      if (!moveToRef) fail("move-to is required: pass --move-to <name|id> for the pot that receives this pot's history");
       const potId = await mustResolvePot(db, userId, potRef);
+      const moveToPotId = await mustResolvePot(db, userId, moveToRef);
       try {
-        const s = await deletePot(db, userId, potId);
-        console.log(`deleted pot ${potId}; ${s.movedTransactions} transactions and ${s.movedAssignments} assignments moved to Uncategorized (pot ${s.uncategorizedPotId})`);
+        const s = await deletePot(db, userId, potId, moveToPotId);
+        console.log(`deleted pot ${potId}; ${s.movedTransactions} transactions and ${s.movedAssignments} assignments moved to ${s.moveToPotName} (pot ${s.moveToPotId})`);
       } catch (e) {
         fail((e as Error).message);
       }
@@ -379,8 +384,8 @@ async function main() {
     const before = (await contactOwed(db, userId, contactId)).reduce((a, o) => a + o.owedCents, 0);
     const { allocations, creditAllocations, creditConsumedCents, leftoverCents } = await applySettlement(db, userId, { contactId, accountId, amountCents, note });
     console.log(`settlement of $${fmtCents(amountCents)} recorded (cleared, confirmed).`);
-    for (const a of creditAllocations) console.log(`  credit ${(a.amountCents / 100).toFixed(2)} -> ${a.potName ?? "Uncategorized"}`);
-    for (const a of allocations) console.log(`  filled ${(a.amountCents / 100).toFixed(2)} -> ${a.potName ?? "Uncategorized"}`);
+    for (const a of creditAllocations) console.log(`  credit ${(a.amountCents / 100).toFixed(2)} -> ${a.potName ?? "(no pot)"}`);
+    for (const a of allocations) console.log(`  filled ${(a.amountCents / 100).toFixed(2)} -> ${a.potName ?? "(no pot)"}`);
     if (leftoverCents > 0) console.log(`  $${fmtCents(leftoverCents)} left over — credit for next time`);
     if (creditConsumedCents > 0) console.log(`  $${fmtCents(creditConsumedCents)} of prior credit consumed`);
     console.log(`${contact.name} owed before: $${fmtCents(before)}`);

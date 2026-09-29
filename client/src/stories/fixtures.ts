@@ -170,7 +170,7 @@ export const fixtureTrend: TrendPoint[] = [
 ];
 
 /* Transactions-page rows: outflows, an inflow, a transfer, splits,
-   and an uncategorized one. */
+   and a just-imported expense. Every row lands in a real pot. */
 
 const fixtureChequing = fixtureAccounts[0];
 const groceriesPot = fixturePots.find((p) => p.name === "Groceries")!;
@@ -208,5 +208,5 @@ export const fixtureListedTxns: ListedTxn[] = [
   makeListedTxn({ date: "2026-09-24", description: "Mock transfer between accounts", amountCents: -89182, isTransfer: 1, potId: null, potName: null, potGroup: null }),
   makeListedTxn({ date: "2026-09-23", description: "Mock dinner out", amountCents: -9650, splitWithContact: 1, sharedCents: 4825, splitContactId: 1, splitContactName: "Alex", potId: diningPot.id, potName: diningPot.name, potGroup: diningPot.group }),
   makeListedTxn({ date: "2026-09-22", description: "Mock coffee stop", amountCents: -485, potId: coffeePot.id, potName: coffeePot.name, potGroup: coffeePot.group }),
-  makeListedTxn({ date: "2026-09-20", description: "Mock uncategorized import", amountCents: -3200, potId: null, potName: null, potGroup: null }),
+  makeListedTxn({ date: "2026-09-20", description: "Mock imported expense", amountCents: -3200, potId: diningPot.id, potName: diningPot.name, potGroup: diningPot.group }),
 ];

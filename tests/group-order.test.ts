@@ -144,10 +144,10 @@ describe("setGroupOrder", () => {
 
   test("deleting the last pot of a group prunes it without conjuring a General group", async () => {
     const db = await dbWithGroups();
+    const p1 = (await db.get<{ id: number }>("SELECT id FROM pots WHERE name = 'P1'"))!.id;
     const p2 = (await db.get<{ id: number }>("SELECT id FROM pots WHERE name = 'P2'"))!.id;
-    await deletePot(db, 1, p2);
-    // Quilt is gone, and the on-demand Uncategorized pot landed in an
-    // existing group instead of inventing a "General" one.
+    await deletePot(db, 1, p2, p1);
+    // Quilt is gone, and no new group was invented for the moved history.
     expect((await orderRows(db)).map(([g]) => g).sort()).toEqual(["Juniper", "Zebra"]);
   });
 });
@@ -197,11 +197,12 @@ describe("PUT /api/groups/order", () => {
 
   test("reorders the groups returned by GET /api/pots", async () => {
     const { app, json, cookie } = await setup();
-    expect(await potGroups(app, json, cookie)).toEqual(["General", "Zebra", "Quilt", "Juniper"]);
-    const r = await json("PUT", "/api/groups/order", { groups: ["Juniper", "Zebra", "Quilt", "General"] }, cookie);
+    // Signup seeds zero pots, so only the three created groups exist.
+    expect(await potGroups(app, json, cookie)).toEqual(["Zebra", "Quilt", "Juniper"]);
+    const r = await json("PUT", "/api/groups/order", { groups: ["Juniper", "Zebra", "Quilt"] }, cookie);
     expect(r.status).toBe(200);
-    expect((await r.json()).groups).toEqual(["Juniper", "Zebra", "Quilt", "General"]);
-    expect(await potGroups(app, json, cookie)).toEqual(["Juniper", "Zebra", "Quilt", "General"]);
+    expect((await r.json()).groups).toEqual(["Juniper", "Zebra", "Quilt"]);
+    expect(await potGroups(app, json, cookie)).toEqual(["Juniper", "Zebra", "Quilt"]);
   });
 
   test("rejects malformed bodies", async () => {

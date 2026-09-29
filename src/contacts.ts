@@ -34,7 +34,9 @@ export async function contactBalances(db: Db, userId: number): Promise<ContactBa
     const owed = await contactOwed(db, userId, c.id);
     const byPot = new Map<string, number>();
     for (const o of owed) {
-      const name = o.potName ?? "Uncategorized";
+      // Splits always reference a real pot; the fallback is a safety net that
+      // should never be user-visible in practice.
+      const name = o.potName ?? "(no pot)";
       byPot.set(name, (byPot.get(name) ?? 0) + o.owedCents);
     }
     out.push({

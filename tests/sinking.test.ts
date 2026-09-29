@@ -217,7 +217,8 @@ describe("sinking schedules", () => {
     const db = await testDb();
     const pot = await taxPot(db);
     await createSchedule(db, 1, pot, 120000, "2027-09");
-    await deletePot(db, 1, pot);
+    const dest = await createPot(db, 1, { name: "Groceries", group: "Food" });
+    await deletePot(db, 1, pot, dest);
     expect(await getSchedule(db, 1, pot)).toBeNull();
     expect(await listSchedules(db, 1)).toEqual([]);
   });

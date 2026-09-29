@@ -563,16 +563,44 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     }
   });
 
+  /** Delete-preview for a pot: how many transactions and assignments would
+   *  move, so the delete dialog can name the counts before confirming. */
+  app.get("/api/pots/:id/delete-preview", async (c) => {
+    const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
+    const id = badId(c, "id");
+    if (id === null) return c.json({ error: "bad pot id" }, 400);
+    const pot = await db.get<{ id: number; name: string }>("SELECT id, name FROM pots WHERE id = ? AND user_id = ?", id, userId);
+    if (!pot) return c.json({ error: `no pot ${id}` }, 404);
+    // Splits are the source of truth for a transaction's pot
+    // (transactions.pot_id is a legacy column, always NULL on new rows).
+    const txns = await db.get<{ n: number }>(
+      `SELECT COUNT(DISTINCT s.transaction_id) AS n FROM splits s
+       JOIN transactions t ON t.id = s.transaction_id
+       WHERE s.pot_id = ? AND s.user_id = ? AND t.user_id = ?`,
+      id,
+      userId,
+      userId
+    );
+    const asg = await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM assignments WHERE pot_id = ? AND user_id = ?", id, userId);
+    return c.json({ potId: id, name: pot.name, transactionCount: txns?.n ?? 0, assignmentCount: asg?.n ?? 0 });
+  });
+
   /** Delete a pot. Its transactions, splits, and assignments move to the
-   *  Uncategorized pot; nothing is destroyed. */
+   *  destination pot named in the body ({ "moveToPotId": number });
+   *  nothing is destroyed. */
   app.delete("/api/pots/:id", async (c) => {
     const db = await getDb();
     const userId = await requestUserId(c, db, authed);
     const id = badId(c, "id");
     if (id === null) return c.json({ error: "bad pot id" }, 400);
     if (!(await potExists(db, userId, id))) return c.json({ error: `no pot ${id}` }, 404);
+    const { ok, body } = await readJson(c);
+    // An empty body is not malformed here; it just means no destination was
+    // chosen, and deletePot's validation reports that clearly.
+    const moveToPotId = ok ? (body as any)?.moveToPotId : undefined;
     try {
-      const summary = await deletePot(db, userId, id);
+      const summary = await deletePot(db, userId, id, moveToPotId);
       return c.json({ ok: true, ...summary });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);

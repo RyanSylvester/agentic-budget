@@ -217,11 +217,11 @@ describe("auth endpoints", () => {
     expect(row.verifier).toBe(bytesToHex(await computeVerifier("test-pepper", KDF_KEY)));
     expect(row.kdf_params).toBe("m=19456,t=2,p=1");
 
-    // Signup provisions the user's Uncategorized pot (deletePot's move target).
-    const uncat = (await db.get(
-      "SELECT id FROM pots WHERE user_id = (SELECT id FROM users WHERE username = 'owner') AND name = 'Uncategorized'"
+    // Signup seeds zero pots: the user creates their first pot in the app.
+    const potCount = (await db.get(
+      "SELECT COUNT(*) AS n FROM pots WHERE user_id = (SELECT id FROM users WHERE username = 'owner')"
     )) as any;
-    expect(uncat?.id).toBeGreaterThan(0);
+    expect(potCount.n).toBe(0);
 
     const cookie = await loginAs(app);
     const me = await (await call(app, "GET", "/api/auth/me", { cookie })).json();
@@ -306,15 +306,15 @@ describe("auth endpoints", () => {
     expect(((await db.get("SELECT used_by FROM invite_codes WHERE code = ?", fresh)) as any).used_by).toBeNull();
   });
 
-  test("a mid-signup pot failure rolls back the user row and the code claim", async () => {
+  test("a mid-signup code-claim failure rolls back the user row and leaves the code unused", async () => {
     const { app, db } = await setupApp();
     await signupFirst(app);
     const cookie = await loginAs(app);
     const code = await mintInvite(app, cookie);
     const usersBefore = ((await db.get("SELECT COUNT(*) AS n FROM users")) as any).n;
-    // Simulate the L4 failure: the Uncategorized-pot insert aborts.
+    // Simulate the L4 failure: the invite-code claim aborts mid-batch.
     await db.exec(
-      "CREATE TRIGGER abort_pot BEFORE INSERT ON pots BEGIN SELECT RAISE(ABORT, 'boom'); END;"
+      "CREATE TRIGGER abort_claim BEFORE UPDATE ON invite_codes BEGIN SELECT RAISE(ABORT, 'boom'); END;"
     );
     const r = await jsonCall(app, "POST", "/api/auth/signup", {
       body: { username: "second", salt: SALT, kdfKey: KDF_KEY, inviteCode: code },
@@ -324,7 +324,7 @@ describe("auth endpoints", () => {
     expect(((await db.get("SELECT COUNT(*) AS n FROM users")) as any).n).toBe(usersBefore);
     expect(((await db.get("SELECT used_by FROM invite_codes WHERE code = ?", code)) as any).used_by).toBeNull();
     // Without the trigger the same signup succeeds and consumes the code.
-    await db.exec("DROP TRIGGER abort_pot");
+    await db.exec("DROP TRIGGER abort_claim");
     const ok = await jsonCall(app, "POST", "/api/auth/signup", {
       body: { username: "second", salt: SALT, kdfKey: KDF_KEY, inviteCode: code },
     });

@@ -907,7 +907,7 @@ export function ContactCard({ contact, accounts }: { contact: ContactBalance; ac
           <ul className="mt-1.5 space-y-1 text-[13px]">
             {last.allocations.map((a, i) => (
               <li key={i} className="flex items-center justify-between">
-                <span className="text-[var(--ink-2)]">{a.potName ?? "Uncategorized"}</span>
+                <span className="text-[var(--ink-2)]">{a.potName ?? "(no pot)"}</span>
                 <span className="t-nums">{money(a.amountCents)}</span>
               </li>
             ))}
@@ -925,10 +925,11 @@ export function ContactCard({ contact, accounts }: { contact: ContactBalance; ac
 
 /* Add or edit a pot: name, group, next-month fill rule, and who it's shared
  *  with (which contact and their percentage). Deleting moves the pot's
- *  history to the Uncategorized pot instead of destroying it. */
-export function PotSheet({ pot, groups, onClose, onSaved }: {
+ *  history to a destination pot the user picks instead of destroying it. */
+export function PotSheet({ pot, groups, pots, onClose, onSaved }: {
   pot: Pot | null;
   groups: string[];
+  pots: Pot[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -992,12 +993,31 @@ export function PotSheet({ pot, groups, onClose, onSaved }: {
     setBusy(false);
   };
 
+  const [moveToPotId, setMoveToPotId] = useState<string>("");
+  const [preview, setPreview] = useState<{ transactionCount: number; assignmentCount: number } | null>(null);
+  const openDelete = async () => {
+    setConfirmDelete(true);
+    setMoveToPotId("");
+    setPreview(null);
+    setError(null);
+    try {
+      const r = await fetch(`/api/pots/${pot!.id}/delete-preview`);
+      if (r.ok) setPreview(await r.json());
+    } catch {
+      /* counts are a nicety; the delete still works without them */
+    }
+  };
+
   const remove = async () => {
-    if (!pot || busy) return;
+    if (!pot || busy || !moveToPotId) return;
     setBusy(true);
     setError(null);
     try {
-      const r = await fetch(`/api/pots/${pot.id}`, { method: "DELETE" });
+      const r = await fetch(`/api/pots/${pot.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ moveToPotId: Number(moveToPotId) }),
+      });
       if (!r.ok) throw new Error((await r.json()).error ?? `HTTP ${r.status}`);
       onSaved();
       onClose();
@@ -1075,7 +1095,7 @@ export function PotSheet({ pot, groups, onClose, onSaved }: {
           <button onClick={onClose} className="btn-ghost px-4 py-2.5 text-[15px]">Cancel</button>
         </div>
         {pot && !confirmDelete && (
-          <button onClick={() => setConfirmDelete(true)} className="cursor-pointer text-[13px] text-[var(--muted)] hover:text-[var(--danger)]">
+          <button onClick={openDelete} className="cursor-pointer text-[13px] text-[var(--muted)] hover:text-[var(--danger)]">
             Delete this pot…
           </button>
         )}
@@ -1083,11 +1103,36 @@ export function PotSheet({ pot, groups, onClose, onSaved }: {
           <div className="rounded-[var(--r-md)] border border-[var(--danger)] p-4 text-[13px]">
             <div className="font-medium">Delete {pot.name}?</div>
             <div className="mt-1 text-[var(--ink-2)]">
-              Its transactions and assignments move to the Uncategorized pot. Nothing is destroyed, but this can't be undone.
+              {preview
+                ? `${preview.transactionCount} transaction${preview.transactionCount === 1 ? "" : "s"} and ${preview.assignmentCount} assignment${preview.assignmentCount === 1 ? "" : "s"} will move to the pot you pick. `
+                : "Its history will move to the pot you pick. "}
+              Nothing is destroyed, but this can't be undone.
             </div>
+            <label className="mt-3 mb-1.5 block font-medium text-[var(--ink-2)]" htmlFor="delete-move-to">
+              Move history to
+            </label>
+            <select
+              id="delete-move-to"
+              value={moveToPotId}
+              onChange={(e) => setMoveToPotId(e.target.value)}
+              className="field w-full px-3 py-2"
+            >
+              <option value="">Choose a pot…</option>
+              {pots
+                .filter((p) => p.id !== pot.id)
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+            </select>
             <div className="mt-3 flex gap-2">
-              <button onClick={remove} disabled={busy} className="cursor-pointer rounded-[var(--r-pill)] bg-[var(--danger)] px-4 py-2 font-medium text-white">
-                {busy ? "Deleting…" : "Delete pot"}
+              <button
+                onClick={remove}
+                disabled={busy || !moveToPotId}
+                className="cursor-pointer rounded-[var(--r-pill)] bg-[var(--danger)] px-4 py-2 font-medium text-white disabled:opacity-40"
+              >
+                {busy ? "Deleting…" : "Move & delete"}
               </button>
               <button onClick={() => setConfirmDelete(false)} className="btn-ghost px-4 py-2">Keep it</button>
             </div>
@@ -1127,6 +1172,16 @@ export function PotsTab({ month }: { month: string }) {
         </div>
       ) : error ? (
         <FetchError onRetry={retry} label="Couldn't load pots." />
+      ) : pots.length === 0 ? (
+        <div className="rounded-[var(--r-lg)] border border-dashed border-[var(--line)] px-6 py-16 text-center">
+          <div className="font-serif-d text-[22px] font-medium">No pots yet</div>
+          <p className="mx-auto mt-2 max-w-[340px] text-[14px] text-[var(--ink-2)]">
+            Pots are the buckets your money lives in. Create your first one to start budgeting.
+          </p>
+          <button onClick={() => setSheetPot("new")} className="btn-ink mt-5 px-5 py-2.5 text-[15px]">
+            Create your first pot
+          </button>
+        </div>
       ) : (
         <>
           <CloseSummaryCard month={month} onClosed={retry} />
@@ -1141,6 +1196,7 @@ export function PotsTab({ month }: { month: string }) {
         <PotSheet
           pot={sheetPot === "new" ? null : sheetPot}
           groups={groups}
+          pots={pots}
           onClose={() => setSheetPot(null)}
           onSaved={retry}
         />
@@ -2083,9 +2139,7 @@ export function TransactionsTab({ month }: { month: string }) {
     if (kind === "out" && !(t.amountCents < 0 && !t.isTransfer)) return false;
     if (kind === "in" && !(t.amountCents > 0 && !t.isTransfer)) return false;
     if (kind === "transfer" && !t.isTransfer) return false;
-    if (potFilter === "none") {
-      if (t.potId !== null) return false;
-    } else if (potFilter !== "all" && t.potId !== Number(potFilter)) return false;
+    if (potFilter !== "all" && t.potId !== Number(potFilter)) return false;
     if (q && !`${t.description} ${t.potName ?? ""}`.toLowerCase().includes(q)) return false;
     return true;
   });
@@ -2122,7 +2176,6 @@ export function TransactionsTab({ month }: { month: string }) {
           className="field max-w-[200px] px-3 py-2 text-[15px]"
         >
           <option value="all">All pots</option>
-          <option value="none">Uncategorized</option>
           {groups.map((g) => (
             <optgroup key={g} label={titleCase(g)}>
               {pots
@@ -2192,7 +2245,7 @@ export function TransactionsTab({ month }: { month: string }) {
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] text-[var(--muted)]">
                       <span>{fmtDate(t.date)}</span>
                       <span aria-hidden>·</span>
-                      <span className="truncate">{t.potName ?? "Uncategorized"}</span>
+                      <span className="truncate">{t.potName ?? "(no pot)"}</span>
                       {t.isTransfer ? <TxnBadge>Transfer</TxnBadge> : null}
                       {t.splitWithContact ? <TxnBadge>{t.splitContactName ? `split · ${t.splitContactName}` : "split"}</TxnBadge> : null}
                     </div>
