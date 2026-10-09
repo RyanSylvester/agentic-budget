@@ -92,6 +92,7 @@ export const LoginRateLimited: Story = {
 type SignupStory = StoryObj<typeof SignupScreen>;
 
 export const SignupDefault: SignupStory = {
+  render: (args) => <SignupScreen {...args} />,
   args: { deriveKey: fastKdf, onSignup: () => {} },
   parameters: {
     mockApi: {
@@ -102,6 +103,7 @@ export const SignupDefault: SignupStory = {
 };
 
 export const SignupMismatch: SignupStory = {
+  render: (args) => <SignupScreen {...args} />,
   args: { deriveKey: fastKdf, onSignup: () => {} },
   parameters: {
     mockApi: { post: { "/api/auth/signup": { ok: true } } } satisfies MockApiConfig,
@@ -118,6 +120,7 @@ export const SignupMismatch: SignupStory = {
 };
 
 export const SignupInviteRequired: SignupStory = {
+  render: (args) => <SignupScreen {...args} />,
   args: { deriveKey: fastKdf, onSignup: () => {} },
   parameters: {
     mockApi: {
@@ -142,6 +145,7 @@ export const SignupInviteRequired: SignupStory = {
 };
 
 export const SignupBadCode: SignupStory = {
+  render: (args) => <SignupScreen {...args} />,
   args: { deriveKey: fastKdf, onSignup: () => {} },
   parameters: {
     mockApi: {

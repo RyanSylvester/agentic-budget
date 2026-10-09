@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { monthLabel, shiftMonth } from "./format";
 
 /* ---------- primitives ---------- */
@@ -41,20 +41,66 @@ export function MonthNav({ month, onChange }: { month: string; onChange: (m: str
 /* ---------- sheet (modal) ---------- */
 
 // Bottom sheet on mobile, centered dialog on desktop. Backdrop click or
-// Escape dismisses. Follows the "More" sheet's visual pattern.
+// Escape dismisses. Keyboard and screen-reader behaviour of a real modal:
+// focus moves into the sheet on open (to an autoFocus field if there is one,
+// otherwise the panel itself, so phones do not pop the keyboard), Tab and
+// Shift+Tab stay inside, the page behind does not scroll, and focus returns
+// to whatever opened the sheet when it closes.
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export function Sheet({ label, onClose, children }: { label: string; onClose: () => void; children: React.ReactNode }) {
+  const panel = useRef<HTMLDivElement>(null);
+  // Read during the first render, before any autoFocus child takes focus.
+  const [opener] = useState(() => document.activeElement as HTMLElement | null);
+  // Callers usually pass an inline onClose; keep the latest in a ref so the
+  // mount effect below runs once and does not steal focus on re-render.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
+    const el = panel.current;
+    if (el && !el.contains(document.activeElement)) el.focus({ preventScroll: true });
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== "Tab" || !panel.current) return;
+      const items = [...panel.current.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((n) => n.offsetParent !== null);
+      if (items.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || active === panel.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+      if (opener && opener.isConnected) opener.focus({ preventScroll: true });
+    };
+  }, []);
+
   return (
     <div className="fixed inset-0 z-30" role="dialog" aria-modal="true" aria-label={label}>
       <div className="absolute inset-0 cursor-pointer bg-black/30" onClick={onClose} />
       <div
-        className="absolute inset-x-0 bottom-0 max-h-[92dvh] overflow-y-auto rounded-t-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--surface)] p-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:w-full sm:max-w-md sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[var(--r-lg)]"
+        ref={panel}
+        tabIndex={-1}
+        className="absolute inset-x-0 bottom-0 max-h-[92dvh] overflow-y-auto rounded-t-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--surface)] p-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] outline-none sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:w-full sm:max-w-md sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[var(--r-lg)]"
         style={{ boxShadow: "var(--shadow-elev)" }}
       >
         {children}

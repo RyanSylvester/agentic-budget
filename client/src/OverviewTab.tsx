@@ -197,9 +197,12 @@ export function AttentionCard({ attention, overview, accounts, onGo }: {
           <li key={i} className="border-b border-[var(--hairline)] last:border-0">
             <button onClick={() => onGo(it.tab)} className="-mx-2 flex w-[calc(100%+1rem)] items-center rounded-[var(--r-md)] px-2 py-2.5 text-left text-[15px] transition hover:bg-[var(--bg-sunken)] active:scale-[0.99] active:bg-[var(--bg-sunken)]">
               <span className="flex items-center gap-2.5">
-                <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--warning)]" />
-                {it.label}
+                <span aria-hidden className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--warning)]" />
+                {/* One flex item for the whole label: otherwise each text and
+                    amount fragment becomes its own item and picks up the gap. */}
+                <span className="min-w-0">{it.label}</span>
               </span>
+              <span aria-hidden className="ml-auto pl-3 text-[17px] text-[var(--muted)]">›</span>
             </button>
           </li>
         ))}
