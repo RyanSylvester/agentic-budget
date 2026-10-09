@@ -11,7 +11,7 @@ const meta: Meta<typeof AttentionCard> = {
     docs: {
       description: {
         component:
-          "The needs-attention card on the overview page. It surfaces the short list that matters right now: accounts that do not reconcile, unassigned money, and outstanding shared balances.",
+          "The needs-attention card on the overview page. It surfaces the short list that matters right now: accounts that do not reconcile and outstanding shared balances. Ready to assign is not repeated here; it has its own line under the hero.",
       },
     },
   },
@@ -34,7 +34,7 @@ export const AllItems: Story = {
   parameters: {
     docs: {
       description: {
-        story: "Every attention item present at once: unreconciled accounts, unassigned money, shared balance.",
+        story: "Every attention item present at once: unreconciled accounts and a shared balance.",
       },
     },
   },

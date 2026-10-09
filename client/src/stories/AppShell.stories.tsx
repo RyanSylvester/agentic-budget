@@ -130,3 +130,27 @@ export const DeepLinkedTab: Story = {
     }
   },
 };
+
+export const AssignFromOverview: Story = {
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "Ready to assign has one home per screen. On Overview it is the Assign button under the hero; tapping it lands on Pots, where the figure sits in the summary card next to Start assigning, and the close card no longer repeats it. (Interaction test.)",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const original = window.location.href;
+    const canvas = within(canvasElement);
+    try {
+      await userEvent.click(await canvas.findByRole("button", { name: /ready to assign.*Assign/ }));
+      await canvas.findAllByText("Rent share");
+      expect(await canvas.findByRole("button", { name: "Start assigning" })).toBeTruthy();
+      expect(canvas.queryByText(/still to assign/)).toBeNull();
+    } finally {
+      window.history.replaceState(null, "", original);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }
+  },
+};
