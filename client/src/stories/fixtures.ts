@@ -158,6 +158,7 @@ export function makeContactBalance(over: Partial<ContactBalance> = {}): ContactB
       { pot: "Groceries", cents: 6970 },
     ],
     oldest: "2026-09-01",
+    archived: false,
     ...over,
   };
 }
@@ -236,12 +237,17 @@ export function makeListedTxn(over: Partial<ListedTransaction> = {}): ListedTran
   };
 }
 
+const fixtureCard = fixtureAccounts[1];
+const card = { accountId: fixtureCard.id, accountName: fixtureCard.name };
+
 export const fixtureListedTxns: ListedTransaction[] = [
-  makeListedTxn({ date: "2026-09-27", description: "Mock grocery run", amountCents: -8421, splitWithContact: 1, sharedCents: 4210, splitContactId: 1, splitContactName: "Alex" }),
-  makeListedTxn({ date: "2026-09-26", description: "Mock transit top-up", amountCents: -15000, potId: transitPot.id, potName: transitPot.name, potGroup: transitPot.group }),
-  makeListedTxn({ date: "2026-09-25", description: "Mock paycheck deposit", amountCents: 250000, potId: paycheckPot.id, potName: paycheckPot.name, potGroup: paycheckPot.group }),
-  makeListedTxn({ date: "2026-09-24", description: "Mock transfer between accounts", amountCents: -89182, isTransfer: 1, potId: null, potName: null, potGroup: null }),
-  makeListedTxn({ date: "2026-09-23", description: "Mock dinner out", amountCents: -9650, splitWithContact: 1, sharedCents: 4825, splitContactId: 1, splitContactName: "Alex", potId: diningPot.id, potName: diningPot.name, potGroup: diningPot.group }),
+  makeListedTxn({ date: "2026-09-27", description: "Mock grocery run", amountCents: -8421, splitWithContact: 1, sharedCents: 4210, splitContactId: 1, splitContactName: "Alex", ...card }),
+  makeListedTxn({ date: "2026-09-27", description: "Mock bakery", amountCents: -1250, potId: coffeePot.id, potName: coffeePot.name, potGroup: coffeePot.group, ...card }),
+  makeListedTxn({ date: "2026-09-26", description: "Mock transit top-up", amountCents: -15000, cleared: "cleared", potId: transitPot.id, potName: transitPot.name, potGroup: transitPot.group }),
+  makeListedTxn({ date: "2026-09-25", description: "Mock paycheck deposit", amountCents: 250000, cleared: "reconciled", potId: paycheckPot.id, potName: paycheckPot.name, potGroup: paycheckPot.group }),
+  makeListedTxn({ date: "2026-09-24", description: "Mock transfer between accounts", amountCents: -89182, isTransfer: 1, cleared: "reconciled", potId: null, potName: null, potGroup: null }),
+  makeListedTxn({ date: "2026-09-23", description: "Mock dinner out", amountCents: -9650, splitWithContact: 1, sharedCents: 4825, splitContactId: 1, splitContactName: "Alex", cleared: "cleared", potId: diningPot.id, potName: diningPot.name, potGroup: diningPot.group, ...card }),
+  makeListedTxn({ date: "2026-09-22", description: "Alex settlement", amountCents: 20000, splitWithContact: 1, sharedCents: -20000, splitContactId: 1, splitContactName: "Alex", cleared: "cleared", settled: 1, potId: null, potName: null, potGroup: null }),
   makeListedTxn({ date: "2026-09-22", description: "Mock coffee stop", amountCents: -485, potId: coffeePot.id, potName: coffeePot.name, potGroup: coffeePot.group }),
-  makeListedTxn({ date: "2026-09-20", description: "Mock imported expense", amountCents: -3200, potId: diningPot.id, potName: diningPot.name, potGroup: diningPot.group }),
+  makeListedTxn({ date: "2026-09-20", description: "Mock imported expense", amountCents: -3200, potId: diningPot.id, potName: diningPot.name, potGroup: diningPot.group, ...card }),
 ];

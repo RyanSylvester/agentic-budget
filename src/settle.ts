@@ -4,8 +4,8 @@
  *  allocateSettlement; DB writes live in applySettlement, run as sequential
  *  awaits (single writer: one user, one agent). */
 import type { Db, DbValue } from "./db-interface";
-import type { Allocation, BackfillSummary, SettlementSummary } from "./api-types";
-export type { Allocation, BackfillSummary, SettlementSummary };
+import type { Allocation, BackfillSummary, SettleDirection, SettlementSummary } from "./api-types";
+export type { Allocation, BackfillSummary, SettleDirection, SettlementSummary };
 import { assertSplitsSum } from "./money";
 
 export interface OwedSplit {
@@ -66,54 +66,35 @@ export async function contactOwed(db: Db, userId: number, contactId?: number): P
   return rows.filter((r) => r.owedCents > 0);
 }
 
-/** Record a lump sum from a contact and allocate it against what they owe.
- *  Existing credit is consumed oldest-first (zero-cash allocations against
- *  the credit settlement), then the new money fills what is still owed.
+/** Record a settlement with a contact. "received" (the default): a lump sum
+ *  from them, allocated against what they owe. Existing credit is consumed
+ *  oldest-first (zero-cash allocations against the credit settlement), then
+ *  the new money fills what is still owed. "paid": money you sent them,
+ *  which draws down their credit (see applyPayout).
+ *
+ *  The settlement row is written first so every allocation it causes can
+ *  name it: rows consuming older credit carry consumed_by_settlement_id,
+ *  which is what lets undoSettlement put that credit back.
+ *
  *  Sequential awaits, not a transaction: one writer per user (a single agent
  *  plus the human behind it), and every statement carries that user's
  *  user_id, so two users' sequences never touch the same rows. */
 export async function applySettlement(
   db: Db,
   userId: number,
-  opts: { contactId: number; accountId: number; amountCents: number; note?: string; enteredBy?: "agent" | "user" }
+  opts: {
+    contactId: number;
+    accountId: number;
+    amountCents: number;
+    note?: string;
+    enteredBy?: "agent" | "user";
+    direction?: SettleDirection;
+  }
 ): Promise<SettlementSummary> {
+  if (opts.direction === "paid") return applyPayout(db, userId, opts);
   const enteredBy = opts.enteredBy ?? "agent";
   const contact = await db.get<{ id: number; name: string }>("SELECT id, name FROM contacts WHERE id = ? AND user_id = ?", opts.contactId, userId);
   if (!contact) throw new Error(`no contact ${opts.contactId}`);
-
-  // 1. Consume existing credit oldest-first, zero cash.
-  const creditAllocations: Allocation[] = [];
-  let creditConsumedCents = 0;
-  const credits = await db.all<{ id: number; leftover_cents: number }>(
-    `SELECT st.id, st.leftover_cents FROM settlements st
-     JOIN transactions t ON t.id = st.transaction_id
-     JOIN splits s ON s.transaction_id = t.id AND s.owner = 'contact' AND s.contact_id = ?
-     WHERE st.leftover_cents > 0 AND st.user_id = ? AND t.user_id = ? AND s.user_id = ? ORDER BY st.date, st.id`,
-    opts.contactId,
-    userId,
-    userId,
-    userId
-  );
-  if (credits.length > 0) {
-    for (const o of await contactOwed(db, userId, opts.contactId)) {
-      let need = o.owedCents;
-      for (const cr of credits) {
-        if (need <= 0) break;
-        if (cr.leftover_cents <= 0) continue;
-        const take = Math.min(need, cr.leftover_cents);
-        await db.run(`INSERT INTO settlement_allocations (user_id, settlement_id, split_id, amount_cents) VALUES (?, ?, ?, ?)`, userId, cr.id, o.splitId, take);
-        await db.run("UPDATE settlements SET leftover_cents = leftover_cents - ? WHERE id = ? AND user_id = ?", take, cr.id, userId);
-        cr.leftover_cents -= take;
-        need -= take;
-        creditConsumedCents += take;
-        creditAllocations.push({ splitId: o.splitId, potName: o.potName, amountCents: take });
-      }
-    }
-  }
-
-  // 2. Allocate the new money against what is still owed.
-  const owed = await contactOwed(db, userId, opts.contactId);
-  const { allocations, leftoverCents } = allocateSettlement(owed, opts.amountCents);
 
   const txn = await db.get<{ id: number }>(
     `INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, cleared)
@@ -132,15 +113,28 @@ export async function applySettlement(
     opts.contactId,
     opts.amountCents
   );
-
+  // leftover_cents starts at 0 (so this row is never read as credit below)
+  // and is set once the new money has been allocated.
   const st = await db.get<{ id: number }>(
-    `INSERT INTO settlements (user_id, transaction_id, date, amount_cents, leftover_cents, note) VALUES (?, ?, date('now'), ?, ?, ?) RETURNING id`,
+    `INSERT INTO settlements (user_id, transaction_id, date, amount_cents, leftover_cents, note) VALUES (?, ?, date('now'), ?, 0, ?) RETURNING id`,
     userId,
     txn!.id,
     opts.amountCents,
-    leftoverCents,
     opts.note ?? null
   );
+
+  // 1. Consume existing credit oldest-first, zero cash.
+  const { allocations: creditAllocations, consumedCents: creditConsumedCents } = await consumeCredit(
+    db,
+    userId,
+    opts.contactId,
+    st!.id,
+    await contactOwed(db, userId, opts.contactId)
+  );
+
+  // 2. Allocate the new money against what is still owed.
+  const owed = await contactOwed(db, userId, opts.contactId);
+  const { allocations, leftoverCents } = allocateSettlement(owed, opts.amountCents);
   // One multi-row INSERT instead of one per allocation.
   if (allocations.length > 0) {
     const values = allocations.map(() => "(?, ?, ?, ?)").join(",");
@@ -151,9 +145,181 @@ export async function applySettlement(
       ...params
     );
   }
+  if (leftoverCents > 0) {
+    await db.run("UPDATE settlements SET leftover_cents = ? WHERE id = ? AND user_id = ?", leftoverCents, st!.id, userId);
+  }
 
   await assertSplitsSum(db, userId, txn!.id);
-  return { contactId: contact.id, contactName: contact.name, allocations, creditAllocations, creditConsumedCents, leftoverCents };
+  return {
+    settlementId: st!.id,
+    direction: "received",
+    amountCents: opts.amountCents,
+    contactId: contact.id,
+    contactName: contact.name,
+    allocations,
+    creditAllocations,
+    creditConsumedCents,
+    leftoverCents,
+  };
+}
+
+/** Pay down `owed` from the contact's unconsumed credit, oldest credit
+ *  first. Each allocation row belongs to the credit's own settlement and is
+ *  stamped with `bySettlementId`, the settlement doing the consuming. */
+async function consumeCredit(
+  db: Db,
+  userId: number,
+  contactId: number,
+  bySettlementId: number,
+  owed: OwedSplit[]
+): Promise<{ allocations: Allocation[]; consumedCents: number }> {
+  const allocations: Allocation[] = [];
+  let consumedCents = 0;
+  const credits = await db.all<{ id: number; leftover_cents: number }>(
+    `SELECT st.id, st.leftover_cents FROM settlements st
+     JOIN transactions t ON t.id = st.transaction_id
+     JOIN splits s ON s.transaction_id = t.id AND s.owner = 'contact' AND s.contact_id = ?
+     WHERE st.leftover_cents > 0 AND st.id != ? AND st.user_id = ? AND t.user_id = ? AND s.user_id = ? ORDER BY st.date, st.id`,
+    contactId,
+    bySettlementId,
+    userId,
+    userId,
+    userId
+  );
+  if (credits.length === 0) return { allocations, consumedCents };
+  for (const o of owed) {
+    let need = o.owedCents;
+    for (const cr of credits) {
+      if (need <= 0) break;
+      if (cr.leftover_cents <= 0) continue;
+      const take = Math.min(need, cr.leftover_cents);
+      await db.run(
+        `INSERT INTO settlement_allocations (user_id, settlement_id, split_id, amount_cents, consumed_by_settlement_id) VALUES (?, ?, ?, ?, ?)`,
+        userId,
+        cr.id,
+        o.splitId,
+        take,
+        bySettlementId
+      );
+      await db.run("UPDATE settlements SET leftover_cents = leftover_cents - ? WHERE id = ? AND user_id = ?", take, cr.id, userId);
+      cr.leftover_cents -= take;
+      need -= take;
+      consumedCents += take;
+      allocations.push({ splitId: o.splitId, potName: o.potName, amountCents: take });
+    }
+  }
+  return { allocations, consumedCents };
+}
+
+/** Money you paid a contact, usually to give back credit from an
+ *  overpayment. Recorded as an outflow from the account whose single split
+ *  is contact-owned (so the user's spend views ignore it, like a received
+ *  settlement), with a settlement row of negative amount so it can be
+ *  listed and undone. The payout is then paid down from the contact's
+ *  credit; anything paid beyond that credit stays as an amount they owe. */
+async function applyPayout(
+  db: Db,
+  userId: number,
+  opts: { contactId: number; accountId: number; amountCents: number; note?: string; enteredBy?: "agent" | "user" }
+): Promise<SettlementSummary> {
+  const enteredBy = opts.enteredBy ?? "agent";
+  const contact = await db.get<{ id: number; name: string }>("SELECT id, name FROM contacts WHERE id = ? AND user_id = ?", opts.contactId, userId);
+  if (!contact) throw new Error(`no contact ${opts.contactId}`);
+
+  const txn = await db.get<{ id: number }>(
+    `INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, cleared)
+     VALUES (?, date('now'), ?, ?, ?, 'manual', ?, 'cleared') RETURNING id`,
+    userId,
+    opts.accountId,
+    -opts.amountCents,
+    opts.note ?? `Paid ${contact.name}`,
+    enteredBy
+  );
+  const split = await db.get<{ id: number }>(
+    `INSERT INTO splits (user_id, transaction_id, owner, contact_id, amount_cents) VALUES (?, ?, 'contact', ?, ?) RETURNING id`,
+    userId,
+    txn!.id,
+    opts.contactId,
+    -opts.amountCents
+  );
+  const st = await db.get<{ id: number }>(
+    `INSERT INTO settlements (user_id, transaction_id, date, amount_cents, leftover_cents, note) VALUES (?, ?, date('now'), ?, 0, ?) RETURNING id`,
+    userId,
+    txn!.id,
+    -opts.amountCents,
+    opts.note ?? null
+  );
+
+  // Only the payout itself is paid down here: other open shares were
+  // already netted against the credit in the balance the user saw.
+  const owed = (await contactOwed(db, userId, opts.contactId)).filter((o) => o.splitId === split!.id);
+  const { allocations: creditAllocations, consumedCents } = await consumeCredit(db, userId, opts.contactId, st!.id, owed);
+
+  await assertSplitsSum(db, userId, txn!.id);
+  return {
+    settlementId: st!.id,
+    direction: "paid",
+    amountCents: opts.amountCents,
+    contactId: contact.id,
+    contactName: contact.name,
+    allocations: [],
+    creditAllocations,
+    creditConsumedCents: consumedCents,
+    leftoverCents: 0,
+  };
+}
+
+/** Reverse a settlement as if it had never been recorded: credit it
+ *  consumed goes back to the settlements it came from, shares it paid down
+ *  are owed again, and its transaction is removed (not voided: a voided
+ *  settlement could be restored without its allocations, which would move
+ *  money twice). Refused when the transaction is reconciled, or when a
+ *  later settlement built on this one (used its credit, or paid down its
+ *  payout); undo that one first. All writes run as one batch. */
+export async function undoSettlement(db: Db, userId: number, settlementId: number): Promise<{ contactId: number | null }> {
+  const st = await db.get<{ id: number; transaction_id: number; cleared: string; contact_id: number | null }>(
+    `SELECT st.id, st.transaction_id, t.cleared,
+            (SELECT s.contact_id FROM splits s WHERE s.transaction_id = st.transaction_id AND s.owner = 'contact' AND s.user_id = st.user_id LIMIT 1) AS contact_id
+     FROM settlements st JOIN transactions t ON t.id = st.transaction_id AND t.user_id = st.user_id
+     WHERE st.id = ? AND st.user_id = ?`,
+    settlementId,
+    userId
+  );
+  if (!st) throw new Error(`no settlement ${settlementId}`);
+  if (st.cleared === "reconciled") throw new Error("already reconciled; settlement cannot be undone");
+  const usedLater = await db.get<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM settlement_allocations
+     WHERE settlement_id = ? AND consumed_by_settlement_id IS NOT NULL AND user_id = ?`,
+    st.id,
+    userId
+  );
+  const paidLater = await db.get<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM settlement_allocations a JOIN splits s ON s.id = a.split_id AND s.user_id = a.user_id
+     WHERE s.transaction_id = ? AND a.user_id = ? AND (a.consumed_by_settlement_id IS NULL OR a.consumed_by_settlement_id != ?)`,
+    st.transaction_id,
+    userId,
+    st.id
+  );
+  if (usedLater!.n > 0 || paidLater!.n > 0) {
+    throw new Error("a later settlement depends on this one; undo that one first");
+  }
+  await db.batch([
+    {
+      // Give consumed credit back to the settlements it came from.
+      sql: `UPDATE settlements SET leftover_cents = leftover_cents + (
+              SELECT COALESCE(SUM(a.amount_cents), 0) FROM settlement_allocations a
+              WHERE a.settlement_id = settlements.id AND a.consumed_by_settlement_id = ? AND a.user_id = ?)
+            WHERE user_id = ? AND id IN (
+              SELECT settlement_id FROM settlement_allocations WHERE consumed_by_settlement_id = ? AND user_id = ?)`,
+      params: [st.id, userId, userId, st.id, userId],
+    },
+    { sql: "DELETE FROM settlement_allocations WHERE consumed_by_settlement_id = ? AND user_id = ?", params: [st.id, userId] },
+    { sql: "DELETE FROM settlement_allocations WHERE settlement_id = ? AND user_id = ?", params: [st.id, userId] },
+    { sql: "DELETE FROM settlements WHERE id = ? AND user_id = ?", params: [st.id, userId] },
+    { sql: "DELETE FROM splits WHERE transaction_id = ? AND user_id = ?", params: [st.transaction_id, userId] },
+    { sql: "DELETE FROM transactions WHERE id = ? AND user_id = ?", params: [st.transaction_id, userId] },
+  ]);
+  return { contactId: st.contact_id };
 }
 
 /** Batched per-contact credit: one GROUP BY query joining settlements to

@@ -10,9 +10,9 @@ import { Hono } from "hono";
 import type { Db } from "./db-interface";
 import { registerAuth, authMiddleware, type AuthConfig, type Identity } from "./auth";
 import { monthSpend, allPotSpend, allPotInflow, recentTransactions, listTransactions, spendTrend, assignedTotal, rtaCents, potHistory } from "./queries";
-import { applySettlement, backfillSettlementAllocations, contactCredit, contactOwed, allContactCredit } from "./settle";
+import { applySettlement, backfillSettlementAllocations, contactCredit, contactOwed, allContactCredit, undoSettlement } from "./settle";
 import { createAccount, updateAccount } from "./accounts";
-import { contactBalances, createContact, renameContact, deleteContact } from "./contacts";
+import { contactBalances, contactLedger, createContact, renameContact, deleteContact, setContactArchived } from "./contacts";
 import { createPot, updatePot, deletePot, potExists, setGroupOrder } from "./pots";
 import { reconcile, suggestClear } from "./reconcile";
 import { closePreview, applyClose, shiftMonth, unclosedPreviousMonth } from "./close";
@@ -32,6 +32,7 @@ import type {
   AuthState,
   ClosePreview,
   CloseResponse,
+  ContactLedger,
   ContactsResponse,
   CreatedResponse,
   GroupOrderResponse,
@@ -716,11 +717,45 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     }
   });
 
-  /** Every contact with what they owe, grouped by pot. Powers Sharing. */
+  /** Every contact with what they owe, grouped by pot. Powers Sharing.
+   *  Archived contacts are left out unless ?archived=1. */
   app.get("/api/contacts", async (c) => {
     const db = await getDb();
     const userId = await requestReaderId(c, db, authed);
-    return c.json({ contacts: await contactBalances(db, userId) } satisfies ContactsResponse);
+    const includeArchived = c.req.query("archived") === "1";
+    return c.json({ contacts: await contactBalances(db, userId, { includeArchived }) } satisfies ContactsResponse);
+  });
+
+  /** The shares and settlements behind one contact's balance, newest first. */
+  app.get("/api/contacts/:id/ledger", async (c) => {
+    const db = await getDb();
+    const userId = await requestReaderId(c, db, authed);
+    const id = badId(c, "id");
+    if (id === null) return c.json({ error: "bad contact id" }, 400);
+    try {
+      return c.json((await contactLedger(db, userId, id)) satisfies ContactLedger);
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 404);
+    }
+  });
+
+  /** Archive or restore a contact. Body: { archived: boolean }. Archiving is
+   *  refused (400) while the contact has an open balance. */
+  app.post("/api/contacts/:id/archive", async (c) => {
+    const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
+    const id = badId(c, "id");
+    if (id === null) return c.json({ error: "bad contact id" }, 400);
+    const { ok, body } = await readJson(c);
+    if (!ok) return c.json({ error: "malformed JSON" }, 400);
+    if (typeof body?.archived !== "boolean") return c.json({ error: "archived must be true or false" }, 400);
+    try {
+      await setContactArchived(db, userId, id, body.archived);
+      return c.json({ ok: true } satisfies OkResponse);
+    } catch (e) {
+      const msg = (e as Error).message;
+      return c.json({ error: msg }, msg.startsWith("no contact") ? 404 : 400);
+    }
   });
 
   /** Add a contact. Body: { name }. */
@@ -819,8 +854,10 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     }
   });
 
-  // Record a lump sum from a contact and allocate it against what they owe, oldest first.
-  // Body: { contactId, accountId, amountCents, note? }.
+  // Record a settlement with a contact. direction "received" (default): a
+  // lump sum from them, allocated against what they owe, oldest first.
+  // direction "paid": money you sent them, drawn from their credit.
+  // Body: { contactId, accountId, amountCents, direction?, note? }.
   app.post("/api/settle", async (c) => {
     const db = await getDb();
     const userId = await requestUserId(c, db, authed);
@@ -831,13 +868,31 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const contactId = Number(body?.contactId);
     if (!accountId || !amountCents || amountCents <= 0) return c.json({ error: "accountId and positive amountCents required" }, 400);
     if (!contactId) return c.json({ error: "contactId required" }, 400);
+    const direction = body?.direction ?? "received";
+    if (direction !== "received" && direction !== "paid") return c.json({ error: `bad direction "${direction}"; expected received or paid` }, 400);
     if (!(await db.get("SELECT 1 FROM accounts WHERE id = ? AND user_id = ?", accountId, userId))) return c.json({ error: `no account ${accountId}` }, 404);
     try {
-      const summary = await applySettlement(db, userId, { contactId, accountId, amountCents, note: body?.note, enteredBy: requestKind(c) });
+      const summary = await applySettlement(db, userId, { contactId, accountId, amountCents, direction, note: body?.note, enteredBy: requestKind(c) });
       return c.json(summary);
     } catch (e) {
       const msg = (e as Error).message;
       return c.json({ error: msg }, msg.startsWith("no contact") ? 404 : 400);
+    }
+  });
+
+  // Reverse a settlement as if it was never recorded. 409 when it is
+  // reconciled or a later settlement depends on it.
+  app.post("/api/settlements/:id/undo", async (c) => {
+    const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
+    const id = badId(c, "id");
+    if (id === null) return c.json({ error: "bad settlement id" }, 400);
+    try {
+      await undoSettlement(db, userId, id);
+      return c.json({ ok: true } satisfies OkResponse);
+    } catch (e) {
+      const msg = (e as Error).message;
+      return c.json({ error: msg }, msg.startsWith("no settlement") ? 404 : 409);
     }
   });
 

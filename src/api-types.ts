@@ -387,11 +387,44 @@ export interface ContactBalance extends Contact {
   creditCents: number;
   oldest: string | null;
   byPot: { pot: string; cents: number }[];
+  /** Archived contacts are hidden by default but keep their history. */
+  archived: boolean;
 }
 
-/** GET /api/contacts */
+/** GET /api/contacts. Archived contacts appear only with ?archived=1. */
 export interface ContactsResponse {
   contacts: ContactBalance[];
+}
+
+/** One line of a contact's ledger: a transaction they share, or money that
+ *  moved between you to settle up. */
+export type ContactLedgerEntry =
+  | {
+      kind: "share";
+      transactionId: number;
+      date: string;
+      description: string;
+      potName: string | null;
+      /** Their share of the transaction (positive). */
+      shareCents: number;
+      /** What is still unpaid of that share. */
+      outstandingCents: number;
+    }
+  | {
+      kind: "settlement";
+      settlementId: number;
+      transactionId: number;
+      date: string;
+      description: string;
+      accountName: string;
+      /** Positive: they paid you. Negative: you paid them. */
+      amountCents: number;
+    };
+
+/** GET /api/contacts/:id/ledger : what makes up a contact's balance, newest first. */
+export interface ContactLedger {
+  contactId: number;
+  entries: ContactLedgerEntry[];
 }
 
 export interface Allocation {
@@ -400,8 +433,17 @@ export interface Allocation {
   amountCents: number; // positive
 }
 
+/** Which way settlement money moved: "received" from the contact (the
+ *  default) or "paid" to them. */
+export type SettleDirection = "received" | "paid";
+
 /** POST /api/settle */
 export interface SettlementSummary {
+  /** The settlement row; POST /api/settlements/:id/undo reverses it. */
+  settlementId: number;
+  direction: SettleDirection;
+  /** The money that moved (positive), whichever direction. */
+  amountCents: number;
   contactId: number;
   contactName: string;
   allocations: Allocation[];

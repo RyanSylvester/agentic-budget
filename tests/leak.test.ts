@@ -128,6 +128,38 @@ async function setupTwoUsers() {
 }
 
 describe("cross-user isolation", () => {
+  test("settlements, their undo, and contact ledgers stay per user", async () => {
+    const { app, db, cookieA, cookieB, contactA, contactB } = await setupTwoUsers();
+
+    // Bob settles with his contact; Alice can neither see nor undo it.
+    const settled = await jsonCall(app, "POST", "/api/settle", { cookie: cookieB, body: { contactId: contactB, accountId: 2, amountCents: 1500 } });
+    expect(settled.status).toBe(200);
+    const settlementB = ((await settled.json()) as any).settlementId as number;
+
+    expect((await jsonCall(app, "POST", `/api/settlements/${settlementB}/undo`, { cookie: cookieA })).status).toBe(404);
+    expect(await db.get("SELECT 1 AS x FROM settlements WHERE id = ?", settlementB)).toBeTruthy();
+
+    expect((await call(app, "GET", `/api/contacts/${contactB}/ledger`, { cookie: cookieA })).status).toBe(404);
+    const ledgerA = (await (await call(app, "GET", `/api/contacts/${contactA}/ledger`, { cookie: cookieA })).json()) as any;
+    expect(ledgerA.entries).toEqual([]);
+    const ledgerB = (await (await call(app, "GET", `/api/contacts/${contactB}/ledger`, { cookie: cookieB })).json()) as any;
+    expect(ledgerB.entries.map((e: any) => [e.kind, e.amountCents, e.accountName])).toEqual([["settlement", 1500, "B Chequing"]]);
+
+    // Alice archives her contact: Bob's list is unaffected, and archived
+    // contacts only come back with ?archived=1.
+    expect((await jsonCall(app, "POST", `/api/contacts/${contactA}/archive`, { cookie: cookieA, body: { archived: true } })).status).toBe(200);
+    const listA = (await (await call(app, "GET", "/api/contacts", { cookie: cookieA })).json()) as any;
+    expect(listA.contacts).toEqual([]);
+    const allA = (await (await call(app, "GET", "/api/contacts?archived=1", { cookie: cookieA })).json()) as any;
+    expect(allA.contacts.map((c: any) => [c.name, c.archived])).toEqual([["Alice Contact", true]]);
+    const listB = (await (await call(app, "GET", "/api/contacts?archived=1", { cookie: cookieB })).json()) as any;
+    expect(listB.contacts.map((c: any) => [c.name, c.archived])).toEqual([["Bob Contact", false]]);
+
+    // Bob's own undo works.
+    expect((await jsonCall(app, "POST", `/api/settlements/${settlementB}/undo`, { cookie: cookieB })).status).toBe(200);
+    expect(await db.get("SELECT 1 AS x FROM settlements WHERE id = ?", settlementB)).toBeNull();
+  });
+
   test("reads never surface the other user's data", async () => {
     const { app, cookieA, potA, potB } = await setupTwoUsers();
 
@@ -189,6 +221,8 @@ describe("cross-user isolation", () => {
     expect((await attempt("PUT", "/api/accounts/2", { name: "Hacked" })).status).toBe(404);
     expect((await attempt("POST", "/api/settle", { contactId: contactB, accountId: 1, amountCents: 1000 })).status).toBe(404);
     expect((await attempt("POST", "/api/settle", { contactId: 1, accountId: 2, amountCents: 1000 })).status).toBe(404);
+    expect((await attempt("POST", "/api/settle", { contactId: contactB, accountId: 1, amountCents: 1000, direction: "paid" })).status).toBe(404);
+    expect((await attempt("POST", `/api/contacts/${contactB}/archive`, { archived: true })).status).toBe(404);
 
     // Clear returns ok (no existence check) but must not touch Bob's row.
     expect((await attempt("POST", `/api/transactions/${txnB}/clear`)).status).toBe(200);
@@ -206,7 +240,7 @@ describe("cross-user isolation", () => {
 
     // Nothing of Bob's changed.
     expect(((await db.get("SELECT name AS n FROM pots WHERE id = ?", potB)) as any).n).toBe("Bob Pot");
-    expect(((await db.get("SELECT name AS n FROM contacts WHERE id = ?", contactB)) as any).n).toBe("Bob Contact");
+    expect(((await db.get("SELECT name AS n, archived AS a FROM contacts WHERE id = ?", contactB)) as any)).toEqual({ n: "Bob Contact", a: 0 });
     expect(((await db.get("SELECT name AS n, user_id AS u FROM accounts WHERE id = 2")) as any)).toEqual({ n: "B Chequing", u: 2 });
     expect(((await db.get("SELECT description AS d, voided AS v, cleared AS c FROM transactions WHERE id = ?", txnB)) as any)).toEqual({
       d: "bob spend", v: 0, c: "uncleared",
