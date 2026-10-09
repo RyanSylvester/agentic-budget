@@ -1,14 +1,18 @@
 /** Month assignments: the agent assigns every dollar of income to a pot.
  *  `assign` upserts the pot's assigned total for the month — idempotent.
  *  Assigning to an Income pot records planned/expected income for the month;
- *  it is stored in the same ledger but excluded from assignedTotal and RTA. */
+ *  it is stored in the same ledger but excluded from assignedTotal and RTA.
+ *  Spending pots may take a negative assignment: an offset such as a
+ *  pay-yourself bridge or a contact's reimbursed half, which hands dollars
+ *  back to RTA so a mirrored budget can still close at $0. */
 import type { Db, DbValue } from "./db-interface";
 import type { Assignment } from "./api-types";
 import { resolvePotId, validMonth } from "./money";
 
 /** Set a user's pot's assigned total for a month. Throws on bad input,
  *  unknown pots, or hidden pots. Income pots accept assignments too:
- *  the value means planned income, not a budget allocation. */
+ *  the value means planned income, not a budget allocation, so it must not
+ *  be negative. Spending pots accept any integer, negatives included. */
 export async function assignToPot(
   db: Db,
   userId: number,
@@ -17,10 +21,15 @@ export async function assignToPot(
   cents: number
 ): Promise<Assignment> {
   if (!validMonth(month)) throw new Error(`bad month "${month}"; expected YYYY-MM`);
-  if (!Number.isInteger(cents) || cents < 0) throw new Error(`bad amount "${cents}"; expected a non-negative integer of cents`);
+  if (!Number.isInteger(cents)) throw new Error(`bad amount "${cents}"; expected an integer of cents`);
   const potId = await resolvePotId(db, userId, String(potIdOrName));
-  const pot = await db.get<{ hidden: number; name: string }>("SELECT hidden, name FROM pots WHERE id = ? AND user_id = ?", potId, userId);
+  const pot = await db.get<{ hidden: number; name: string; is_assignable: number }>(
+    "SELECT hidden, name, is_assignable FROM pots WHERE id = ? AND user_id = ?",
+    potId,
+    userId
+  );
   if (pot!.hidden) throw new Error(`pot "${pot!.name}" is retired`);
+  if (cents < 0 && !pot!.is_assignable) throw new Error(negativeIncomeError(pot!.name));
   await db.run(
     `INSERT INTO assignments (user_id, month, pot_id, cents) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, month, pot_id) DO UPDATE SET cents = excluded.cents`,
     userId,
@@ -29,6 +38,10 @@ export async function assignToPot(
     cents
   );
   return { potId, month, cents };
+}
+
+function negativeIncomeError(name: string): string {
+  return `pot "${name}" is an income pot; planned income can't be negative. Put the offset on a spending pot instead`;
 }
 
 /** What was assigned to one pot for a month (0 when nothing). */
@@ -94,8 +107,9 @@ export async function allPotAssignedMonths(
 }
 
 /** Set assigned totals for many pots in one month with a single multi-row
- *  upsert. Validates like assignToPot: the month format, non-negative integer
- *  cents, pots exist and are not retired. Empty lines do nothing. */
+ *  upsert. Validates like assignToPot: the month format, integer cents (never
+ *  negative on income pots), pots exist and are not retired. Empty lines do
+ *  nothing. */
 export async function assignManyToPot(
   db: Db,
   userId: number,
@@ -105,12 +119,12 @@ export async function assignManyToPot(
   if (!validMonth(month)) throw new Error(`bad month "${month}"; expected YYYY-MM`);
   if (lines.length === 0) return;
   for (const l of lines) {
-    if (!Number.isInteger(l.cents) || l.cents < 0) throw new Error(`bad amount "${l.cents}"; expected a non-negative integer of cents`);
+    if (!Number.isInteger(l.cents)) throw new Error(`bad amount "${l.cents}"; expected an integer of cents`);
   }
   const potIds = [...new Set(lines.map((l) => l.potId))];
   const potPh = potIds.map(() => "?").join(",");
-  const pots = await db.all<{ id: number; hidden: number; name: string }>(
-    `SELECT id, hidden, name FROM pots WHERE id IN (${potPh}) AND user_id = ?`,
+  const pots = await db.all<{ id: number; hidden: number; name: string; is_assignable: number }>(
+    `SELECT id, hidden, name, is_assignable FROM pots WHERE id IN (${potPh}) AND user_id = ?`,
     ...potIds,
     userId
   );
@@ -119,6 +133,10 @@ export async function assignManyToPot(
     const p = byId.get(id);
     if (!p) throw new Error(`no pot with id ${id}`);
     if (p.hidden) throw new Error(`pot "${p.name}" is retired`);
+  }
+  for (const l of lines) {
+    const p = byId.get(l.potId)!;
+    if (l.cents < 0 && !p.is_assignable) throw new Error(negativeIncomeError(p.name));
   }
   const values = lines.map(() => "(?, ?, ?, ?)").join(",");
   const params: DbValue[] = [];

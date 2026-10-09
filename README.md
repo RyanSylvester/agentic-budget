@@ -71,6 +71,10 @@ for `wrangler dev`). Deploying is `bun run --cwd client build` followed by
   (`budget assign --month YYYY-MM --pot <id|name> --cents N`, idempotent).
   Ready-to-Assign = inflows − assignments; the month ends with RTA at exactly
   $0, and the close refuses to apply otherwise.
+  Spending pots also take negative assignments for offsets a mirrored budget
+  balances with, such as a pay-yourself bridge or a contact's reimbursed half
+  of a bill (`--cents -514946`); they hand dollars back to RTA. Income pots
+  never take negatives, since their assignment means planned income.
 - **Splits**: every transaction is split by owner (`user` / `contact`).
   The user's share counts in their views; a contact's share is recorded
   as what they owe and never counted as the user's spending. Settlements
