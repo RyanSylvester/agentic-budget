@@ -5,7 +5,7 @@ import { PotsTab } from "./PotsTab";
 import { SettingsTab } from "./SettingsTab";
 import { SharingTab } from "./SharingTab";
 import { TransactionsTab } from "./TransactionsTab";
-import { useApi } from "./api";
+import { useApi, useOnline } from "./api";
 import { TABS, type Tab, tabFromUrl, tabLabel } from "./tabs";
 import type { Attention } from "./types";
 import { MonthNav, Sheet } from "./ui";
@@ -189,9 +189,9 @@ export function MobileTabBar({ tab, onGo, closeAlert, initialMoreOpen = false }:
  *  auth gate below has confirmed a session. Also the Storybook entry point. */
 export function AppShell() {
   const [tab, setTab] = useState<Tab>(tabFromUrl);
-  const [refreshKey, setRefreshKey] = useState(0);
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const { data: attention } = useApi<Attention>("/api/attention");
+  const online = useOnline();
 
   // Keep the tab in the URL (?tab=pots) so a refresh lands back on the
   // current tab, and browser back/forward moves between tabs.
@@ -254,15 +254,20 @@ export function AppShell() {
           <span className="font-serif-d text-[19px] font-medium tracking-tight">Daybook</span>
         </header>
         <div className="mx-auto max-w-5xl px-5 pb-32 pt-2 md:px-8 md:py-8 md:pb-16">
+          {!online && (
+            <div role="status" className="card mb-5 px-4 py-3 text-[13px] text-[var(--ink-2)]">
+              You're offline. Showing what was last loaded; changes won't save until you're back.
+            </div>
+          )}
           {MONTH_TABS.includes(tab) && <MonthNav month={month} onChange={setMonth} />}
 
-          {tab === "overview" && <OverviewTab key={`o-${refreshKey}-${month}`} month={month} onGo={go} />}
+          {tab === "overview" && <OverviewTab key={`o-${month}`} month={month} onGo={go} />}
 
-          {tab === "pots" && <PotsTab key={`p-${refreshKey}-${month}`} month={month} />}
+          {tab === "pots" && <PotsTab key={`p-${month}`} month={month} />}
 
-          {tab === "transactions" && <TransactionsTab key={`t-${refreshKey}-${month}`} month={month} />}
+          {tab === "transactions" && <TransactionsTab key={`t-${month}`} month={month} />}
 
-          {tab === "sharing" && <SharingTab key={`s-${refreshKey}`} />}
+          {tab === "sharing" && <SharingTab />}
 
           {tab === "accounts" && (
             <div>

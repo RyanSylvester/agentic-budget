@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AppShell } from "./AppShell";
 import { LoginScreen, SignupScreen } from "./AuthScreens";
-import { prime } from "./api";
+import { invalidate, onUnauthorized, prime } from "./api";
 import type { AuthState } from "./types";
 import { Skeleton } from "./ui";
 
@@ -15,9 +15,26 @@ export default function App() {
   const [auth, setAuth] = useState<AuthState | null>(null);
   const [failed, setFailed] = useState(false);
   const [authView, setAuthView] = useState<"login" | "signup">("login");
+  const [notice, setNotice] = useState<string | null>(null);
+  const signedIn = useRef(false);
+  signedIn.current = auth?.authenticated === true;
+
+  // A 401 from any data call means the session ended (expired or logged out
+  // elsewhere): drop back to login instead of leaving retry buttons that can
+  // never succeed.
+  useEffect(() => {
+    onUnauthorized(() => {
+      if (!signedIn.current) return;
+      setNotice("Your session ended. Log in again to pick up where you left off.");
+      setAuthView("login");
+      setAuth((a) => (a ? { ...a, authenticated: false } : a));
+    });
+    return () => onUnauthorized(null);
+  }, []);
 
   const load = () => {
     setFailed(false);
+    invalidate();
     // Warm the data cache in parallel with the auth check: the five hot
     // endpoints start fetching before the shell even renders, so the first
     // paint already has real data instead of skeletons popping in one by
@@ -78,7 +95,14 @@ export default function App() {
     return authView === "signup" ? (
       <SignupScreen onSignup={load} onBackToLogin={() => setAuthView("login")} />
     ) : (
-      <LoginScreen onAuthenticated={load} onSignup={() => setAuthView("signup")} />
+      <LoginScreen
+        notice={notice}
+        onAuthenticated={() => {
+          setNotice(null);
+          load();
+        }}
+        onSignup={() => setAuthView("signup")}
+      />
     );
   }
   return <AppShell />;

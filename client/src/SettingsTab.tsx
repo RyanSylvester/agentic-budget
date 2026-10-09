@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useApi } from "./api";
+import { useApi, send } from "./api";
 import type { AgentToken, AgentTokenCreated, AgentTokensResponse, AuthState } from "./types";
 import { Skeleton, FetchError } from "./ui";
 
@@ -116,7 +116,7 @@ function AgentTokensCard() {
     setCreating(true);
     setCreateError(null);
     try {
-      const r = await fetch("/api/auth/agent-tokens", {
+      const r = await send("/api/auth/agent-tokens", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim() || "cli" }),
@@ -137,7 +137,7 @@ function AgentTokensCard() {
     if (revokingId !== null) return;
     setRevokingId(id);
     try {
-      const r = await fetch(`/api/auth/agent-tokens/${id}`, { method: "DELETE" });
+      const r = await send(`/api/auth/agent-tokens/${id}`, { method: "DELETE" });
       if (!r.ok) throw new Error("revoke failed");
       retry();
     } catch {

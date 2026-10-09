@@ -2,7 +2,7 @@ import { useState } from "react";
 import { BudgetTable } from "./BudgetTable";
 import { PotSheet } from "./PotSheet";
 import { ScaffoldSheet } from "./ScaffoldSheet";
-import { useApi } from "./api";
+import { useApi, send } from "./api";
 import { money, monthLabel, titleCase, trendLabel } from "./format";
 import type { ClosePreview, Pot, PotsResponse, TrendPoint, TrendResponse } from "./types";
 import { FetchError, Skeleton } from "./ui";
@@ -58,7 +58,7 @@ export function CloseSummaryCard({ month, onClosed }: { month: string; onClosed:
     setBusy(true);
     setFailed(null);
     try {
-      const r = await fetch("/api/close", {
+      const r = await send("/api/close", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ month }),

@@ -1,3 +1,4 @@
+import { send } from "./api";
 import { useEffect, useRef, useState } from "react";
 import { MoneyInput } from "./MoneyInput";
 import { money, shortMonth, titleCase } from "./format";
@@ -42,7 +43,7 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
     setBusy(true);
     setFailed(null);
     try {
-      const r = await fetch("/api/assign", {
+      const r = await send("/api/assign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ month, potId: pot.id, cents }),
