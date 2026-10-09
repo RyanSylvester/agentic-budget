@@ -2,7 +2,7 @@
    no real transaction descriptions, no personal names. Contact names used
    ("Alex", "Sam") are fictional stand-ins, never real people. */
 
-import type { Account, Attention, ClosePreview, ContactBalance, ListedTransaction, Overview, Pot, RecentTransaction, TrendPoint } from "../types";
+import type { Account, Attention, ClosePreview, PotCloseLine, ContactBalance, ListedTransaction, Overview, Pot, RecentTransaction, TrendPoint } from "../types";
 
 export const MONTH = "2026-09";
 
@@ -86,6 +86,7 @@ export function makeAttention(over: Partial<Attention> = {}): Attention {
     rtaCents: 487250,
     unsettledSharedCents: 0,
     sharedOwedBy: [],
+    unclosedMonth: null,
     ...over,
   };
 }
@@ -106,6 +107,45 @@ export function makeClosePreview(over: Partial<ClosePreview> = {}): ClosePreview
     ...over,
   };
 }
+
+/** A pinned "today" for stories whose look depends on the date: mid-month,
+ *  and the last days of the month, when closing early is offered. */
+export const TODAY_MID = "2026-09-14";
+export const TODAY_MONTH_END = "2026-09-29";
+export const PAST_MONTH = "2026-08";
+export const FUTURE_MONTH = "2026-10";
+
+/** The month's pots with $5,120 of planned income and $4,800 assigned, as a
+ *  freshly filled future month looks: nothing received or spent yet. */
+export const fixturePlannedPots: Pot[] = fixturePots.map((p) =>
+  p.name === "Paycheck"
+    ? { ...p, assignedCents: 512000 }
+    : p.name === "Emergency buffer"
+      ? { ...p, assignedCents: 185000, spentCents: 0 }
+      : { ...p, spentCents: 0, sharedCents: 0 }
+);
+
+/** Close-preview pot lines: next month's fill amounts. */
+export const fixtureCloseLines: PotCloseLine[] = [
+  { name: "Rent share", wireframeCents: 172000 },
+  { name: "Utilities", wireframeCents: 14000 },
+  { name: "Internet", wireframeCents: 9000 },
+  { name: "Groceries", wireframeCents: 58500 },
+  { name: "Dining out", wireframeCents: 21000 },
+  { name: "Transit", wireframeCents: 15000 },
+  { name: "Car insurance", wireframeCents: 12500, wireframeSkipped: true },
+  { name: "Emergency buffer", wireframeCents: 0, targetType: "savings" as const },
+  { name: "Paycheck", wireframeCents: 0, assignable: false },
+].map((l, i) => ({
+  potId: i + 1,
+  targetType: "fixed",
+  targetCents: 0,
+  spentCents: 0,
+  historyCents: [],
+  assignable: true,
+  wireframeSkipped: false,
+  ...l,
+}));
 
 export function makeContactBalance(over: Partial<ContactBalance> = {}): ContactBalance {
   return {

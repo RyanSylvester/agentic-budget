@@ -11,7 +11,7 @@ const meta: Meta<typeof Hero> = {
     docs: {
       description: {
         component:
-          "The overview page header. It shows the month's total spend in large light type, the daily pace, and ready-to-assign. Ready to assign appears only here on Overview: with money waiting it is an Assign button that jumps to Pots. Past months show their closed totals instead.",
+          "The overview page header. It shows the month's total spend in large light type, the daily pace, and ready-to-assign. Ready to assign appears only here on Overview: with money waiting it is an Assign button that jumps to Pots. The figure is labelled Spent this month, or Spent in <Month> elsewhere; past months read final, future months do not.",
       },
     },
   },
@@ -44,7 +44,7 @@ export const CurrentMonthZeroRta: Story = {
 export const PastMonth: Story = {
   args: { overview: makeOverview({ month: "2026-08", confirmedSpendCents: 198450 }), isCurrent: false },
   parameters: {
-    docs: { description: { story: "A closed month shows final totals; nothing is editable." } },
+    docs: { description: { story: "A past month: Spent in August, marked final." } },
   },
 };
 
@@ -66,5 +66,12 @@ export const WithoutAction: Story = {
   args: { overview: makeOverview(), isCurrent: true, onAssign: undefined },
   parameters: {
     docs: { description: { story: "Without an onAssign handler the line renders as plain text." } },
+  },
+};
+
+export const FutureMonth: Story = {
+  args: { overview: makeOverview({ month: "2026-12", confirmedSpendCents: 0, rtaCents: 0 }), isCurrent: false, isFuture: true },
+  parameters: {
+    docs: { description: { story: "A month that hasn't started: Spent in December, not called final." } },
   },
 };

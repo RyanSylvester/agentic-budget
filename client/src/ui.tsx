@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { monthLabel, shiftMonth } from "./format";
+import { MONTHS, currentMonthLocal, monthLabel, shiftMonth } from "./format";
 
 /* ---------- primitives ---------- */
 
@@ -22,16 +22,29 @@ export function FetchError({ onRetry, label = "Couldn't load this." }: { onRetry
   );
 }
 
+// Away from the running month, a "Back to <Month>" pill sits under the label
+// so the way home is one tap instead of counting chevrons.
 export function MonthNav({ month, onChange }: { month: string; onChange: (m: string) => void }) {
   // Chevron glyph size, not text: kept off the type scale.
   const btn =
     "flex h-11 w-11 items-center justify-center text-[20px] text-[var(--ink-2)] transition active:scale-95";
+  const current = currentMonthLocal();
   return (
     <div className="mb-5 flex items-center justify-between">
       <button aria-label="Previous month" onClick={() => onChange(shiftMonth(month, -1))} className={btn}>
         ‹
       </button>
-      <span className="text-lg font-medium">{monthLabel(month)}</span>
+      <div className="flex flex-col items-center gap-1">
+        <span className="text-lg font-medium">{monthLabel(month)}</span>
+        {month !== current && (
+          <button
+            onClick={() => onChange(current)}
+            className="rounded-[var(--r-pill)] bg-[var(--bg-sunken)] px-3 py-1 text-sm font-medium text-[var(--ink-2)] transition active:scale-95"
+          >
+            Back to {MONTHS[Number(current.slice(5, 7)) - 1]}
+          </button>
+        )}
+      </div>
       <button aria-label="Next month" onClick={() => onChange(shiftMonth(month, 1))} className={btn}>
         ›
       </button>

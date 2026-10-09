@@ -206,9 +206,11 @@ export function AppShell() {
   // the close card now lives there.
   const now = new Date();
   const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const closeAlert = now.getDate() >= lastDay - 2 && (attention?.rtaCents ?? 0) > 0;
+  const closeAlert =
+    (now.getDate() >= lastDay - 2 && (attention?.rtaCents ?? 0) > 0) || !!attention?.unclosedMonth;
 
-  const go = (t: Tab) => {
+  const go = (t: Tab, m?: string) => {
+    if (m) setMonth(m);
     setTab(t);
     const url = new URL(window.location.href);
     url.searchParams.set("tab", t);
@@ -266,7 +268,16 @@ export function AppShell() {
 
           {tab === "overview" && <OverviewTab key={`o-${month}`} month={month} onGo={go} />}
 
-          {tab === "pots" && <PotsTab key={`p-${month}`} month={month} />}
+          {tab === "pots" && (
+            <PotsTab
+              key={`p-${month}`}
+              month={month}
+              onGoMonth={(m) => {
+                setMonth(m);
+                window.scrollTo(0, 0);
+              }}
+            />
+          )}
 
           {tab === "transactions" && <TransactionsTab key={`t-${month}`} month={month} />}
 
