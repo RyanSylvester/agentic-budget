@@ -241,6 +241,18 @@ function validUsername(v: unknown): v is string {
   return typeof v === "string" && v.trim().length > 0 && v.trim().length <= 80;
 }
 
+/** Usernames are case-insensitive: phones auto-capitalise the first letter.
+ *  Trim and lower-case ASCII only, matching SQLite's built-in lower(), so a
+ *  normalised name compares equal to `lower(username)` for every stored row,
+ *  including mixed-case names created before signup normalised them. */
+export function normaliseUsername(v: string): string {
+  return v.trim().replace(/[A-Z]/g, (ch) => ch.toLowerCase());
+}
+
+/** Case-insensitive user lookup. Should two legacy rows differ only in case,
+ *  the exact-case match wins so neither account becomes unreachable. */
+const USER_BY_NAME = "FROM users WHERE lower(username) = ? ORDER BY username = ? DESC LIMIT 1";
+
 export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthConfig): void {
   /** Challenge: {salt, kdf_params} for the user. Unknown usernames get a
    *  random salt so the response shape never reveals whether a user exists. */
@@ -249,7 +261,8 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
     if (!validUsername(body?.username)) return c.json({ error: "username required" }, 400);
     const db = await getDb();
     const row = await db.get<{ salt: string; kdf_params: string }>(
-      "SELECT salt, kdf_params FROM users WHERE username = ?",
+      `SELECT salt, kdf_params ${USER_BY_NAME}`,
+      normaliseUsername(body.username),
       body.username.trim()
     );
     if (row) return c.json({ salt: row.salt, kdf_params: row.kdf_params } satisfies AuthChallenge);
@@ -275,7 +288,7 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
   app.post("/api/auth/signup", async (c) => {
     if (!config.pepper) return c.json({ error: "auth not configured" }, 500);
     const body = await c.req.json().catch(() => null);
-    const username = validUsername(body?.username) ? body.username.trim() : "";
+    const username = validUsername(body?.username) ? normaliseUsername(body.username) : "";
     const salt = typeof body?.salt === "string" && /^[0-9a-fA-F]{32}$/.test(body.salt) ? body.salt.toLowerCase() : "";
     const kdfKey = typeof body?.kdfKey === "string" && /^[0-9a-fA-F]{64}$/.test(body.kdfKey) ? body.kdfKey : "";
     const rawCode = typeof body?.inviteCode === "string" ? body.inviteCode.trim().toLowerCase() : "";
@@ -290,6 +303,11 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
     if (inviteCode) {
       const ok = await db.get("SELECT code FROM invite_codes WHERE code = ? AND used_by IS NULL", inviteCode);
       if (!ok) return c.json({ error: "invalid or already-used invite code" }, 400);
+    }
+    // The UNIQUE constraint is case-sensitive and legacy rows may be mixed
+    // case, so check for a case-insensitive clash explicitly.
+    if (await db.get("SELECT id FROM users WHERE lower(username) = ?", username)) {
+      return c.json({ error: "that username is taken" }, 400);
     }
     const verifier = bytesToHex(await computeVerifier(config.pepper, kdfKey));
     const now = new Date().toISOString();
@@ -344,16 +362,20 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
   app.post("/api/auth/login", async (c) => {
     if (!config.pepper) return c.json({ error: "auth not configured" }, 500);
     const body = await c.req.json().catch(() => null);
-    const username = validUsername(body?.username) ? body.username.trim() : "";
+    const rawName = validUsername(body?.username) ? body.username.trim() : "";
     const kdfKey = typeof body?.kdfKey === "string" && /^[0-9a-fA-F]{64}$/.test(body.kdfKey) ? body.kdfKey : "";
-    if (!username || !kdfKey) return c.json({ error: "username and kdfKey required" }, 400);
+    if (!rawName || !kdfKey) return c.json({ error: "username and kdfKey required" }, 400);
     if (await rateLimitHit(config.kv, clientIp(c))) return c.json({ error: "too many attempts; try again later" }, 429);
     const db = await getDb();
-    const row = await db.get<{ id: number; verifier: string }>("SELECT id, verifier FROM users WHERE username = ?", username);
+    const row = await db.get<{ id: number; username: string; verifier: string }>(
+      `SELECT id, username, verifier ${USER_BY_NAME}`,
+      normaliseUsername(rawName),
+      rawName
+    );
     const expected = row ? hexToBytes(row.verifier) : crypto.getRandomValues(new Uint8Array(32));
     const actual = await computeVerifier(config.pepper, kdfKey);
     if (!row || !timingSafeEqual(actual, expected)) return c.json({ error: "wrong username or password" }, 401);
-    const token = await mintSession(config.kv, row.id, username);
+    const token = await mintSession(config.kv, row.id, row.username);
     c.header("Set-Cookie", sessionCookie(token, SESSION_TTL_SECONDS));
     return c.json({ ok: true } satisfies OkResponse);
   });

@@ -113,6 +113,10 @@ export function LoginScreen({ onAuthenticated, onSignup, deriveKey = deriveKdfKe
             id="login-username"
             type="text"
             autoComplete="username"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            autoFocus
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             className={inputCls}
@@ -139,7 +143,7 @@ export function LoginScreen({ onAuthenticated, onSignup, deriveKey = deriveKdfKe
         </button>
       </form>
       {onSignup && (
-        <button onClick={onSignup} className="-m-2 mt-4 w-full p-2 text-center text-[13px] text-[var(--ink-2)] underline underline-offset-2">
+        <button onClick={onSignup} className="mt-2 w-full py-2 text-center text-[13px] text-[var(--ink-2)] underline underline-offset-2">
           Need an account? Sign up
         </button>
       )}
@@ -213,6 +217,9 @@ export function SignupScreen({ onSignup, onBackToLogin, deriveKey = deriveKdfKey
             id="signup-username"
             type="text"
             autoComplete="username"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             className={inputCls}
