@@ -1,98 +1,166 @@
 @import "tailwindcss";
 
-/* Warm Ledger design system. Light/dark via variable swap on
-   prefers-color-scheme; components reference tokens, never raw colors. */
+/* Mist design system (light) with Dusk as its dark mode. Light/dark via
+   variable swap: prefers-color-scheme by default, overridable with a
+   data-theme="light" | "dark" attribute on <html> or any wrapper (Storybook
+   uses the wrapper form). Components reference tokens, never raw colors. */
 
 :root {
-  color-scheme: light dark;
-
-  --bg: #f7f7f5;
-  --bg-sunken: #f0efeb;
-  --surface: #ffffff;
-
-  --ink: #161616;
-  --ink-2: #4c4c49;
-  --muted: #86867f;
-  --faint: #babab3;
-
-  --hairline: #e6e6e1;
-  --hairline-strong: #d6d6d0;
-
-  --accent: #1e6b42;
-  --accent-soft: #e2eee6;
-  --on-accent: #ffffff;
-
-  --success: #2e9e5b;
-  --warning: #9c6b23;
-  --warning-soft: #f4ebda;
-  --danger: #be3b32;
-  --danger-soft: #f8e9e5;
-
-  --r-sm: 8px;
-  --r-md: 12px;
-  --r-lg: 14px;
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 20px;
   --r-pill: 999px;
 
-  /* Neutral categorical ramp for charts, largest segment first.
-     Components reference these tokens, never raw colors, so dark mode
-     keeps working. */
-  --chart-1: #1e6b42;
-  --chart-2: #2b2b28;
-  --chart-3: #6f6f68;
-  --chart-4: #a9a9a0;
-  --chart-5: #d8d8d0;
-  --chart-6: #5b7a8c;
-  --chart-7: #c9c9c4;
-  --chart-8: #8f8f88;
+  /* Type scale. Prefer these over one-off sizes in new code. */
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 15px;
+  --text-lg: 17px;
+  --text-xl: 24px;
+  --text-2xl: 42px;
 
-  /* Six-month spend bars: solid ink in both schemes. */
-  --bar: #1a1a1a;
+  --font-sans: "Onest", -apple-system, "SF Pro Text", "Segoe UI", sans-serif;
+  --font-display: var(--font-sans);
+}
 
-  --shadow-card: 0 1px 2px rgba(20, 20, 19, 0.05);
-  --shadow-elev: 0 12px 32px rgba(20, 20, 19, 0.1);
+:root,
+[data-theme="light"] {
+    --bg: #eef1f4;
+    --bg-sunken: #f4f6f8;
+    --surface: #ffffff;
 
-  --font-sans: "Inter", -apple-system, "SF Pro Text", "Segoe UI", sans-serif;
-  --font-serif: "Newsreader", Georgia, "Times New Roman", serif;
+    --ink: #17212b;
+    --ink-2: #3d4a57;
+    --muted: #7a8794;
+    --faint: #a9b3bd;
+
+    --hairline: #e7ebef;
+    --hairline-strong: #d5dbe1;
+    --line: var(--hairline-strong);
+
+    --accent: #4f8a6f;
+    --accent-soft: #e8f1ec;
+    --on-accent: #ffffff;
+
+    --success: #3f7d60;
+    --warning: #b07a2a;
+    --warning-soft: #f6eddd;
+    --danger: #c2524c;
+    --danger-soft: #f8e7e5;
+
+    /* Pot progress tracks: fill is spent / assigned. */
+    --track: #edf0f3;
+    --fill: #4f8a6f;
+    --fill-over: #d0605a;
+
+    --chart-1: #4f8a6f;
+    --chart-2: #17212b;
+    --chart-3: #7a8794;
+    --chart-4: #a9b3bd;
+    --chart-5: #d5dbe1;
+    --chart-6: #6c8ec2;
+    --chart-7: #c6ced6;
+    --chart-8: #93a0ac;
+
+    /* Trend line. */
+    --bar: #4f8a6f;
+
+    --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 10px 28px rgba(16, 24, 40, 0.05);
+    --shadow-elev: 0 16px 40px rgba(16, 24, 40, 0.14);
+
+    color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #141412;
-    --bg-sunken: #1a1a17;
-    --surface: #1e1e1b;
+  :root:not([data-theme="light"]) {
+      --bg: #0e1320;
+      --bg-sunken: #121828;
+      --surface: #151c2c;
 
-    --ink: #f4f4f0;
-    --ink-2: #d8d8d2;
-    --muted: #9b9b94;
-    --faint: #6a6a63;
+      --ink: #e8ecf5;
+      --ink-2: #c3cad8;
+      --muted: #8a94aa;
+      --faint: #5e6880;
 
-    --hairline: rgba(244, 244, 240, 0.1);
-    --hairline-strong: rgba(244, 244, 240, 0.18);
+      --hairline: #1f2738;
+      --hairline-strong: #2a3348;
+      --line: var(--hairline-strong);
 
-    --accent: #55b37e;
-    --accent-soft: rgba(85, 179, 126, 0.16);
-    --on-accent: #0f120f;
+      --accent: #8fa8ff;
+      --accent-soft: rgba(143, 168, 255, 0.14);
+      --on-accent: #0e1320;
 
-    --success: #3fba6f;
-    --warning: #c08a3e;
-    --warning-soft: rgba(192, 138, 62, 0.14);
-    --danger: #d4695f;
-    --danger-soft: rgba(212, 105, 95, 0.14);
+      --success: #7fe0b4;
+      --warning: #e8b86a;
+      --warning-soft: rgba(232, 184, 106, 0.14);
+      --danger: #ff8a7a;
+      --danger-soft: rgba(255, 138, 122, 0.14);
+
+      --track: #1f2840;
+      --fill: #8fa8ff;
+      --fill-over: #ff8a7a;
+
+      --chart-1: #8fa8ff;
+      --chart-2: #e8ecf5;
+      --chart-3: #8a94aa;
+      --chart-4: #5e6880;
+      --chart-5: #2a3348;
+      --chart-6: #7fe0b4;
+      --chart-7: #3a4560;
+      --chart-8: #6f7a92;
+
+      --bar: #8fa8ff;
+
+      --shadow-card: none;
+      --shadow-elev: 0 16px 40px rgba(0, 0, 0, 0.5);
+
+      color-scheme: dark;
+}
+}
+
+[data-theme="dark"] {
+    --bg: #0e1320;
+    --bg-sunken: #121828;
+    --surface: #151c2c;
+
+    --ink: #e8ecf5;
+    --ink-2: #c3cad8;
+    --muted: #8a94aa;
+    --faint: #5e6880;
+
+    --hairline: #1f2738;
+    --hairline-strong: #2a3348;
+    --line: var(--hairline-strong);
+
+    --accent: #8fa8ff;
+    --accent-soft: rgba(143, 168, 255, 0.14);
+    --on-accent: #0e1320;
+
+    --success: #7fe0b4;
+    --warning: #e8b86a;
+    --warning-soft: rgba(232, 184, 106, 0.14);
+    --danger: #ff8a7a;
+    --danger-soft: rgba(255, 138, 122, 0.14);
+
+    --track: #1f2840;
+    --fill: #8fa8ff;
+    --fill-over: #ff8a7a;
+
+    --chart-1: #8fa8ff;
+    --chart-2: #e8ecf5;
+    --chart-3: #8a94aa;
+    --chart-4: #5e6880;
+    --chart-5: #2a3348;
+    --chart-6: #7fe0b4;
+    --chart-7: #3a4560;
+    --chart-8: #6f7a92;
+
+    --bar: #8fa8ff;
 
     --shadow-card: none;
-    --shadow-elev: 0 12px 32px rgba(0, 0, 0, 0.4);
+    --shadow-elev: 0 16px 40px rgba(0, 0, 0, 0.5);
 
-    --chart-1: #55b37e;
-    --chart-2: #ecece6;
-    --chart-3: #a9a9a0;
-    --chart-4: #76766e;
-    --chart-5: #4c4c46;
-    --chart-6: #7e9bb0;
-    --chart-7: #3b3b37;
-    --chart-8: #55554f;
-
-    --bar: #edede8;
-  }
+    color-scheme: dark;
 }
 
 @layer base {
@@ -101,6 +169,14 @@
     color: var(--ink);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+  }
+  /* Keyboard focus only: clicks no longer leave a heavy outline. */
+  :focus {
+    outline: none;
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
   ::selection {
     background: var(--accent-soft);
@@ -131,9 +207,11 @@
   .t-nums {
     font-variant-numeric: tabular-nums;
   }
+  /* Display headings and headline figures. Name kept from the earlier
+     serif system so existing call sites keep working. */
   .font-serif-d {
-    font-family: var(--font-serif);
-    font-optical-sizing: auto;
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
   }
   .eyebrow {
     font-size: 12px;
@@ -163,6 +241,39 @@
   }
   .btn-ink:disabled {
     opacity: 0.5;
+  }
+  .btn-ghost {
+    background: transparent;
+    color: var(--ink-2);
+    border: 1px solid var(--hairline-strong);
+    border-radius: var(--r-pill);
+    font-weight: 500;
+    transition: background-color 150ms ease-out, transform 150ms ease-out;
+  }
+  .btn-ghost:hover {
+    background: var(--bg-sunken);
+  }
+  .btn-ghost:active {
+    transform: scale(0.98);
+  }
+  .btn-ghost:disabled {
+    opacity: 0.5;
+  }
+  /* Pot progress: a rounded track filled to spent / assigned. */
+  .track {
+    height: 6px;
+    border-radius: var(--r-pill);
+    background: var(--track);
+    overflow: hidden;
+  }
+  .track > span {
+    display: block;
+    height: 100%;
+    border-radius: var(--r-pill);
+    background: var(--fill);
+  }
+  .track > span.over {
+    background: var(--fill-over);
   }
   .field {
     background: transparent;

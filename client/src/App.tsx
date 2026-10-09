@@ -128,8 +128,8 @@ export interface ListedTxn {
 
 /* ---------- helpers ---------- */
 
-const money = (cents: number) =>
-  `${cents < 0 ? "−" : ""}$${(Math.abs(cents) / 100).toFixed(2)}`;
+// One money format everywhere: grouped thousands, true minus sign.
+const money = moneyGrouped;
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const monthLabel = (ym: string) => {
@@ -229,7 +229,7 @@ export function Hero({ overview, isCurrent, loading }: { overview: Overview | nu
       </div>
       {isCurrent && overview.rtaCents != null && (
         <div className="mt-1.5 text-[15px]">
-          <span className="t-nums font-medium text-[var(--ink-2)]">{money(overview.rtaCents)}</span>
+          <span className="t-nums font-medium text-[var(--accent)]">{money(overview.rtaCents)}</span>
           <span className="text-[var(--muted)]"> ready to assign</span>
         </div>
       )}
@@ -364,7 +364,7 @@ export function SplitTag({ p }: { p: Pot }) {
     : p.sharePct === 50 ? "split 50/50"
     : `${p.contactName ?? "Shared"} ${p.sharePct}%`;
   return (
-    <span className="t-nums ml-2 inline-flex items-center rounded-[var(--r-pill)] border border-[var(--hairline)] bg-[var(--bg-sunken)] px-2 py-0.5 align-middle text-[11px] font-medium text-[var(--ink)]">
+    <span className="t-nums ml-2 inline-flex items-center rounded-[var(--r-pill)] border border-transparent bg-[var(--accent-soft)] px-2 py-0.5 align-middle text-[11px] font-medium text-[var(--accent)]">
       {label}
     </span>
   );
@@ -468,7 +468,7 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
         const share = shareLabel(assigned, totalAssigned);
         const isOpen = open[g.name] ?? true;
         return (
-          <section key={g.name} className="overflow-hidden rounded-[12px] bg-[var(--bg-sunken)]">
+          <section key={g.name} className="card overflow-hidden">
             {/* Group header. The word "assigned" is intentionally absent from the
               visible UI. The percentage pill is the semantic rescue: no other
               figure on this screen is ever a percentage, so "$X, N%" can only
@@ -487,7 +487,7 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
             >
               <span className="flex min-w-0 flex-1 items-baseline gap-2">
                 <span aria-hidden="true" className="shrink-0 text-[13px] text-[var(--faint)]">{isOpen ? "▾" : "▸"}</span>
-                <span className="truncate font-serif-d text-[18px] font-medium text-[var(--ink)]">{titleCase(g.name)}</span>
+                <span className="truncate text-[17px] font-semibold text-[var(--ink)]">{titleCase(g.name)}</span>
               </span>
               <span className="t-nums flex shrink-0 items-baseline gap-2 whitespace-nowrap">
                 <span className={`text-[22px] font-semibold ${assigned === 0 ? "text-[var(--muted)]" : "text-[var(--ink)]"}`}>
@@ -530,6 +530,24 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
                       <Available assignedCents={p.assignedCents ?? 0} spentCents={p.spentCents} />
                     </span>
                   </div>
+                  {/* spent / assigned progress, once per row; sinking pots have their own bar */}
+                  {!p.sinking && (() => {
+                    const a = p.assignedCents ?? 0;
+                    const over = p.spentCents > a;
+                    const pct = over ? 100 : a > 0 ? Math.max(0, Math.min(100, (p.spentCents / a) * 100)) : 0;
+                    return (
+                      <div
+                        className="track mt-2.5"
+                        role="progressbar"
+                        aria-valuenow={Math.round(pct)}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-label={`${p.name}: ${money(p.spentCents)} of ${money(a)} spent`}
+                      >
+                        <span className={over ? "over" : undefined} style={{ width: `${pct}%` }} />
+                      </div>
+                    );
+                  })()}
                 </div>
               ))}
               </div>
@@ -694,7 +712,7 @@ export function CloseSummaryCard({ month, onClosed }: { month: string; onClosed:
         ].map((s) => (
           <div key={s.label} className="rounded-[var(--r-md)] bg-[var(--bg-sunken)] px-2 py-3">
             <div className="text-[12px] text-[var(--muted)]">{s.label}</div>
-            <div className="t-nums mt-0.5 text-[17px] font-semibold leading-none">{money(s.cents)}</div>
+            <div className="t-nums mt-0.5 text-[17px] font-medium leading-none">{money(s.cents)}</div>
           </div>
         ))}
       </div>
@@ -1247,24 +1265,78 @@ export function PotsTab({ month }: { month: string }) {
 // covers this month's spend, so this stays a summary, not a dashboard.
 export function TrendSpark({ trend }: { trend: TrendPoint[] }) {
   if (trend.length === 0) return null;
-  const max = Math.max(...trend.map((t) => t.spent), 1);
-  const cur = trend[trend.length - 1].month;
+  const W = 300;
+  const H = 72;
+  const PAD = 4; // keep the stroke and end dot off the top/bottom edges
+  const max = Math.max(...trend.map((t) => (Number.isFinite(t.spent) ? t.spent : 0)), 0) * 1.1 || 1;
+  const n = trend.length;
+  // x as a fraction of width: points sit at the centre of each label column.
+  const xFrac = (i: number) => (i + 0.5) / n;
+  const yFrac = (v: number) => {
+    const s = Number.isFinite(v) ? Math.max(0, v) : 0;
+    return (PAD + (1 - s / max) * (H - 2 * PAD)) / H;
+  };
+  const pts = trend.map((t, i) => [xFrac(i) * W, yFrac(t.spent) * H] as const);
+  const line = pts.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`).join(" ");
+  const area = n > 1 ? `${line} L${pts[n - 1][0].toFixed(2)},${H} L${pts[0][0].toFixed(2)},${H} Z` : "";
+  const last = trend[n - 1];
+  // Static id: every instance defines an identical gradient, so a duplicate is harmless.
+  const gradId = "trend-spark-fill";
   return (
     <div>
-      <div className="flex h-12 items-end gap-1.5" role="img" aria-label="Spending trend, last six months">
-        {trend.map((t) => (
-          <div key={t.month} className="flex h-full flex-1 items-end" title={`${monthLabel(t.month)}: ${money(t.spent)}`}>
-            <div
-              className="w-full rounded-t-[3px]"
-              style={{
-                height: `${Math.max(5, (t.spent / max) * 100)}%`,
-                background: t.month === cur ? "var(--ink)" : "var(--bar)",
-              }}
-            />
-          </div>
-        ))}
+      <div className="relative h-[72px]" role="img" aria-label="Spending trend, last six months">
+        <svg
+          className="absolute inset-0 h-full w-full overflow-visible"
+          viewBox={`0 0 ${W} ${H}`}
+          preserveAspectRatio="none"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" style={{ stopColor: "var(--bar)", stopOpacity: 0.22 }} />
+              <stop offset="100%" style={{ stopColor: "var(--bar)", stopOpacity: 0 }} />
+            </linearGradient>
+          </defs>
+          {n > 1 && (
+            <>
+              <path d={area} fill={`url(#${gradId})`} stroke="none" />
+              <path
+                d={line}
+                fill="none"
+                style={{ stroke: "var(--bar)" }}
+                strokeWidth={2}
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            </>
+          )}
+        </svg>
+        {/* End dot as HTML so it stays round when the SVG stretches. */}
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full"
+          style={{
+            left: `${xFrac(n - 1) * 100}%`,
+            top: `${yFrac(last.spent) * 100}%`,
+            background: "var(--bar)",
+            boxShadow: "0 0 0 2px var(--surface)",
+          }}
+        />
+        {/* Invisible per-month hover targets carry the exact figures. */}
+        <div className="absolute inset-0 flex">
+          {trend.map((t) => (
+            <div key={t.month} className="h-full flex-1" title={`${monthLabel(t.month)}: ${money(t.spent)}`} />
+          ))}
+        </div>
       </div>
-      <div className="mt-1 flex gap-1.5">
+      <ul className="sr-only">
+        {trend.map((t) => (
+          <li key={t.month}>{`${monthLabel(t.month)}: ${money(t.spent)}`}</li>
+        ))}
+      </ul>
+      <div className="mt-1 flex" aria-hidden="true">
         {trend.map((t) => (
           <span key={t.month} className="t-nums flex-1 text-center text-[10px] text-[var(--faint)]">
             {trendLabel(t.month)}
@@ -1297,7 +1369,7 @@ export function PotsSummary({
     <section className="card mb-6 p-5" aria-label={`Summary for ${monthLabel(month)}`}>
       <div>
         <div className="text-[12px] text-[var(--muted)]">Ready to assign</div>
-        <div className="t-nums font-serif-d mt-0.5 text-[28px] font-medium leading-none">{money(rtaCents)}</div>
+        <div className="t-nums font-serif-d mt-0.5 text-[32px] font-light leading-none text-[var(--accent)]">{money(rtaCents)}</div>
       </div>
       {top.length > 0 && (
         <div className="mt-4 border-t border-[var(--hairline)] pt-3">
@@ -2476,8 +2548,8 @@ export function AppShell() {
                 aria-current={active ? "page" : undefined}
                 className={`flex items-center rounded-[var(--r-sm)] px-3 py-2.5 text-left text-[15px] transition active:scale-[0.99] ${
                   active
-                    ? "bg-[var(--bg-sunken)] font-semibold text-[var(--ink)]"
-                    : "font-medium text-[var(--muted)] hover:bg-[var(--bg-sunken)] hover:text-[var(--ink-2)]"
+                    ? "bg-[var(--surface)] font-semibold text-[var(--ink)] shadow-[var(--shadow-card)]"
+                    : "font-medium text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--ink-2)]"
                 }`}
               >
                 {tabLabel(id)}
