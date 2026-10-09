@@ -21,3 +21,38 @@ jobs:
       - name: Build client
         run: bun run build
         working-directory: client
+
+  # Every push to main that passes the checks above goes live. Needs the
+  # CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID repository secrets.
+  # Schema changes are not applied here: run `budget migrate-remote
+  # --schema-only` before merging anything that adds a migration.
+  deploy:
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    environment:
+      name: production
+      url: https://daybook.daybook-app.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile
+        working-directory: client
+      - name: Build client
+        run: bun run build
+        working-directory: client
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.149.0"
+          command: deploy
+      - name: Check the live site
+        run: |
+          curl -fsS -o /dev/null https://daybook.daybook-app.workers.dev/
+          test "$(curl -s -o /dev/null -w '%{http_code}' https://daybook.daybook-app.workers.dev/api/me)" = 401

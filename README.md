@@ -56,7 +56,12 @@ bun src/cli.ts login --api-url https://<your-worker>   # prompts for an agent to
 mode `serve`, `user` and `migration` are local-only and refuse to run.
 Database migrations live in `src/migrations` and are applied to D1 with
 `budget migrate-remote` (or `wrangler d1 migrations apply daybook --local`
-for `wrangler dev`). Deploying is `bun run --cwd client build` followed by
+for `wrangler dev`). Every push to `main` that passes CI is deployed by the
+`deploy` job in `.github/workflows/ci.yml`, which builds the client and runs
+`wrangler deploy` using the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`
+repository secrets. Migrations are not applied by CI, so run
+`budget migrate-remote --schema-only` before merging a change that adds one.
+To deploy by hand, run `bun run --cwd client build` followed by
 `wrangler deploy`.
 
 ## How it works
