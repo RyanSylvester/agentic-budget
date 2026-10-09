@@ -1,5 +1,5 @@
 import { useApi } from "./api";
-import { fmtDate, money, monthLabel } from "./format";
+import { currentMonthLocal, fmtDate, money, monthLabel } from "./format";
 import { type Tab } from "./tabs";
 import type { Account, AccountsResponse, Attention, Overview, RecentTransaction } from "./types";
 import { Eyebrow, FetchError, Skeleton } from "./ui";
@@ -131,7 +131,7 @@ export function OverviewTab({ month, onGo }: { month: string; onGo: (t: Tab) => 
   const { data: attention } = useApi<Attention>("/api/attention");
   const { data: accountsData } = useApi<AccountsResponse>("/api/accounts");
 
-  const current = new Date().toISOString().slice(0, 7);
+  const current = currentMonthLocal();
 
   return (
     <div className="space-y-7">

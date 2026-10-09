@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { MoneyInput } from "./MoneyInput";
 import { useApi, send } from "./api";
-import { fmtDate, money, titleCase } from "./format";
+import { defaultDateInMonth, fmtDate, money, titleCase, todayLocal } from "./format";
 import { expressionToCents } from "./money";
 import type { Account, AccountsResponse, ContactsResponse, ListedTransaction, Pot, PotsResponse, TransactionsResponse } from "./types";
 import { FetchError, FormLabel, Segmented, Sheet, Skeleton, TxnBadge } from "./ui";
@@ -11,8 +11,9 @@ import { FetchError, FormLabel, Segmented, Sheet, Skeleton, TxnBadge } from "./u
 // Add/edit form for one transaction. txn === null means "add". Renders inside
 // a Sheet; the parent refetches on onSaved. All inputs keep a fixed size so
 // focusing never shifts the layout.
-export function TransactionSheet({ txn, pots, accounts, onClose, onSaved }: {
+export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved }: {
   txn: ListedTransaction | null;
+  month?: string;
   pots: Pot[];
   accounts: Account[];
   onClose: () => void;
@@ -22,7 +23,7 @@ export function TransactionSheet({ txn, pots, accounts, onClose, onSaved }: {
   const [description, setDescription] = useState(txn?.description ?? "");
   const [amount, setAmount] = useState(txn ? (Math.abs(txn.amountCents) / 100).toFixed(2) : "");
   const [direction, setDirection] = useState<"out" | "in">(txn && txn.amountCents > 0 ? "in" : "out");
-  const [date, setDate] = useState(txn?.date ?? new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(txn?.date ?? (month ? defaultDateInMonth(month) : todayLocal()));
   const [accountId, setAccountId] = useState(txn ? String(txn.accountId) : accounts[0] ? String(accounts[0].id) : "");
   const [potId, setPotId] = useState(txn ? (txn.potId != null ? String(txn.potId) : "") : "");
   const [isTransfer, setIsTransfer] = useState(!!txn?.isTransfer);
@@ -489,6 +490,7 @@ export function TransactionsTab({ month }: { month: string }) {
       {sheet && (
         <TransactionSheet
           txn={sheet.txn}
+          month={month}
           pots={pots}
           accounts={accounts}
           onClose={() => setSheet(null)}

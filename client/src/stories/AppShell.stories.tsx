@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, within } from "storybook/test";
 import { AppShell } from "../AppShell";
+import { currentMonthLocal } from "../format";
 import {
   fixtureAccounts,
   fixtureContacts,
@@ -15,7 +16,7 @@ import type { MockApiConfig } from "./mockApi";
 
 /* Full app shell: sidebar, content, and tab navigation, all API routes mocked. */
 
-const CUR = new Date().toISOString().slice(0, 7);
+const CUR = currentMonthLocal();
 
 const fullApi = {
   get: {
