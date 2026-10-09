@@ -16,6 +16,8 @@ export function MoneyInput({
   onKeyDown,
   onBlur,
   autoFocus,
+  selectOnFocus,
+  enterKeyHint,
   ariaLabel,
   placeholder = "0.00",
   className = "",
@@ -26,6 +28,9 @@ export function MoneyInput({
   onKeyDown?: (e: KeyboardEvent<HTMLInputElement>) => void;
   onBlur?: () => void;
   autoFocus?: boolean;
+  /** Select the whole value on focus, so typing replaces a prefilled amount. */
+  selectOnFocus?: boolean;
+  enterKeyHint?: "done" | "enter" | "go" | "next" | "previous" | "search" | "send";
   ariaLabel: string;
   placeholder?: string;
   className?: string;
@@ -51,6 +56,8 @@ export function MoneyInput({
         type="text"
         inputMode="decimal"
         autoFocus={autoFocus}
+        enterKeyHint={enterKeyHint}
+        onFocus={selectOnFocus ? (e) => e.currentTarget.select() : undefined}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}

@@ -7,10 +7,12 @@ import type { AssignHistory, Pot } from "./types";
 
 /* ---------- budget table ---------- */
 
-// Inline assign control: the Assigned cell is the button. Click to edit,
-// Enter commits, Escape or click-away cancels. The control is never hidden.
-// Idle and editing states share an identical box (w-24, same padding and
-// border width) so toggling never shifts the surrounding layout.
+// Inline assign control: the Assigned cell is the button. Tap to edit; the
+// amount saves on Enter, on the ✓ button, on a quick-fill chip, or when focus
+// leaves the editor with a changed value (the iOS decimal keypad has no
+// Return key). Escape is the only cancel. Idle and editing states share an
+// identical field box (w-24, same padding and border width) so toggling
+// never shifts the surrounding layout.
 // purpose="planned" relabels the control for income pots, where the value
 // means planned income rather than a budget allocation.
 export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot: Pot; month: string; onAssigned: () => void; purpose?: "assign" | "planned" }) {
@@ -18,8 +20,20 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
   const [amt, setAmt] = useState("");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
+  // The just-saved amount, shown until the refreshed pot arrives so the old
+  // value never flashes back after a save.
+  const [savedCents, setSavedCents] = useState<number | null>(null);
   const editorRef = useRef<HTMLSpanElement>(null);
+  // Set once the editor has been closed by a save or Escape, so the blur that
+  // follows the input unmounting can't save a second time.
+  const closed = useRef(false);
+  // A press inside the editor (a chip or ✓). Touch browsers may blur the
+  // input with no relatedTarget before the click lands; the click saves.
+  const pressing = useRef(false);
   const [hist, setHist] = useState<AssignHistory | null>(null);
+  const shownCents = savedCents ?? pot.assignedCents;
+
+  useEffect(() => setSavedCents(null), [pot.assignedCents]);
 
   // Fetch last-month / 3-month-average assignments when the editor opens,
   // for the quick-fill buttons. One cheap GROUP BY query.
@@ -34,18 +48,26 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
       .catch(() => {});
   }, [editing, pot.id, month]);
 
-  const commit = async () => {
+  const close = () => {
+    closed.current = true;
+    setEditing(false);
+  };
+
+  const commit = async (text: string) => {
     // Spending pots can take a negative offset (a bridge or a reimbursed
     // half), so evaluate directly instead of expressionToCents, which
     // rejects negatives. The server refuses negatives on income pots.
-    const dollars = evaluateExpression(amt);
+    const dollars = evaluateExpression(text);
     const cents = dollars === null ? null : Math.round(dollars * 100);
-    if (cents === null || busy) {
-      if (!busy) setFailed("Enter a number, or math like 25+30.");
+    if (cents === null) {
+      setFailed("Enter a number, or math like 25+30.");
       return;
     }
-    setBusy(true);
+    close();
     setFailed(null);
+    if (cents === shownCents || busy) return;
+    setSavedCents(cents);
+    setBusy(true);
     try {
       const r = await send("/api/assign", {
         method: "POST",
@@ -55,15 +77,17 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
       if (r.status === 400) {
         // A rule the server enforces (e.g. no negative planned income): say it.
         const body = (await r.json().catch(() => null)) as { error?: string } | null;
+        setSavedCents(null);
         setFailed(body?.error ?? "Couldn't save.");
         setBusy(false);
         return;
       }
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      setEditing(false);
       setAmt("");
       onAssigned();
     } catch {
+      // Keep the typed amount so reopening the editor offers it again.
+      setSavedCents(null);
       setFailed("Couldn't save.");
     }
     setBusy(false);
@@ -71,50 +95,77 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
 
   if (!editing) {
     return (
-      <button
-        onClick={() => {
-          setAmt(((pot.assignedCents) / 100).toFixed(2));
-          setEditing(true);
-        }}
-        title={purpose === "planned" ? `Set planned income for ${pot.name}` : `Assign to ${pot.name}`}
-        // The visible text is only the amount; name the pot for screen readers.
-        aria-label={
-          purpose === "planned"
-            ? `Set planned income for ${pot.name}, currently ${money(pot.assignedCents)}`
-            : `Assign to ${pot.name}, currently ${money(pot.assignedCents)}`
-        }
-        className="t-nums w-24 rounded-[var(--r-sm)] border border-transparent px-2 py-1.5 text-left text-md text-[var(--ink)] underline decoration-[var(--hairline-strong)] decoration-dotted underline-offset-4 transition hover:bg-[var(--surface)] active:scale-95"
-      >
-        {money(pot.assignedCents)}
-      </button>
+      <span className="inline-flex items-center gap-2">
+        <button
+          onClick={() => {
+            if (busy) return;
+            if (!failed) setAmt((shownCents / 100).toFixed(2));
+            setFailed(null);
+            closed.current = false;
+            setEditing(true);
+          }}
+          title={purpose === "planned" ? `Set planned income for ${pot.name}` : `Assign to ${pot.name}`}
+          // The visible text is only the amount; name the pot for screen readers.
+          aria-label={
+            purpose === "planned"
+              ? `Set planned income for ${pot.name}, currently ${money(shownCents)}`
+              : `Assign to ${pot.name}, currently ${money(shownCents)}`
+          }
+          aria-busy={busy}
+          className={`t-nums w-24 rounded-[var(--r-sm)] border border-transparent px-2 py-1.5 text-left text-md text-[var(--ink)] underline decoration-[var(--hairline-strong)] decoration-dotted underline-offset-4 transition hover:bg-[var(--surface)] active:scale-95 ${busy ? "animate-pulse opacity-60" : ""}`}
+        >
+          {money(shownCents)}
+        </button>
+        {busy && <span className="sr-only" role="status">Saving</span>}
+        {failed && <span className="text-sm text-[var(--danger)]">{failed}</span>}
+      </span>
     );
   }
-  // Quick-fill: set the amount and hand focus back to the field, so Enter
-  // commits straight away.
-  const fillFrom = (cents: number) => {
-    setAmt((cents / 100).toFixed(2));
-    setFailed(null);
-    editorRef.current?.querySelector("input")?.focus();
-  };
-  const showQuick = hist !== null && (hist.lastMonth.cents > 0 || hist.avg3moCents > 0);
+  // A sinking schedule's monthly amount for this month. The server's pace
+  // already counts this month's assignment as saved, so add it back to get
+  // the full amount to assign; with nothing assigned yet it equals the "/mo"
+  // figure on the row.
+  const s = pot.sinking;
+  const scheduleCents =
+    s && s.monthsLeft > 0 ? Math.ceil(Math.max(0, s.expectedCents - s.balanceCents + pot.assignedCents) / s.monthsLeft) : 0;
+  const quick: { label: string; cents: number }[] = [];
+  if (scheduleCents > 0) quick.push({ label: "Schedule", cents: scheduleCents });
+  if (hist !== null && (hist.lastMonth.cents > 0 || hist.avg3moCents > 0)) {
+    quick.push({ label: "Last month", cents: hist.lastMonth.cents }, { label: "3-mo avg", cents: hist.avg3moCents });
+  }
+  const chip =
+    "t-nums inline-flex items-center rounded-full border border-[var(--hairline-strong)] px-2 py-0.5 text-xs text-[var(--ink-2)] transition hover:bg-[var(--bg-sunken)] active:scale-95 pointer-coarse:min-h-9 pointer-coarse:px-3";
   return (
     // Blur is handled on the whole editor, not just the input, so the
-    // quick-fill chips below can be clicked or tabbed to without the editor
-    // closing underneath them. Leaving the editor entirely still cancels.
+    // quick-fill chips and ✓ can be clicked or tabbed to without the editor
+    // closing underneath them. Mouse presses outside the input keep focus in
+    // it. Leaving the editor saves a changed amount.
     <span
       ref={editorRef}
       className="inline-flex flex-col items-start gap-1.5"
+      onMouseDown={(e) => {
+        if (!(e.target instanceof HTMLInputElement)) e.preventDefault();
+      }}
+      onPointerDown={(e) => {
+        pressing.current = !(e.target instanceof HTMLInputElement);
+      }}
+      onPointerCancel={() => (pressing.current = false)}
+      onClick={() => (pressing.current = false)}
       onBlur={(e) => {
+        if (closed.current || pressing.current) return;
         if (editorRef.current?.contains(e.relatedTarget as Node | null)) return;
-        if (!busy) {
-          setEditing(false);
+        const dollars = evaluateExpression(amt);
+        if (amt.trim() === "" || (dollars !== null && Math.round(dollars * 100) === shownCents)) {
+          close();
           setFailed(null);
-        }
+        } else commit(amt);
       }}
     >
-      <span className="inline-flex items-center gap-2">
+      <span className="inline-flex items-center gap-1.5">
         <MoneyInput
           autoFocus
+          selectOnFocus
+          enterKeyHint="done"
           ariaLabel={purpose === "planned" ? `Planned income for ${pot.name}` : `Assign money to ${pot.name}`}
           value={amt}
           onChange={(v) => {
@@ -122,34 +173,31 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
             setFailed(null);
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") commit();
+            if (e.key === "Enter") commit(amt);
             if (e.key === "Escape") {
-              setEditing(false);
+              close();
               setFailed(null);
             }
           }}
           className="w-24 py-1.5 text-md"
         />
+        <button
+          type="button"
+          aria-label="Save"
+          onClick={() => commit(amt)}
+          className="inline-flex size-9 shrink-0 items-center justify-center rounded-[var(--r-sm)] border border-[var(--hairline-strong)] text-md text-[var(--ink)] transition hover:bg-[var(--bg-sunken)] active:scale-95 pointer-coarse:size-11"
+        >
+          <span aria-hidden>✓</span>
+        </button>
         {failed && <span className="text-sm text-[var(--danger)]">{failed}</span>}
       </span>
-      {showQuick && (
-        <span className="flex gap-1.5">
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => fillFrom(hist.lastMonth.cents)}
-            className="t-nums rounded-full border border-[var(--hairline-strong)] px-2 py-0.5 text-xs text-[var(--ink-2)] transition hover:bg-[var(--bg-sunken)] active:scale-95"
-          >
-            Last month · {money(hist.lastMonth.cents)}
-          </button>
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => fillFrom(hist.avg3moCents)}
-            className="t-nums rounded-full border border-[var(--hairline-strong)] px-2 py-0.5 text-xs text-[var(--ink-2)] transition hover:bg-[var(--bg-sunken)] active:scale-95"
-          >
-            3-mo avg · {money(hist.avg3moCents)}
-          </button>
+      {quick.length > 0 && (
+        <span className="flex flex-wrap gap-1.5">
+          {quick.map((q) => (
+            <button key={q.label} type="button" onClick={() => commit((q.cents / 100).toFixed(2))} className={chip}>
+              {q.label} · {money(q.cents)}
+            </button>
+          ))}
         </span>
       )}
     </span>
@@ -311,11 +359,18 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
                   <div className="sm:hidden">
                     <div className="flex items-start justify-between gap-3">
                       <PotNameCell p={p} onEdit={onEditPot ? () => onEditPot(p) : undefined} />
-                      <Available assignedCents={p.assignedCents} spentCents={p.spentCents} className="shrink-0 pt-0.5" />
+                      <span className="shrink-0 pt-0.5">
+                        <Available assignedCents={p.assignedCents} spentCents={p.spentCents} />
+                        <span className="text-xs text-[var(--muted)]"> {p.spentCents > p.assignedCents ? "over" : "left"}</span>
+                      </span>
                     </div>
-                    <div className="mt-2 flex items-center gap-4">
-                      <AssignCell pot={p} month={month} onAssigned={onAssigned} />
+                    <div className="mt-2 flex items-baseline gap-4">
+                      <span className="flex items-baseline gap-1.5">
+                        <span className="text-xs text-[var(--muted)]">Assigned</span>
+                        <AssignCell pot={p} month={month} onAssigned={onAssigned} />
+                      </span>
                       <span className="t-nums text-sm text-[var(--ink-2)]">
+                        <span className="text-xs text-[var(--muted)]">Spent </span>
                         {money(p.spentCents)}
                         <SplitTag p={p} />
                       </span>
