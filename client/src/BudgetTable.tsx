@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MoneyInput } from "./MoneyInput";
 import { money, shortMonth, titleCase } from "./format";
 import { expressionToCents, moneyGrouped, shareLabel } from "./money";
@@ -17,6 +17,7 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
   const [amt, setAmt] = useState("");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
+  const editorRef = useRef<HTMLSpanElement>(null);
   const [hist, setHist] = useState<AssignHistory | null>(null);
 
   // Fetch last-month / 3-month-average assignments when the editor opens,
@@ -64,15 +65,41 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
           setEditing(true);
         }}
         title={purpose === "planned" ? `Set planned income for ${pot.name}` : `Assign to ${pot.name}`}
+        // The visible text is only the amount; name the pot for screen readers.
+        aria-label={
+          purpose === "planned"
+            ? `Set planned income for ${pot.name}, currently ${money(pot.assignedCents)}`
+            : `Assign to ${pot.name}, currently ${money(pot.assignedCents)}`
+        }
         className="t-nums w-24 rounded-[var(--r-sm)] border border-transparent px-2 py-1.5 text-left text-[15px] text-[var(--ink)] underline decoration-[var(--hairline-strong)] decoration-dotted underline-offset-4 transition hover:bg-[var(--surface)] active:scale-95"
       >
         {money(pot.assignedCents)}
       </button>
     );
   }
+  // Quick-fill: set the amount and hand focus back to the field, so Enter
+  // commits straight away.
+  const fillFrom = (cents: number) => {
+    setAmt((cents / 100).toFixed(2));
+    setFailed(null);
+    editorRef.current?.querySelector("input")?.focus();
+  };
   const showQuick = hist !== null && (hist.lastMonth.cents > 0 || hist.avg3moCents > 0);
   return (
-    <span className="inline-flex flex-col items-start gap-1.5">
+    // Blur is handled on the whole editor, not just the input, so the
+    // quick-fill chips below can be clicked or tabbed to without the editor
+    // closing underneath them. Leaving the editor entirely still cancels.
+    <span
+      ref={editorRef}
+      className="inline-flex flex-col items-start gap-1.5"
+      onBlur={(e) => {
+        if (editorRef.current?.contains(e.relatedTarget as Node | null)) return;
+        if (!busy) {
+          setEditing(false);
+          setFailed(null);
+        }
+      }}
+    >
       <span className="inline-flex items-center gap-2">
         <MoneyInput
           autoFocus
@@ -89,12 +116,6 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
               setFailed(null);
             }
           }}
-          onBlur={() => {
-            if (!busy) {
-              setEditing(false);
-              setFailed(null);
-            }
-          }}
           className="w-24 py-1.5 text-[15px]"
         />
         {failed && <span className="text-[13px] text-[var(--danger)]">{failed}</span>}
@@ -103,14 +124,16 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
         <span className="flex gap-1.5">
           <button
             type="button"
-            onClick={() => setAmt((hist.lastMonth.cents / 100).toFixed(2))}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => fillFrom(hist.lastMonth.cents)}
             className="t-nums rounded-full border border-[var(--hairline-strong)] px-2 py-0.5 text-[12px] text-[var(--ink-2)] transition hover:bg-[var(--bg-sunken)] active:scale-95"
           >
             Last month · {money(hist.lastMonth.cents)}
           </button>
           <button
             type="button"
-            onClick={() => setAmt((hist.avg3moCents / 100).toFixed(2))}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => fillFrom(hist.avg3moCents)}
             className="t-nums rounded-full border border-[var(--hairline-strong)] px-2 py-0.5 text-[12px] text-[var(--ink-2)] transition hover:bg-[var(--bg-sunken)] active:scale-95"
           >
             3-mo avg · {money(hist.avg3moCents)}
@@ -155,7 +178,7 @@ export function PotNameCell({ p, onEdit }: { p: Pot; onEdit?: () => void }) {
       <div className="flex items-baseline gap-2">
         <div className="truncate text-[15px] font-semibold">{p.name}</div>
         {onEdit && (
-          <button onClick={onEdit} className="-m-2 shrink-0 cursor-pointer p-2 text-[12px] text-[var(--faint)] hover:text-[var(--ink)] hover:underline">
+          <button onClick={onEdit} aria-label={`Edit ${p.name}`} className="-m-2 shrink-0 cursor-pointer p-2 text-[12px] text-[var(--muted)] hover:text-[var(--ink)] hover:underline">
             Edit
           </button>
         )}
@@ -225,7 +248,7 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
     <div>
       <div className="hidden grid-cols-[minmax(0,1fr)_130px_170px_120px] gap-3 border-b border-[var(--hairline-strong)] px-4 pb-2 sm:grid sm:px-5">
         <span className="eyebrow">Pot</span>
-        <span className="eyebrow">Assigned <span className="whitespace-nowrap text-[var(--faint)]" style={{ textTransform: "none", letterSpacing: "normal", fontWeight: 400 }}>(tap to edit)</span></span>
+        <span className="eyebrow">Assigned <span className="whitespace-nowrap text-[var(--muted)]" style={{ textTransform: "none", letterSpacing: "normal", fontWeight: 400 }}>(tap to edit)</span></span>
         <span className="eyebrow">Spent</span>
         <span className="eyebrow text-right">Available</span>
       </div>
@@ -332,11 +355,11 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
               <PotNameCell p={p} onEdit={onEditPot ? () => onEditPot(p) : undefined} />
               <div className="flex shrink-0 items-center gap-4">
                 <span className="flex items-baseline gap-1.5">
-                  <span className="text-[12px] text-[var(--faint)]">planned</span>
+                  <span className="text-[12px] text-[var(--muted)]">planned</span>
                   <AssignCell pot={p} month={month} onAssigned={onAssigned} purpose="planned" />
                 </span>
                 <span className="t-nums whitespace-nowrap text-[13px] text-[var(--muted)]">
-                  <span className="text-[12px] text-[var(--faint)]">received </span>
+                  <span className="text-[12px] text-[var(--muted)]">received </span>
                   {money(p.receivedCents)}
                 </span>
               </div>

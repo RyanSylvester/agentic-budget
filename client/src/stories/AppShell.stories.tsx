@@ -65,7 +65,7 @@ export const Pots: Story = {
   },
   play: async ({ canvasElement }) => {
     await goToTab(canvasElement, "Pots");
-    await within(canvasElement).findByText("Rent share");
+    await within(canvasElement).findAllByText("Rent share");
   },
 };
 
@@ -85,7 +85,7 @@ export const Sharing: Story = {
   },
   play: async ({ canvasElement }) => {
     await goToTab(canvasElement, "Sharing");
-    await within(canvasElement).findByText("Alex");
+    await within(canvasElement).findAllByText("Alex");
   },
 };
 
@@ -110,6 +110,9 @@ export const DeepLinkedTab: Story = {
   },
   play: async ({ canvasElement }) => {
     const original = window.location.href;
+    // Wait until Overview data has rendered: by then the shell's popstate
+    // listener (attached in an effect) is in place.
+    await within(canvasElement).findByText("Mock grocery run");
     try {
       // Simulate arriving with ?tab=sharing in the URL, the way a refresh
       // or a shared link would.
@@ -117,11 +120,11 @@ export const DeepLinkedTab: Story = {
       deep.searchParams.set("tab", "sharing");
       window.history.replaceState(null, "", deep);
       window.dispatchEvent(new PopStateEvent("popstate"));
-      await within(canvasElement).findByText("Alex");
+      await within(canvasElement).findAllByText("Alex");
 
       // Switching tabs writes the new tab back to the URL.
       await goToTab(canvasElement, "Pots");
-      await within(canvasElement).findByText("Rent share");
+      await within(canvasElement).findAllByText("Rent share");
       expect(new URLSearchParams(window.location.search).get("tab")).toBe("pots");
     } finally {
       // Clean up so other stories still open on Overview.

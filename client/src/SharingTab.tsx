@@ -219,11 +219,11 @@ export function ContactsManager({ contacts, onChanged }: { contacts: ContactBala
             {confirmDeleteId === c.id ? (
               <span className="flex items-center gap-2 text-[13px]">
                 <span className="text-[var(--muted)]">Delete?</span>
-                <button onClick={() => remove(c.id)} disabled={busy} className="cursor-pointer font-medium text-[var(--danger)]">Yes</button>
-                <button onClick={() => setConfirmDeleteId(null)} className="cursor-pointer text-[var(--ink-2)]">Keep</button>
+                <button onClick={() => remove(c.id)} disabled={busy} aria-label={`Yes, delete ${c.name}`} className="-my-2 min-h-11 cursor-pointer px-2 font-medium text-[var(--danger)]">Yes</button>
+                <button onClick={() => setConfirmDeleteId(null)} aria-label={`Keep ${c.name}`} className="-my-2 -mr-2 min-h-11 cursor-pointer px-2 text-[var(--ink-2)]">Keep</button>
               </span>
             ) : (
-              <button onClick={() => setConfirmDeleteId(c.id)} className="cursor-pointer text-[13px] text-[var(--muted)] hover:text-[var(--danger)]">
+              <button onClick={() => setConfirmDeleteId(c.id)} aria-label={`Delete ${c.name}`} className="-my-2 -mr-2 min-h-11 cursor-pointer px-2 text-[13px] text-[var(--muted)] hover:text-[var(--danger)]">
                 Delete
               </button>
             )}

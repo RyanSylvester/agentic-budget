@@ -216,10 +216,9 @@ export const DeleteBlocked: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    const card = (await canvas.findByText("Contacts")).closest("div")!;
-    await userEvent.click(within(card).getByRole("button", { name: "Delete" }));
-    await userEvent.click(within(card).getByRole("button", { name: "Yes" }));
-    await within(card).findByText(/still used by 2 pots/);
+    await userEvent.click(await canvas.findByRole("button", { name: "Delete Alex" }));
+    await userEvent.click(canvas.getByRole("button", { name: "Yes, delete Alex" }));
+    await canvas.findByText(/still used by 2 pots/);
   },
 };
 
