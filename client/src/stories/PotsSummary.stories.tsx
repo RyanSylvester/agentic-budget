@@ -1,16 +1,17 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { fn } from "storybook/test";
 import { PotsSummary } from "../PotsTab";
 import { fixturePots, fixtureTrend, MONTH } from "./fixtures";
 
 const meta: Meta<typeof PotsSummary> = {
   title: "Tabs/PotsSummary",
   component: PotsSummary,
-  args: { month: MONTH, pots: fixturePots, rtaCents: 8633, trend: fixtureTrend },
+  args: { month: MONTH, pots: fixturePots, rtaCents: 8633, trend: fixtureTrend, onAssign: fn() },
   parameters: {
     docs: {
       description: {
         component:
-          "The compact month summary at the top of the Pots page: spend and ready-to-assign, the top three spending groups, and a six-month sparkline. This replaces the old Insights tab.",
+          "The compact month summary on the Pots page: ready-to-assign (its one home on this screen, with a Start assigning action that scrolls to the Assigned column), the top three spending groups, and a six-month sparkline.",
       },
     },
   },
@@ -55,5 +56,19 @@ export const SingleGroup: Story = {
   args: { pots: fixturePots.filter((p) => p.group === "Food") },
   parameters: {
     docs: { description: { story: "Only one spending group: the top-groups list stays short." } },
+  },
+};
+
+export const AllAssigned: Story = {
+  args: { rtaCents: 0 },
+  parameters: {
+    docs: { description: { story: "Ready to assign at $0: neutral figure, a short confirmation, no action button." } },
+  },
+};
+
+export const OverAssigned: Story = {
+  args: { rtaCents: -4250 },
+  parameters: {
+    docs: { description: { story: "More assigned than came in: the figure turns to the danger tone with guidance to lower an amount." } },
   },
 };

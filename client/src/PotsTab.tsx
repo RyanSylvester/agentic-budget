@@ -127,9 +127,12 @@ export function CloseSummaryCard({ month, onClosed }: { month: string; onClosed:
               </button>
             )
           ) : (
+            // The amount itself lives in Ready to assign below; here we only
+            // say what unlocks the close, so the figure is not repeated.
             <p className="text-center text-[13px] text-[var(--muted)]">
-              <span className="t-nums font-medium text-[var(--ink-2)]">{money(rta)}</span> still to assign before the
-              month can close.
+              {rta > 0
+                ? "Close opens once everything in Ready to assign has a job."
+                : "More is assigned than came in. Bring Ready to assign back to $0 to close the month."}
             </p>
           )}
           {failed && <p className="mt-2 text-center text-[13px] text-[var(--danger)]">{failed}</p>}
@@ -137,6 +140,15 @@ export function CloseSummaryCard({ month, onClosed }: { month: string; onClosed:
       )}
     </section>
   );
+}
+
+/* "Start assigning": bring the budget table into view and put focus on the
+ * first Assigned amount, which is where money gets a job. */
+function focusFirstAssignCell() {
+  const cell = document.querySelector<HTMLButtonElement>('#budget-table button[title^="Assign to"]');
+  const target = cell ?? document.getElementById("budget-table");
+  target?.scrollIntoView({ behavior: "smooth", block: "center" });
+  cell?.focus({ preventScroll: true });
 }
 
 export function PotsTab({ month }: { month: string }) {
@@ -181,8 +193,16 @@ export function PotsTab({ month }: { month: string }) {
       ) : (
         <>
           <CloseSummaryCard month={month} onClosed={retry} />
-          <PotsSummary month={month} pots={pots} rtaCents={data?.rtaCents ?? 0} trend={trendData?.trend ?? []} />
-          <BudgetTable pots={pots} month={month} onAssigned={retry} onEditPot={(p) => setSheetPot(p)} />
+          <PotsSummary
+            month={month}
+            pots={pots}
+            rtaCents={data?.rtaCents ?? 0}
+            trend={trendData?.trend ?? []}
+            onAssign={focusFirstAssignCell}
+          />
+          <div id="budget-table">
+            <BudgetTable pots={pots} month={month} onAssigned={retry} onEditPot={(p) => setSheetPot(p)} />
+          </div>
         </>
       )}
       {scaffoldOpen && (
@@ -203,7 +223,8 @@ export function PotsTab({ month }: { month: string }) {
 
 /* ---------- pots summary ---------- */
 
-// Compact month summary shown on the Pots page: ready-to-assign, top
+// Compact month summary shown on the Pots page: ready-to-assign (its one
+// home on this screen, with the action that leads to assigning), top
 // spending groups, and a six-month sparkline. The close card above it already
 // covers this month's spend, so this stays a summary, not a dashboard.
 export function TrendSpark({ trend }: { trend: TrendPoint[] }) {
@@ -295,11 +316,14 @@ export function PotsSummary({
   pots,
   rtaCents,
   trend,
+  onAssign,
 }: {
   month: string;
   pots: Pot[];
   rtaCents: number;
   trend: TrendPoint[];
+  /** Takes the user to the assign controls; omitted, no button is shown. */
+  onAssign?: () => void;
 }) {
   const spent = pots.reduce((a, p) => a + p.spentCents, 0);
   const byGroup = new Map<string, number>();
@@ -310,9 +334,29 @@ export function PotsSummary({
 
   return (
     <section className="card mb-6 p-5" aria-label={`Summary for ${monthLabel(month)}`}>
-      <div>
-        <div className="text-[12px] text-[var(--muted)]">Ready to assign</div>
-        <div className="t-nums font-serif-d mt-0.5 text-[32px] font-light leading-none text-[var(--accent)]">{money(rtaCents)}</div>
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+        <div>
+          <div className="text-[12px] text-[var(--muted)]">Ready to assign</div>
+          <div
+            className={`t-nums font-serif-d mt-0.5 text-[32px] font-light leading-none ${
+              rtaCents > 0 ? "text-[var(--accent)]" : rtaCents < 0 ? "text-[var(--danger)]" : "text-[var(--ink)]"
+            }`}
+          >
+            {money(rtaCents)}
+          </div>
+          <div className="mt-1.5 text-[13px] text-[var(--muted)]">
+            {rtaCents > 0
+              ? "Give it a job: tap any Assigned amount below."
+              : rtaCents < 0
+                ? "More is assigned than came in. Lower an Assigned amount below."
+                : "Every dollar has a job."}
+          </div>
+        </div>
+        {onAssign && rtaCents !== 0 && (
+          <button onClick={onAssign} className="btn-ink min-h-11 px-5 text-[15px]">
+            {rtaCents > 0 ? "Start assigning" : "Review amounts"}
+          </button>
+        )}
       </div>
       {top.length > 0 && (
         <div className="mt-4 border-t border-[var(--hairline)] pt-3">

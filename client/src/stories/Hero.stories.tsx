@@ -1,15 +1,17 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { fn } from "storybook/test";
 import { Hero } from "../OverviewTab";
 import { makeOverview } from "./fixtures";
 
 const meta: Meta<typeof Hero> = {
   title: "Overview/Hero",
   component: Hero,
+  args: { onAssign: fn() },
   parameters: {
     docs: {
       description: {
         component:
-          "The overview page header. It shows the month's total spend, what's left to assign, and how much was assigned, in large serif type. Past months show their closed totals instead.",
+          "The overview page header. It shows the month's total spend in large light type, the daily pace, and ready-to-assign. Ready to assign appears only here on Overview: with money waiting it is an Assign button that jumps to Pots. Past months show their closed totals instead.",
       },
     },
   },
@@ -28,14 +30,14 @@ export const Loading: Story = {
 export const CurrentMonth: Story = {
   args: { overview: makeOverview(), isCurrent: true },
   parameters: {
-    docs: { description: { story: "The current month with money still ready to assign." } },
+    docs: { description: { story: "The current month with money still ready to assign: the line is a button that goes to Pots." } },
   },
 };
 
 export const CurrentMonthZeroRta: Story = {
   args: { overview: makeOverview({ rtaCents: 0 }), isCurrent: true },
   parameters: {
-    docs: { description: { story: "Every dollar assigned: ready-to-assign reads zero, the target end-of-month state." } },
+    docs: { description: { story: "Every dollar assigned: the line settles into a quiet confirmation with no action." } },
   },
 };
 
@@ -50,5 +52,19 @@ export const ZeroSpend: Story = {
   args: { overview: makeOverview({ confirmedSpendCents: 0, rtaCents: 512000 }), isCurrent: true },
   parameters: {
     docs: { description: { story: "A fresh month with no spending yet." } },
+  },
+};
+
+export const CurrentMonthOverAssigned: Story = {
+  args: { overview: makeOverview({ rtaCents: -4250 }), isCurrent: true },
+  parameters: {
+    docs: { description: { story: "More assigned than came in: the line turns to the danger tone and offers a fix in Pots." } },
+  },
+};
+
+export const WithoutAction: Story = {
+  args: { overview: makeOverview(), isCurrent: true, onAssign: undefined },
+  parameters: {
+    docs: { description: { story: "Without an onAssign handler the line renders as plain text." } },
   },
 };

@@ -6,7 +6,45 @@ import { Eyebrow, FetchError, Skeleton } from "./ui";
 
 /* ---------- overview pieces ---------- */
 
-export function Hero({ overview, isCurrent, loading }: { overview: Overview | null; isCurrent: boolean; loading?: boolean }) {
+/* Ready to assign has one home on Overview: this line under the hero figure.
+ * With money waiting it is a button that jumps to Pots, where the assigning
+ * happens; at zero it settles into a quiet confirmation. */
+export function RtaLine({ cents, onAssign }: { cents: number; onAssign?: () => void }) {
+  if (cents === 0) {
+    return <div className="mt-3 text-[15px] text-[var(--muted)]">Every dollar is assigned</div>;
+  }
+  const over = cents < 0;
+  const body = (
+    <>
+      <span className={`t-nums font-medium ${over ? "text-[var(--danger)]" : "text-[var(--accent)]"}`}>
+        {money(Math.abs(cents))}
+      </span>
+      <span className="text-[var(--ink-2)]">{over ? " over-assigned" : " ready to assign"}</span>
+    </>
+  );
+  if (!onAssign) return <div className="mt-3 text-[15px]">{body}</div>;
+  return (
+    <button
+      onClick={onAssign}
+      className={`mt-3 inline-flex min-h-11 items-center gap-1 rounded-[var(--r-pill)] pl-4 pr-3 text-[15px] transition active:scale-[0.98] ${
+        over ? "bg-[var(--danger-soft)]" : "bg-[var(--accent-soft)]"
+      }`}
+    >
+      {body}
+      <span className={`ml-2 font-medium ${over ? "text-[var(--danger)]" : "text-[var(--accent)]"}`}>
+        {over ? "Fix in Pots" : "Assign"} <span aria-hidden>→</span>
+      </span>
+    </button>
+  );
+}
+
+export function Hero({ overview, isCurrent, loading, onAssign }: {
+  overview: Overview | null;
+  isCurrent: boolean;
+  loading?: boolean;
+  /** Where the ready-to-assign line leads; omitted, the line is plain text. */
+  onAssign?: () => void;
+}) {
   const today = new Date();
   const day = today.getDate();
   const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
@@ -38,12 +76,7 @@ export function Hero({ overview, isCurrent, loading }: { overview: Overview | nu
           <span className="text-[var(--muted)]">{monthLabel(overview.month)}</span>
         )}
       </div>
-      {isCurrent && (
-        <div className="mt-1.5 text-[15px]">
-          <span className="t-nums font-medium text-[var(--accent)]">{money(overview.rtaCents)}</span>
-          <span className="text-[var(--muted)]"> ready to assign</span>
-        </div>
-      )}
+      {isCurrent && <RtaLine cents={overview.rtaCents} onAssign={onAssign} />}
     </div>
   );
 }
@@ -109,7 +142,7 @@ export function OverviewTab({ month, onGo }: { month: string; onGo: (t: Tab) => 
           <Hero overview={null} isCurrent={month === current} loading />
         )
       ) : (
-        <Hero overview={overview} isCurrent={month === current} />
+        <Hero overview={overview} isCurrent={month === current} onAssign={() => onGo("pots")} />
       )}
       <AttentionCard
         attention={attention}
@@ -147,11 +180,8 @@ export function AttentionCard({ attention, overview, accounts, onGo }: {
         tab: "sharing",
       });
     }
-    if (attention.rtaCents > 0)
-      items.push({
-        label: <><span className="t-nums font-medium">{money(attention.rtaCents)}</span> ready to assign</>,
-        tab: "pots",
-      });
+    // Ready to assign is deliberately not listed here: it lives on the hero
+    // line above, with its own Assign action, so it is not said twice.
   } else {
     // Legacy fallback while /api/attention is unavailable.
     for (const a of accounts)
