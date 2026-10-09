@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn } from "storybook/test";
-import { Eyebrow, FetchError, Skeleton } from "../ui";
+import { useState } from "react";
+import { expect, fn, userEvent, within } from "storybook/test";
+import { Eyebrow, FetchError, Sheet, Skeleton } from "../ui";
 
 const meta: Meta = {
   title: "Primitives",
@@ -65,5 +66,52 @@ export const FetchErrorCustomLabel: StoryObj = {
         story: "The error card accepts a custom message naming what failed to load.",
       },
     },
+  },
+};
+
+function SheetDemo() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button onClick={() => setOpen(true)} className="btn-ink px-4 py-2 text-[15px]">
+        Open sheet
+      </button>
+      {open && (
+        <Sheet label="Demo sheet" onClose={() => setOpen(false)}>
+          <div className="mb-3 text-[17px] font-semibold">Demo sheet</div>
+          <input aria-label="Name" className="field w-full px-3 py-2.5 text-[15px]" />
+          <div className="mt-4 flex gap-2">
+            <button onClick={() => setOpen(false)} className="btn-ghost flex-1 py-2.5 text-[15px]">Cancel</button>
+            <button onClick={() => setOpen(false)} className="btn-ink flex-1 py-2.5 text-[15px]">Save</button>
+          </div>
+        </Sheet>
+      )}
+    </div>
+  );
+}
+
+export const SheetKeyboard: StoryObj = {
+  render: () => <SheetDemo />,
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "The shared sheet behaves like a modal: focus moves into it on open, Tab and Shift+Tab cycle inside it, Escape closes it, and focus returns to the button that opened it. (Interaction test.)",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const opener = canvas.getByRole("button", { name: "Open sheet" });
+    await userEvent.click(opener);
+    const dialog = await canvas.findByRole("dialog", { name: "Demo sheet" });
+    await expect(dialog.contains(document.activeElement)).toBe(true);
+    for (let i = 0; i < 5; i++) await userEvent.tab();
+    await expect(dialog.contains(document.activeElement)).toBe(true);
+    await userEvent.tab({ shift: true });
+    await expect(dialog.contains(document.activeElement)).toBe(true);
+    await userEvent.keyboard("{Escape}");
+    await expect(canvas.queryByRole("dialog")).toBeNull();
+    await expect(document.activeElement).toBe(opener);
   },
 };
