@@ -110,3 +110,13 @@ export const NothingToShow: Story = {
     },
   },
 };
+
+export const PreviousMonthNotClosed: Story = {
+  args: {
+    ...base,
+    attention: makeAttention({ unclosedMonth: "2026-08" }),
+  },
+  parameters: {
+    docs: { description: { story: "Last month is still open: the first item offers Close, which goes to Pots on that month." } },
+  },
+};

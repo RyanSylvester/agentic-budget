@@ -1,5 +1,5 @@
 import { useApi } from "./api";
-import { currentMonthLocal, fmtDate, money, monthLabel } from "./format";
+import { MONTHS, currentMonthLocal, fmtDate, money, monthLabel, shiftMonth } from "./format";
 import { type Tab } from "./tabs";
 import type { Account, AccountsResponse, Attention, Overview, RecentTransaction } from "./types";
 import { Eyebrow, FetchError, Skeleton } from "./ui";
@@ -38,9 +38,11 @@ export function RtaLine({ cents, onAssign }: { cents: number; onAssign?: () => v
   );
 }
 
-export function Hero({ overview, isCurrent, loading, onAssign }: {
+export function Hero({ overview, isCurrent, isFuture = false, loading, onAssign }: {
   overview: Overview | null;
   isCurrent: boolean;
+  /** A month that hasn't started: its figures are not final. */
+  isFuture?: boolean;
   loading?: boolean;
   /** Where the ready-to-assign line leads; omitted, the line is plain text. */
   onAssign?: () => void;
@@ -58,11 +60,10 @@ export function Hero({ overview, isCurrent, loading, onAssign }: {
   }
   const spent = overview.confirmedSpendCents;
   const daily = spent / Math.max(1, day);
+  const name = MONTHS[Number(overview.month.slice(5, 7)) - 1];
   return (
     <div className="pb-1 pt-2">
-      {!isCurrent && (
-        <div className="text-lg text-[var(--muted)]">final for the month</div>
-      )}
+      <div className="text-lg text-[var(--muted)]">{isCurrent ? "Spent this month" : `Spent in ${name}`}</div>
       {/* Hero figure: deliberately larger than the top of the type scale. */}
       <div className="t-nums font-serif-d mt-1 text-[56px] font-light leading-none tracking-[-0.02em]">
         {money(spent)}
@@ -74,7 +75,9 @@ export function Hero({ overview, isCurrent, loading, onAssign }: {
             <span className="text-[var(--muted)]"> · day {day} of {daysInMonth}</span>
           </>
         ) : (
-          <span className="text-[var(--muted)]">{monthLabel(overview.month)}</span>
+          <span className="text-[var(--muted)]">
+            {monthLabel(overview.month)} · {isFuture ? "hasn't started yet" : "final"}
+          </span>
         )}
       </div>
       {isCurrent && <RtaLine cents={overview.rtaCents} onAssign={onAssign} />}
@@ -127,7 +130,11 @@ export function RecentActivity({ txns, loading }: { txns: RecentTransaction[]; l
   );
 }
 
-export function OverviewTab({ month, onGo }: { month: string; onGo: (t: Tab) => void }) {
+export function OverviewTab({ month, onGo }: {
+  month: string;
+  /** Go to a tab; with a month, also switch to that month. */
+  onGo: (t: Tab, month?: string) => void;
+}) {
   const { data: overview, error, loading, retry } = useApi<Overview>(`/api/overview?month=${month}`);
   const { data: attention } = useApi<Attention>("/api/attention");
   const { data: accountsData } = useApi<AccountsResponse>("/api/accounts");
@@ -143,7 +150,12 @@ export function OverviewTab({ month, onGo }: { month: string; onGo: (t: Tab) => 
           <Hero overview={null} isCurrent={month === current} loading />
         )
       ) : (
-        <Hero overview={overview} isCurrent={month === current} onAssign={() => onGo("pots")} />
+        <Hero
+          overview={overview}
+          isCurrent={month === current}
+          isFuture={month > current}
+          onAssign={() => onGo("pots")}
+        />
       )}
       <AttentionCard
         attention={attention}
@@ -160,10 +172,15 @@ export function AttentionCard({ attention, overview, accounts, onGo }: {
   attention: Attention | null;
   overview: Overview | null;
   accounts: Account[];
-  onGo: (t: Tab) => void;
+  onGo: (t: Tab, month?: string) => void;
 }) {
-  const items: { label: React.ReactNode; tab: Tab }[] = [];
+  const items: { label: React.ReactNode; tab: Tab; month?: string; action?: string }[] = [];
   if (attention) {
+    // Last month still open: the close happens on Pots, on that month.
+    if (attention.unclosedMonth) {
+      const m = attention.unclosedMonth;
+      items.push({ label: `${MONTHS[Number(m.slice(5, 7)) - 1]} isn't closed yet`, tab: "pots", month: m, action: "Close" });
+    }
     for (const a of attention.unreconciledAccounts) {
       items.push({ label: `${a.name} not reconciled yet`, tab: "accounts" });
     }
@@ -196,14 +213,20 @@ export function AttentionCard({ attention, overview, accounts, onGo }: {
       <ul>
         {items.map((it, i) => (
           <li key={i} className="border-b border-[var(--hairline)] last:border-0">
-            <button onClick={() => onGo(it.tab)} className="-mx-2 flex w-[calc(100%+1rem)] items-center rounded-[var(--r-md)] px-2 py-2.5 text-left text-md transition hover:bg-[var(--bg-sunken)] active:scale-[0.99] active:bg-[var(--bg-sunken)]">
+            <button onClick={() => onGo(it.tab, it.month)} className="-mx-2 flex w-[calc(100%+1rem)] items-center rounded-[var(--r-md)] px-2 py-2.5 text-left text-md transition hover:bg-[var(--bg-sunken)] active:scale-[0.99] active:bg-[var(--bg-sunken)]">
               <span className="flex items-center gap-2.5">
                 <span aria-hidden className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--warning)]" />
                 {/* One flex item for the whole label: otherwise each text and
                     amount fragment becomes its own item and picks up the gap. */}
                 <span className="min-w-0">{it.label}</span>
               </span>
-              <span aria-hidden className="ml-auto pl-3 text-lg text-[var(--muted)]">›</span>
+              {it.action ? (
+                <span className="ml-auto shrink-0 pl-3 text-md font-medium text-[var(--accent)]">
+                  {it.action} <span aria-hidden>→</span>
+                </span>
+              ) : (
+                <span aria-hidden className="ml-auto pl-3 text-lg text-[var(--muted)]">›</span>
+              )}
             </button>
           </li>
         ))}

@@ -75,3 +75,20 @@ export const Error: Story = {
     docs: { description: { story: "The shared error card with retry when the overview fails." } },
   },
 };
+
+export const PreviousMonthNotClosed: Story = {
+  parameters: {
+    mockApi: {
+      get: {
+        [overviewUrl]: makeOverview(),
+        "/api/attention": makeAttention({ unreconciledAccounts: [], unclosedMonth: "2026-08" }),
+        "/api/accounts": { accounts: fixtureAccounts },
+      },
+    } satisfies MockApiConfig,
+    docs: {
+      description: {
+        story: "Last month was never closed: the attention card links to Pots on that month (onGo receives the month).",
+      },
+    },
+  },
+};

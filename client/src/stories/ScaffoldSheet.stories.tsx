@@ -1,25 +1,31 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn, userEvent, within } from "storybook/test";
 import { ScaffoldSheet } from "../ScaffoldSheet";
+import { fixturePots } from "./fixtures";
 import type { MockApiConfig } from "./mockApi";
 
-/* Bulk-fill a future month's assignments from history. */
+/* Fill a month's assignments from history. */
 
 const now = new Date();
 const FUTURE = `${now.getFullYear() + (now.getMonth() === 11 ? 1 : 0)}-${String(
   now.getMonth() === 11 ? 1 : now.getMonth() + 2
 ).padStart(2, "0")}`;
 
+const [rent, groceries, , , dining, , , , buffer, pay] = fixturePots;
 const lines = [
-  { potId: 1, name: "Rent", cents: 300000, income: false },
-  { potId: 2, name: "Groceries", cents: 105000, income: false },
-  { potId: 3, name: "TFSA", cents: 75000, income: false },
+  { potId: rent.id, name: rent.name, cents: 172000, income: false },
+  { potId: groceries.id, name: groceries.name, cents: 58500, income: false },
+  { potId: dining.id, name: dining.name, cents: 21000, income: false },
+  { potId: buffer.id, name: buffer.name, cents: 228500, income: false },
 ];
 
 const linesWithIncome = [
   ...lines,
-  { potId: 4, name: "Pay", cents: 512000, income: true },
+  { potId: pay.id, name: pay.name, cents: 512000, income: true },
 ];
+
+/* The month as loaded: what each pot holds now, for "current -> new". */
+const currentPots = fixturePots.map((p) => (p.id === pay.id ? { ...p, assignedCents: 500000 } : p));
 
 const scaffoldPost = (returned: typeof lines) => ({
   "/api/assign/scaffold": (body: unknown) => {
@@ -36,7 +42,7 @@ const meta: Meta<typeof ScaffoldSheet> = {
     docs: {
       description: {
         component:
-          "The bulk-fill sheet for a future month. Pick a strategy (3-month average or last month assigned), preview the per-pot values, then confirm. Income pots always copy last month's planned income.",
+          "Fill from history: the bulk-fill sheet for a future month, or the current month before anything is assigned. Pick a strategy (3-month average or last month assigned), preview the per-pot values against what is set now, then confirm. Planned income is listed apart and the total counts only assignable pots, against planned income.",
       },
     },
   },
@@ -53,9 +59,10 @@ export const Preview: Story = {
 };
 
 export const WithIncomePot: Story = {
+  args: { pots: currentPots },
   parameters: {
     mockApi: { post: scaffoldPost(linesWithIncome) } satisfies MockApiConfig,
-    docs: { description: { story: "Income pots are marked as planned income in the preview." } },
+    docs: { description: { story: "With the month's pots passed in, rows that change show current → new, and the total reads against planned income." } },
   },
 };
 
@@ -66,8 +73,8 @@ export const ConfirmStep: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(await canvas.findByRole("button", { name: /Scaffold 3 pots/ }));
-    await canvas.findByText(/overwrites any values already set/);
+    await userEvent.click(await canvas.findByRole("button", { name: /Fill 4 pots/ }));
+    await canvas.findByText(/replaces any values already set/);
   },
 };
 
@@ -91,5 +98,32 @@ export const SwitchStrategy: Story = {
     const canvas = within(canvasElement);
     await userEvent.click(await canvas.findByRole("button", { name: "Last month" }));
     await canvas.findByText("Rent");
+  },
+};
+
+export const PreviewFails: Story = {
+  parameters: {
+    mockApi: { failPost: ["/api/assign/scaffold"] } satisfies MockApiConfig,
+    docs: { description: { story: "The preview could not be computed: a retry card, and the fill button stays disabled." } },
+  },
+};
+
+export const ApplyFails: Story = {
+  parameters: {
+    mockApi: {
+      post: {
+        "/api/assign/scaffold": (body: unknown) =>
+          (body as { dryRun?: boolean }).dryRun
+            ? { ok: true, month: FUTURE, lines: linesWithIncome }
+            : new Response(JSON.stringify({ error: "bad month" }), { status: 400, headers: { "content-type": "application/json" } }),
+      },
+    } satisfies MockApiConfig,
+    docs: { description: { story: "Saving failed: the preview stays, with its own error under the buttons. (Interaction test.)" } },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: /Fill 4 pots/ }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Fill now" }));
+    await canvas.findByText(/Couldn't save these amounts/);
   },
 };

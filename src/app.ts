@@ -14,7 +14,7 @@ import { applySettlement, backfillSettlementAllocations, contactCredit, contactO
 import { contactBalances, createContact, renameContact, deleteContact } from "./contacts";
 import { createPot, updatePot, deletePot, potExists, setGroupOrder } from "./pots";
 import { reconcile, suggestClear } from "./reconcile";
-import { closePreview, applyClose, shiftMonth } from "./close";
+import { closePreview, applyClose, shiftMonth, unclosedPreviousMonth } from "./close";
 import { assignToPot, allPotAssigned, allPotAssignedMonths } from "./assign";
 import { scaffoldMonth, type ScaffoldStrategy } from "./scaffold";
 import { createTransaction, updateTransaction, voidLockReason } from "./transactions";
@@ -353,6 +353,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
       rtaCents: await rtaCents(db, userId, month),
       unsettledSharedCents: Math.max(0, sharedOwedCents - (await contactCredit(db, userId))),
       sharedOwedBy,
+      unclosedMonth: await unclosedPreviousMonth(db, userId, month),
     } satisfies Attention);
   });
 
@@ -762,7 +763,9 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
 
   /** Apply the month-end close. Body: { month: "YYYY-MM" }. The $0 rule binds
    *  here: ready-to-assign must be exactly $0, and the month must not already
-   *  be closed. Human review happens before the agent runs this. */
+   *  be closed. Any month that has started can be closed: the current one
+   *  (early) or a past one that was left open. A future month cannot. Human
+   *  review happens before the agent runs this. */
   app.post("/api/close", async (c) => {
     const db = await getDb();
     const userId = await requestUserId(c, db, authed);
@@ -770,6 +773,9 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     const month = body?.month ?? new Date().toISOString().slice(0, 7);
     if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
+    if (month > new Date().toISOString().slice(0, 7)) {
+      return c.json({ error: `${month} hasn't started yet; only a current or past month can be closed` }, 400);
+    }
     try {
       await applyClose(db, userId, await closePreview(db, userId, month));
       return c.json({ ok: true, month } satisfies CloseResponse);
