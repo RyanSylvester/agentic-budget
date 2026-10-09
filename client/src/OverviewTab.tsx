@@ -1,0 +1,181 @@
+import { useApi } from "./api";
+import { fmtDate, money, monthLabel } from "./format";
+import { type Tab } from "./tabs";
+import { Account, Attention, Overview, Txn } from "./types";
+import { Eyebrow, FetchError, Skeleton } from "./ui";
+
+/* ---------- overview pieces ---------- */
+
+export function Hero({ overview, isCurrent, loading }: { overview: Overview | null; isCurrent: boolean; loading?: boolean }) {
+  const today = new Date();
+  const day = today.getDate();
+  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  if (loading || !overview) {
+    return (
+      <div className="pb-1 pt-2">
+        <Skeleton className="h-[56px] w-56" />
+        <Skeleton className="mt-2.5 h-5 w-44" />
+      </div>
+    );
+  }
+  const spent = overview.confirmedSpendCents;
+  const daily = spent / Math.max(1, day);
+  return (
+    <div className="pb-1 pt-2">
+      {!isCurrent && (
+        <div className="text-[17px] text-[var(--muted)]">final for the month</div>
+      )}
+      <div className="t-nums font-serif-d mt-1 text-[56px] font-light leading-none tracking-[-0.02em]">
+        {money(spent)}
+      </div>
+      <div className="mt-2.5 text-[15px]">
+        {isCurrent ? (
+          <>
+            <span className="t-nums font-medium text-[var(--ink-2)]">{money(Math.round(daily))}/day</span>
+            <span className="text-[var(--muted)]"> · day {day} of {daysInMonth}</span>
+          </>
+        ) : (
+          <span className="text-[var(--muted)]">{monthLabel(overview.month)}</span>
+        )}
+      </div>
+      {isCurrent && overview.rtaCents != null && (
+        <div className="mt-1.5 text-[15px]">
+          <span className="t-nums font-medium text-[var(--accent)]">{money(overview.rtaCents)}</span>
+          <span className="text-[var(--muted)]"> ready to assign</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function RecentActivity({ txns, loading }: { txns: Txn[]; loading?: boolean }) {
+  // Transfer pairs (e.g. +$891.82 / -$891.82 between own accounts) are net-zero
+  // noise, not spending: keep them out of the activity feed.
+  const visible = txns.filter((t) => !t.is_transfer);
+  if (loading) {
+    return (
+      <div>
+        <div className="mb-2"><Eyebrow>Recent activity</Eyebrow></div>
+        <div className="space-y-2.5">
+          {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-[54px]" />)}
+        </div>
+      </div>
+    );
+  }
+  if (visible.length === 0) {
+    return (
+      <div>
+        <div className="mb-2"><Eyebrow>Recent activity</Eyebrow></div>
+        <p className="text-[17px] italic text-[var(--muted)]">Nothing here yet.</p>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div className="mb-2"><Eyebrow>Recent activity</Eyebrow></div>
+      <ul>
+        {visible.slice(0, 8).map((t) => (
+          <li key={t.id} className="flex items-center justify-between gap-3 border-b border-[var(--hairline)] py-2.5 last:border-0">
+            <div className="min-w-0">
+              <div className="truncate text-[15px]">{t.description}</div>
+              <div className="mt-0.5 text-[13px] text-[var(--muted)]">
+                {fmtDate(t.date)}
+                {t.split_with_contact ? ` · split${t.split_contact_name ? ` with ${t.split_contact_name}` : ""}` : ""}
+              </div>
+            </div>
+            <span className={`t-nums shrink-0 text-[15px] ${t.user_cents < 0 ? "" : "font-medium text-[var(--success)]"}`}>
+              {money(t.user_cents)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export function OverviewTab({ month, onGo }: { month: string; onGo: (t: Tab) => void }) {
+  const { data: overview, error, loading, retry } = useApi<Overview>(`/api/overview?month=${month}`);
+  const { data: attention } = useApi<Attention>("/api/attention");
+  const { data: accountsData } = useApi<{ accounts: Account[] }>("/api/accounts");
+
+  const current = new Date().toISOString().slice(0, 7);
+
+  return (
+    <div className="space-y-7">
+      {loading || !overview ? (
+        error ? (
+          <FetchError onRetry={retry} label="Couldn't load this month." />
+        ) : (
+          <Hero overview={null} isCurrent={month === current} loading />
+        )
+      ) : (
+        <Hero overview={overview} isCurrent={month === current} />
+      )}
+      <AttentionCard
+        attention={attention}
+        overview={overview}
+        accounts={accountsData?.accounts ?? []}
+        onGo={onGo}
+      />
+      <RecentActivity txns={overview?.recent ?? []} loading={loading} />
+    </div>
+  );
+}
+
+export function AttentionCard({ attention, overview, accounts, onGo }: {
+  attention: Attention | null;
+  overview: Overview | null;
+  accounts: Account[];
+  onGo: (t: Tab) => void;
+}) {
+  const items: { label: React.ReactNode; tab: Tab }[] = [];
+  if (attention) {
+    for (const a of attention.unreconciledAccounts ?? []) {
+      const name = typeof a === "string" ? a : a.name;
+      items.push({ label: `${name} not reconciled yet`, tab: "accounts" });
+    }
+    if (attention.unsettledSharedCents > 0) {
+      const names = attention.sharedOwedBy ?? [];
+      items.push({
+        label:
+          names.length === 1 ? (
+            // The per-contact line is the NET owed (gross minus credit), same
+            // convention as the contact card headline. Falls back to gross for
+            // older servers that do not send netCents.
+            <>{names[0].name} owes <span className="t-nums font-medium">{money(names[0].netCents ?? names[0].cents)}</span></>
+          ) : (
+            <><span className="t-nums font-medium">{money(attention.unsettledSharedCents)}</span> in shared balances owed</>
+          ),
+        tab: "sharing",
+      });
+    }
+    if (attention.rtaCents > 0)
+      items.push({
+        label: <><span className="t-nums font-medium">{money(attention.rtaCents)}</span> ready to assign</>,
+        tab: "pots",
+      });
+  } else {
+    // Legacy fallback while /api/attention is unavailable.
+    for (const a of accounts)
+      if (!a.lastReconciledAt)
+        items.push({ label: `${a.name} not reconciled yet`, tab: "accounts" });
+  }
+  if (items.length === 0) return null;
+  return (
+    <div className="card px-5 py-4">
+      <div className="mb-1"><Eyebrow>Needs attention</Eyebrow></div>
+      <ul>
+        {items.map((it, i) => (
+          <li key={i} className="border-b border-[var(--hairline)] last:border-0">
+            <button onClick={() => onGo(it.tab)} className="-mx-2 flex w-[calc(100%+1rem)] items-center rounded-[var(--r-md)] px-2 py-2.5 text-left text-[15px] transition hover:bg-[var(--bg-sunken)] active:scale-[0.99] active:bg-[var(--bg-sunken)]">
+              <span className="flex items-center gap-2.5">
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--warning)]" />
+                {it.label}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}

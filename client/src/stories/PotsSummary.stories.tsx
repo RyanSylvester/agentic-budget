@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { PotsSummary } from "../App";
+import { PotsSummary } from "../PotsTab";
 import { fixturePots, fixtureTrend, MONTH } from "./fixtures";
 
 const meta: Meta<typeof PotsSummary> = {

@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { userEvent, within } from "storybook/test";
-import { TransactionsTab, TransactionSheet } from "../App";
+import { TransactionsTab, TransactionSheet } from "../TransactionsTab";
 import {
   MONTH,
   fixtureAccounts,

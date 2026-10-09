@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, within } from "storybook/test";
-import { AppShell } from "../App";
+import { AppShell } from "../AppShell";
 import {
   fixtureAccounts,
   fixtureContacts,

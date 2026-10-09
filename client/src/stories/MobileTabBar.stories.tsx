@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { MobileTabBar } from "../App";
+import { MobileTabBar } from "../AppShell";
 
 /* Six-tab mobile bottom bar: icon-only, every tab directly reachable. */
 

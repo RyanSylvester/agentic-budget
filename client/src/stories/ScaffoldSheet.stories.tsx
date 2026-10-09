@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn, userEvent, within } from "storybook/test";
-import { ScaffoldSheet } from "../App";
+import { ScaffoldSheet } from "../ScaffoldSheet";
 import type { MockApiConfig } from "./mockApi";
 
 /* Bulk-fill a future month's assignments from history. */

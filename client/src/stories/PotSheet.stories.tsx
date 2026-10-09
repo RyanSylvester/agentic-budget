@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, within } from "storybook/test";
-import { PotSheet } from "../App";
+import { PotSheet } from "../PotSheet";
 import { fixtureContacts, fixturePots, makePot } from "./fixtures";
 import type { MockApiConfig } from "./mockApi";
 

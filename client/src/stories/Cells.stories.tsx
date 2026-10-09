@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { Available, SplitTag } from "../App";
+import { Available, SplitTag } from "../BudgetTable";
 import { makePot } from "./fixtures";
 
 const meta: Meta = {

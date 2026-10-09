@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, within } from "storybook/test";
-import { AccountsView } from "../App";
+import { AccountsView } from "../AccountsTab";
 import { fixtureAccounts } from "./fixtures";
 import type { MockApiConfig } from "./mockApi";
 

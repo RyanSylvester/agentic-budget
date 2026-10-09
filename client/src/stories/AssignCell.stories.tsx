@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
-import { AssignCell } from "../App";
+import { AssignCell } from "../BudgetTable";
 import { makePot } from "./fixtures";
 import type { MockApiConfig } from "./mockApi";
 

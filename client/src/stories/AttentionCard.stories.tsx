@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
-import { AttentionCard } from "../App";
+import { AttentionCard } from "../OverviewTab";
 import { fixtureAccounts, makeAttention, makeOverview } from "./fixtures";
 
 const meta: Meta<typeof AttentionCard> = {

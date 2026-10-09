@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { RecentActivity } from "../App";
+import { RecentActivity } from "../OverviewTab";
 import { fixtureTxns, makeTxn } from "./fixtures";
 
 const meta: Meta<typeof RecentActivity> = {

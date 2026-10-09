@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { Hero } from "../App";
+import { Hero } from "../OverviewTab";
 import { makeOverview } from "./fixtures";
 
 const meta: Meta<typeof Hero> = {
