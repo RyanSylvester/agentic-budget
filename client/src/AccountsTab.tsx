@@ -3,19 +3,10 @@ import { MoneyInput } from "./MoneyInput";
 import { useApi } from "./api";
 import { money } from "./format";
 import { evaluateExpression } from "./money";
-import { Account } from "./types";
+import type { Account, AccountsResponse, ReconcileResponse } from "./types";
 import { FetchError, Skeleton } from "./ui";
 
 /* ---------- accounts + reconcile ---------- */
-
-export interface ReconcileResponse {
-  differenceCents: number;
-  balanced: boolean;
-  clearedBalanceCents: number;
-  actualBalanceCents: number;
-  uncleared?: { id: number; date: string; description: string; amount_cents: number }[];
-  suggestedClearId?: number | null;
-}
 
 export function clearedLabel(a: Account): string {
   // Credit-card cleared balances are negative (money owed): say so plainly
@@ -26,7 +17,7 @@ export function clearedLabel(a: Account): string {
 }
 
 export function AccountsView() {
-  const { data, error, loading, retry } = useApi<{ accounts: Account[] }>("/api/accounts");
+  const { data, error, loading, retry } = useApi<AccountsResponse>("/api/accounts");
   const [actual, setActual] = useState<Record<number, string>>({});
   const [result, setResult] = useState<Record<number, ReconcileResponse | null>>({});
 
@@ -38,11 +29,14 @@ export function AccountsView() {
     const dollars = evaluateExpression(actual[id] ?? "");
     if (dollars === null) return;
     const cents = Math.round(dollars * 100);
-    const r = await fetch(`/api/accounts/${id}/reconcile`, {
+    const res = await fetch(`/api/accounts/${id}/reconcile`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ actualBalanceCents: cents }),
-    }).then((x) => x.json());
+    });
+    // An error body ({ error }) is not a reconcile result; rendering it as
+    // one would crash on the missing uncleared list.
+    const r = res.ok ? ((await res.json()) as ReconcileResponse) : null;
     setResult((prev) => ({ ...prev, [id]: r }));
     load();
   };
@@ -104,7 +98,7 @@ export function AccountsView() {
                 <>
                   <div>Difference: <strong className="t-nums">{money(result[a.id]!.differenceCents)}</strong></div>
                   <ul className="mt-2 space-y-1.5">
-                    {result[a.id]!.uncleared!.map((t) => (
+                    {(result[a.id]!.uncleared ?? []).map((t) => (
                       <li key={t.id} className="flex items-center justify-between gap-2 text-[13px]">
                         <span className="truncate">{t.description} <span className="t-nums text-[var(--muted)]">{money(t.amount_cents)}</span></span>
                         <button onClick={() => clearTxn(a.id, t.id)}

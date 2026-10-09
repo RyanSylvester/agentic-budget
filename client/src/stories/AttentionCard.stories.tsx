@@ -29,7 +29,7 @@ const base = {
 export const AllItems: Story = {
   args: {
     ...base,
-    attention: makeAttention({ unsettledSharedCents: 42180, sharedOwedBy: [{ contactId: 1, name: "Alex", cents: 42180 }] }),
+    attention: makeAttention({ unsettledSharedCents: 42180, sharedOwedBy: [{ contactId: 1, name: "Alex", cents: 42180, netCents: 42180 }] }),
   },
   parameters: {
     docs: {
@@ -48,8 +48,8 @@ export const SharedOwesOnly: Story = {
       rtaCents: 0,
       unsettledSharedCents: 129900,
       sharedOwedBy: [
-        { contactId: 1, name: "Alex", cents: 89900 },
-        { contactId: 2, name: "Sam", cents: 40000 },
+        { contactId: 1, name: "Alex", cents: 89900, netCents: 89900 },
+        { contactId: 2, name: "Sam", cents: 40000, netCents: 40000 },
       ],
     }),
   },
@@ -65,7 +65,7 @@ export const SingleContactOwes: Story = {
       unreconciledAccounts: [],
       rtaCents: 0,
       unsettledSharedCents: 89900,
-      sharedOwedBy: [{ contactId: 1, name: "Alex", cents: 89900 }],
+      sharedOwedBy: [{ contactId: 1, name: "Alex", cents: 89900, netCents: 89900 }],
     }),
   },
   parameters: {

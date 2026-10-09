@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { MoneyInput } from "./MoneyInput";
 import { money, shortMonth, titleCase } from "./format";
 import { expressionToCents, moneyGrouped, shareLabel } from "./money";
-import { Pot } from "./types";
+import type { AssignHistory, Pot } from "./types";
 
 /* ---------- budget table ---------- */
 
@@ -17,7 +17,7 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
   const [amt, setAmt] = useState("");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
-  const [hist, setHist] = useState<{ lastMonth: { month: string; cents: number }; avg3moCents: number } | null>(null);
+  const [hist, setHist] = useState<AssignHistory | null>(null);
 
   // Fetch last-month / 3-month-average assignments when the editor opens,
   // for the quick-fill buttons. One cheap GROUP BY query.
@@ -25,7 +25,7 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
     if (!editing) return;
     setHist(null);
     fetch(`/api/pots/${pot.id}/assign-history?month=${month}`)
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => (r.ok ? (r.json() as Promise<AssignHistory>) : null))
       .then((h) => {
         if (h) setHist(h);
       })
@@ -60,13 +60,13 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
     return (
       <button
         onClick={() => {
-          setAmt(((pot.assignedCents ?? 0) / 100).toFixed(2));
+          setAmt(((pot.assignedCents) / 100).toFixed(2));
           setEditing(true);
         }}
         title={purpose === "planned" ? `Set planned income for ${pot.name}` : `Assign to ${pot.name}`}
         className="t-nums w-24 rounded-[var(--r-sm)] border border-transparent px-2 py-1.5 text-left text-[15px] text-[var(--ink)] underline decoration-[var(--hairline-strong)] decoration-dotted underline-offset-4 transition hover:bg-[var(--surface)] active:scale-95"
       >
-        {money(pot.assignedCents ?? 0)}
+        {money(pot.assignedCents)}
       </button>
     );
   }
@@ -219,7 +219,7 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
   const sum = (ps: Pot[], f: (p: Pot) => number) => ps.reduce((a, p) => a + f(p), 0);
   // Share-of-assigned percentages in group headers use earners only, matching
   // the grouping above; income pots never count toward the total.
-  const totalAssigned = sum(earners, (p) => p.assignedCents ?? 0);
+  const totalAssigned = sum(earners, (p) => p.assignedCents);
 
   return (
     <div>
@@ -231,7 +231,7 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
       </div>
       <div className="mt-3 space-y-4">
       {groups.map((g) => {
-        const assigned = sum(g.pots, (p) => p.assignedCents ?? 0);
+        const assigned = sum(g.pots, (p) => p.assignedCents);
         const share = shareLabel(assigned, totalAssigned);
         const isOpen = open[g.name] ?? true;
         return (
@@ -275,7 +275,7 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
                   <div className="sm:hidden">
                     <div className="flex items-start justify-between gap-3">
                       <PotNameCell p={p} onEdit={onEditPot ? () => onEditPot(p) : undefined} />
-                      <Available assignedCents={p.assignedCents ?? 0} spentCents={p.spentCents} className="shrink-0 pt-0.5" />
+                      <Available assignedCents={p.assignedCents} spentCents={p.spentCents} className="shrink-0 pt-0.5" />
                     </div>
                     <div className="mt-2 flex items-center gap-4">
                       <AssignCell pot={p} month={month} onAssigned={onAssigned} />
@@ -294,12 +294,12 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
                       <SplitTag p={p} />
                     </span>
                     <span className="text-right">
-                      <Available assignedCents={p.assignedCents ?? 0} spentCents={p.spentCents} />
+                      <Available assignedCents={p.assignedCents} spentCents={p.spentCents} />
                     </span>
                   </div>
                   {/* spent / assigned progress, once per row; sinking pots have their own bar */}
                   {!p.sinking && (() => {
-                    const a = p.assignedCents ?? 0;
+                    const a = p.assignedCents;
                     const over = p.spentCents > a;
                     const pct = over ? 100 : a > 0 ? Math.max(0, Math.min(100, (p.spentCents / a) * 100)) : 0;
                     return (
@@ -337,7 +337,7 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
                 </span>
                 <span className="t-nums whitespace-nowrap text-[13px] text-[var(--muted)]">
                   <span className="text-[12px] text-[var(--faint)]">received </span>
-                  {money(p.receivedCents ?? 0)}
+                  {money(p.receivedCents)}
                 </span>
               </div>
             </div>

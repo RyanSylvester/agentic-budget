@@ -19,7 +19,7 @@ const CUR = new Date().toISOString().slice(0, 7);
 
 const fullApi = {
   get: {
-    "/api/attention": makeAttention({ unsettledSharedCents: 42180, sharedOwedBy: [{ contactId: 1, name: "Alex", cents: 42180 }] }),
+    "/api/attention": makeAttention({ unsettledSharedCents: 42180, sharedOwedBy: [{ contactId: 1, name: "Alex", cents: 42180, netCents: 42180 }] }),
     [`/api/overview?month=${CUR}`]: makeOverview({ month: CUR }),
     [`/api/pots?month=${CUR}`]: { pots: fixturePots, rtaCents: 8633 },
     "/api/trend": { trend: fixtureTrend },

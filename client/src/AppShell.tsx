@@ -7,7 +7,7 @@ import { SharingTab } from "./SharingTab";
 import { TransactionsTab } from "./TransactionsTab";
 import { useApi } from "./api";
 import { TABS, type Tab, tabFromUrl, tabLabel } from "./tabs";
-import { Attention } from "./types";
+import type { Attention } from "./types";
 import { MonthNav } from "./ui";
 
 /* ---------- app ---------- */
