@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AppShell } from "./AppShell";
-import { LoginScreen, SignupScreen } from "./AuthScreens";
+import { LoginScreen, SignupScreen, inviteFromUrl } from "./AuthScreens";
 import { invalidate, onUnauthorized, prime } from "./api";
 import { currentMonthLocal } from "./format";
 import type { AuthState } from "./types";
@@ -70,7 +70,8 @@ function ShellSkeleton() {
 export default function App() {
   const [auth, setAuth] = useState<AuthState | null>(null);
   const [failed, setFailed] = useState(false);
-  const [authView, setAuthView] = useState<"login" | "signup">("login");
+  // An invite link (/?invite=CODE) opens straight on signup.
+  const [authView, setAuthView] = useState<"login" | "signup">(() => (inviteFromUrl() ? "signup" : "login"));
   const [notice, setNotice] = useState<string | null>(null);
   const signedIn = useRef(false);
   signedIn.current = auth?.authenticated === true;
@@ -136,7 +137,7 @@ export default function App() {
 
   if (!auth) return <ShellSkeleton />;
 
-  if (auth.setupRequired) return <SignupScreen onSignup={load} />;
+  if (auth.setupRequired) return <SignupScreen firstAccount onSignup={load} />;
   if (!auth.authenticated) {
     return authView === "signup" ? (
       <SignupScreen onSignup={load} onBackToLogin={() => setAuthView("login")} />

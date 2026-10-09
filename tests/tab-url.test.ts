@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { tabFromUrl } from "../client/src/tabs";
+import { monthFromUrl, tabFromUrl } from "../client/src/tabs";
 
 describe("tabFromUrl", () => {
   test("reads a known tab from the query param", () => {
@@ -21,5 +21,18 @@ describe("tabFromUrl", () => {
   });
   test("ignores other params around it", () => {
     expect(tabFromUrl("?foo=1&tab=accounts&bar=2")).toBe("accounts");
+  });
+});
+
+describe("monthFromUrl", () => {
+  test("reads a YYYY-MM month alongside the tab", () => {
+    expect(monthFromUrl("?tab=pots&month=2026-10")).toBe("2026-10");
+    expect(monthFromUrl("?month=2027-01")).toBe("2027-01");
+  });
+  test("missing or malformed months are ignored", () => {
+    expect(monthFromUrl("?tab=pots")).toBeNull();
+    expect(monthFromUrl("?month=2026-13")).toBeNull();
+    expect(monthFromUrl("?month=2026-1")).toBeNull();
+    expect(monthFromUrl("?month=banana")).toBeNull();
   });
 });

@@ -22,3 +22,11 @@ export function tabFromUrl(search: string = window.location.search): Tab {
   const raw = new URLSearchParams(search).get("tab");
   return TAB_IDS.includes(raw as Tab) ? (raw as Tab) : "overview";
 }
+
+/* Read the month from the URL (?month=2026-10) for the month tabs. Anything
+ * that is not a real YYYY-MM month is ignored and the caller's fallback (the
+ * current month) is used. */
+export function monthFromUrl(search: string = window.location.search): string | null {
+  const raw = new URLSearchParams(search).get("month");
+  return raw && /^\d{4}-(0[1-9]|1[0-2])$/.test(raw) ? raw : null;
+}

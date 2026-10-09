@@ -438,6 +438,9 @@ export interface AgentToken {
   id: number;
   name: string;
   created_at: string;
+  /** ISO timestamp of the last request made with it, refreshed at most
+   *  hourly; null when it has never been used. */
+  last_used_at: string | null;
 }
 
 /** GET /api/auth/agent-tokens */
@@ -450,7 +453,7 @@ export interface AgentTokenCreated extends CreatedResponse {
   token: string;
 }
 
-/** POST /api/auth/invites */
+/** POST /api/auth/invite-codes */
 export interface InviteCreated extends OkResponse {
   code: string;
 }

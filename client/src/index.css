@@ -52,15 +52,20 @@
     --hairline-strong: #d5dbe1;
     --line: var(--hairline-strong);
 
-    --accent: #4f8a6f;
+    /* Text-grade sage: 4.7:1 on --accent-soft, 4.8:1 on --bg. Fills and
+       chart marks keep the lighter #4f8a6f (graphics need 3:1, not 4.5:1). */
+    --accent: #3f7459;
     --accent-soft: #e8f1ec;
     --on-accent: #ffffff;
 
-    --success: #3f7d60;
+    /* 5.1:1 on --bg. */
+    --success: #367156;
     --warning: #b07a2a;
     --warning-soft: #f6eddd;
     --danger: #c2524c;
     --danger-soft: #f8e7e5;
+    /* Text on a solid --danger button. */
+    --on-danger: #ffffff;
 
     /* Pot progress tracks: fill is spent / assigned. */
     --track: #edf0f3;
@@ -100,30 +105,35 @@
       --hairline-strong: #2a3348;
       --line: var(--hairline-strong);
 
-      --accent: #8fa8ff;
-      --accent-soft: rgba(143, 168, 255, 0.14);
+      /* Sage, the light accent's hue lifted for dark: 9.5:1 on --bg,
+         7.4:1 on --accent-soft. */
+      --accent: #7fc9a4;
+      --accent-soft: rgba(127, 201, 164, 0.14);
       --on-accent: #0e1320;
 
       --success: #7fe0b4;
       --warning: #e8b86a;
-      --warning-soft: rgba(232, 184, 106, 0.14);
+      /* Opaque: a translucent amber over navy read as muddy. */
+      --warning-soft: #2b2618;
       --danger: #ff8a7a;
       --danger-soft: rgba(255, 138, 122, 0.14);
+      /* White on #ff8a7a is 2.3:1; the page navy is 8.1:1. */
+      --on-danger: #0e1320;
 
       --track: #1f2840;
-      --fill: #8fa8ff;
+      --fill: #7fc9a4;
       --fill-over: #ff8a7a;
 
-      --chart-1: #8fa8ff;
+      --chart-1: #7fc9a4;
       --chart-2: #e8ecf5;
       --chart-3: #8a94aa;
       --chart-4: #5e6880;
       --chart-5: #2a3348;
-      --chart-6: #7fe0b4;
+      --chart-6: #8fa8ff;
       --chart-7: #3a4560;
       --chart-8: #6f7a92;
 
-      --bar: #8fa8ff;
+      --bar: #7fc9a4;
 
       --shadow-card: none;
       --shadow-elev: 0 16px 40px rgba(0, 0, 0, 0.5);
@@ -146,30 +156,35 @@
     --hairline-strong: #2a3348;
     --line: var(--hairline-strong);
 
-    --accent: #8fa8ff;
-    --accent-soft: rgba(143, 168, 255, 0.14);
+    /* Sage, the light accent's hue lifted for dark: 9.5:1 on --bg,
+       7.4:1 on --accent-soft. */
+    --accent: #7fc9a4;
+    --accent-soft: rgba(127, 201, 164, 0.14);
     --on-accent: #0e1320;
 
     --success: #7fe0b4;
     --warning: #e8b86a;
-    --warning-soft: rgba(232, 184, 106, 0.14);
+    /* Opaque: a translucent amber over navy read as muddy. */
+    --warning-soft: #2b2618;
     --danger: #ff8a7a;
     --danger-soft: rgba(255, 138, 122, 0.14);
+    /* White on #ff8a7a is 2.3:1; the page navy is 8.1:1. */
+    --on-danger: #0e1320;
 
     --track: #1f2840;
-    --fill: #8fa8ff;
+    --fill: #7fc9a4;
     --fill-over: #ff8a7a;
 
-    --chart-1: #8fa8ff;
+    --chart-1: #7fc9a4;
     --chart-2: #e8ecf5;
     --chart-3: #8a94aa;
     --chart-4: #5e6880;
     --chart-5: #2a3348;
-    --chart-6: #7fe0b4;
+    --chart-6: #8fa8ff;
     --chart-7: #3a4560;
     --chart-8: #6f7a92;
 
-    --bar: #8fa8ff;
+    --bar: #7fc9a4;
 
     --shadow-card: none;
     --shadow-elev: 0 16px 40px rgba(0, 0, 0, 0.5);

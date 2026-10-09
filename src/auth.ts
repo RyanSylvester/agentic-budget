@@ -182,6 +182,24 @@ function clientIp(c: any): string {
   );
 }
 
+/** Refresh an agent token's last_used_at at most once an hour: Settings
+ *  shows it at hour granularity, and an agent's burst of reads should not
+ *  each become a D1 write. The WHERE clause keeps concurrent requests from
+ *  writing twice in the same hour. */
+export const LAST_USED_RESOLUTION_MS = 60 * 60 * 1000;
+
+async function touchAgentToken(db: Db, id: number, lastUsedAt: string | null): Promise<void> {
+  const now = Date.now();
+  if (lastUsedAt && now - Date.parse(lastUsedAt) < LAST_USED_RESOLUTION_MS) return;
+  const cutoff = new Date(now - LAST_USED_RESOLUTION_MS).toISOString();
+  await db.run(
+    "UPDATE agent_tokens SET last_used_at = ? WHERE id = ? AND (last_used_at IS NULL OR last_used_at < ?)",
+    new Date(now).toISOString(),
+    id,
+    cutoff
+  );
+}
+
 /** Identify the request: a valid session cookie resolves to the user it was
  *  minted for; a bearer token is hashed and looked up in agent_tokens
  *  (per-user tokens, M2). Otherwise null. Pre-M2 sessions stored only
@@ -205,11 +223,14 @@ export async function identifyRequest(c: any, config: AuthConfig, db: Db): Promi
   if (authz.startsWith("Bearer ")) {
     const presented = authz.slice(7).trim().toLowerCase();
     if (/^[0-9a-f]{64}$/.test(presented)) {
-      const row = await db.get<{ user_id: number }>(
-        "SELECT user_id FROM agent_tokens WHERE token_hash = ?",
+      const row = await db.get<{ id: number; user_id: number; last_used_at: string | null }>(
+        "SELECT id, user_id, last_used_at FROM agent_tokens WHERE token_hash = ?",
         await sha256Hex(presented)
       );
-      if (row) return { kind: "agent", userId: row.user_id };
+      if (row) {
+        await touchAgentToken(db, row.id, row.last_used_at);
+        return { kind: "agent", userId: row.user_id };
+      }
     }
   }
   return null;
@@ -400,13 +421,14 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
     return c.json({ authenticated: false, setupRequired: (await userCount(db)) === 0 } satisfies AuthState);
   });
 
-  /** List the user's agent tokens (id, name, created_at; never the secret). */
+  /** List the user's agent tokens (id, name, created_at, last_used_at;
+   *  never the secret). */
   app.get("/api/auth/agent-tokens", async (c) => {
     const db = await getDb();
     const identity = await identifyRequest(c, config, db);
     if (!identity || identity.kind !== "user") return c.json({ error: "unauthorized" }, 401);
     const rows = await db.all<AgentToken>(
-      "SELECT id, name, created_at FROM agent_tokens WHERE user_id = ? ORDER BY id",
+      "SELECT id, name, created_at, last_used_at FROM agent_tokens WHERE user_id = ? ORDER BY id",
       identity.userId
     );
     return c.json({ tokens: rows } satisfies AgentTokensResponse);

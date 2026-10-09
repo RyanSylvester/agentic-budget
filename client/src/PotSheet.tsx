@@ -208,7 +208,7 @@ export function PotSheet({ pot, groups, pots, onClose, onSaved }: {
               <button
                 onClick={remove}
                 disabled={busy || !moveToPotId}
-                className="cursor-pointer rounded-[var(--r-pill)] bg-[var(--danger)] px-4 py-2 font-medium text-white disabled:opacity-40"
+                className="cursor-pointer rounded-[var(--r-pill)] bg-[var(--danger)] px-4 py-2 font-medium text-[var(--on-danger)] disabled:opacity-40"
               >
                 {busy ? "Deleting…" : "Move & delete"}
               </button>

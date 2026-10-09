@@ -98,7 +98,40 @@ export const SignupDefault: SignupStory = {
     mockApi: {
       post: { "/api/auth/signup": { ok: true } },
     } satisfies MockApiConfig,
-    docs: { description: { story: "Account creation with an invite code field. The code is optional only for the very first account." } },
+    docs: { description: { story: "Account creation once the budget has users: the invite code is required, and a link like /?invite=CODE prefills it." } },
+  },
+};
+
+export const SignupFirstAccount: SignupStory = {
+  render: (args) => <SignupScreen {...args} />,
+  args: { deriveKey: fastKdf, onSignup: () => {}, firstAccount: true },
+  parameters: {
+    mockApi: {
+      post: { "/api/auth/signup": { ok: true } },
+    } satisfies MockApiConfig,
+    docs: { description: { story: "The very first account needs no invite, so the field is hidden." } },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.queryByLabelText(/Invite code/)).toBeNull();
+  },
+};
+
+export const SignupShortPassword: SignupStory = {
+  render: (args) => <SignupScreen {...args} />,
+  args: { deriveKey: fastKdf, onSignup: () => {} },
+  parameters: {
+    mockApi: { post: { "/api/auth/signup": { ok: true } } } satisfies MockApiConfig,
+    docs: { description: { story: "Passwords need at least 8 characters; the hint counts down and submit explains why it stopped." } },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.type(canvas.getByLabelText("Username"), "newuser");
+    await userEvent.type(canvas.getByLabelText("Password"), "short");
+    await userEvent.type(canvas.getByLabelText("Confirm password"), "short");
+    await expect(canvas.getByText(/3 more/)).toBeInTheDocument();
+    await userEvent.click(canvas.getByRole("button", { name: "Create account" }));
+    await expect(await canvas.findByRole("alert")).toHaveTextContent("at least 8 characters");
   },
 };
 
@@ -112,8 +145,8 @@ export const SignupMismatch: SignupStory = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.type(canvas.getByLabelText("Username"), "newuser");
-    await userEvent.type(canvas.getByLabelText("Password"), "one");
-    await userEvent.type(canvas.getByLabelText("Confirm password"), "two");
+    await userEvent.type(canvas.getByLabelText("Password"), "correct horse");
+    await userEvent.type(canvas.getByLabelText("Confirm password"), "correct horsf");
     await userEvent.click(canvas.getByRole("button", { name: "Create account" }));
     await expect(await canvas.findByRole("alert")).toHaveTextContent("Passwords don't match.");
   },
@@ -132,7 +165,7 @@ export const SignupInviteRequired: SignupStory = {
           }),
       },
     } satisfies MockApiConfig,
-    docs: { description: { story: "Once an account exists, signup without a code is rejected with a plain error." } },
+    docs: { description: { story: "Once an account exists, signup without a code is stopped before anything is sent." } },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
@@ -140,7 +173,7 @@ export const SignupInviteRequired: SignupStory = {
     await userEvent.type(canvas.getByLabelText("Password"), "correct horse");
     await userEvent.type(canvas.getByLabelText("Confirm password"), "correct horse");
     await userEvent.click(canvas.getByRole("button", { name: "Create account" }));
-    await expect(await canvas.findByRole("alert")).toHaveTextContent("an invite code is required to sign up");
+    await expect(await canvas.findByRole("alert")).toHaveTextContent("Enter your invite code.");
   },
 };
 
@@ -157,15 +190,30 @@ export const SignupBadCode: SignupStory = {
           }),
       },
     } satisfies MockApiConfig,
-    docs: { description: { story: "A wrong or already-used invite code is rejected." } },
+    docs: { description: { story: "A well-formed but wrong or already-used invite code is rejected by the server. Spaces, dashes and capitals in a pasted code are tidied first." } },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.type(canvas.getByLabelText("Username"), "newuser");
     await userEvent.type(canvas.getByLabelText("Password"), "correct horse");
     await userEvent.type(canvas.getByLabelText("Confirm password"), "correct horse");
-    await userEvent.type(canvas.getByLabelText("Invite code"), "nope");
+    await userEvent.type(canvas.getByLabelText(/Invite code/), "ABCD-EF01 2345-6789 ABCD-EF01 2345-6789");
     await userEvent.click(canvas.getByRole("button", { name: "Create account" }));
     await expect(await canvas.findByRole("alert")).toHaveTextContent("invalid invite code");
+  },
+};
+
+export const SignupMalformedCode: SignupStory = {
+  render: (args) => <SignupScreen {...args} />,
+  args: { deriveKey: fastKdf, onSignup: () => {} },
+  parameters: {
+    mockApi: { post: { "/api/auth/signup": { ok: true } } } satisfies MockApiConfig,
+    docs: { description: { story: "A code that cannot be an invite (not 32 hex characters) is flagged inline when the field loses focus." } },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.type(canvas.getByLabelText(/Invite code/), "nope");
+    await userEvent.tab();
+    await expect(canvas.getByText("That code doesn't look right.")).toBeInTheDocument();
   },
 };

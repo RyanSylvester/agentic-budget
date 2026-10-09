@@ -28,6 +28,10 @@ const fullApi = {
     "/api/contacts": { contacts: fixtureContacts },
     "/api/accounts": { accounts: fixtureAccounts },
     [`/api/transactions?month=${CUR}`]: { month: CUR, transactions: fixtureListedTxns },
+    "/api/auth/me": { authenticated: true, setupRequired: false, username: "owner" },
+    "/api/auth/agent-tokens": {
+      tokens: [{ id: 1, name: "Home server", created_at: "2026-09-02T14:10:00.000Z", last_used_at: null }],
+    },
   },
 } satisfies MockApiConfig;
 
@@ -97,6 +101,16 @@ export const Accounts: Story = {
   play: async ({ canvasElement }) => {
     await goToTab(canvasElement, "Accounts");
     await within(canvasElement).findByText("Mock Credit Card");
+  },
+};
+
+export const Settings: Story = {
+  parameters: {
+    docs: { description: { story: "Navigating to the Settings tab. (Interaction test.)" } },
+  },
+  play: async ({ canvasElement }) => {
+    await goToTab(canvasElement, "Settings");
+    await within(canvasElement).findByText("Home server");
   },
 };
 
