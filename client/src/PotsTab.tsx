@@ -302,7 +302,7 @@ export function TrendSpark({ trend }: { trend: TrendPoint[] }) {
       </ul>
       <div className="mt-1 flex" aria-hidden="true">
         {trend.map((t) => (
-          <span key={t.month} className="t-nums flex-1 text-center text-[10px] text-[var(--faint)]">
+          <span key={t.month} className="t-nums flex-1 text-center text-[11px] text-[var(--muted)]">
             {trendLabel(t.month)}
           </span>
         ))}

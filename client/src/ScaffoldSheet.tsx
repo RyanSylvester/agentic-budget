@@ -94,8 +94,8 @@ export function ScaffoldSheet({ month, onClose, onScaffolded }: {
                 <li key={l.potId} className="flex items-baseline justify-between gap-3 text-[14px]">
                   <span className="truncate text-[var(--ink-2)]">
                     {l.name}
-                    {l.income && <span className="text-[var(--faint)]"> · planned</span>}
-                    {l.scheduled && <span className="text-[var(--faint)]"> · schedule</span>}
+                    {l.income && <span className="text-[var(--muted)]"> · planned</span>}
+                    {l.scheduled && <span className="text-[var(--muted)]"> · schedule</span>}
                   </span>
                   <span className="t-nums shrink-0 font-medium">{money(l.cents)}</span>
                 </li>

@@ -31,7 +31,10 @@
 
     --ink: #17212b;
     --ink-2: #3d4a57;
-    --muted: #7a8794;
+    /* Secondary text: 4.5:1 on --bg, --surface and --bg-sunken (WCAG AA). */
+    --muted: #616d7a;
+    /* Tertiary: placeholders, decorative glyphs and chart ticks only, never
+       text a reader needs (below AA). */
     --faint: #a9b3bd;
 
     --hairline: #e7ebef;
