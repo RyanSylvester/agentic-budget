@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
+import { currentMonthLocal } from "../format";
 import { MonthNav } from "../ui";
 
 const meta: Meta<typeof MonthNav> = {
@@ -20,7 +21,7 @@ export default meta;
 type Story = StoryObj<typeof MonthNav>;
 
 export const CurrentMonth: Story = {
-  args: { month: new Date().toISOString().slice(0, 7) },
+  args: { month: currentMonthLocal() },
   parameters: {
     docs: { description: { story: "The forward chevron stays active on the current month, opening next month for scaffolding." } },
   },

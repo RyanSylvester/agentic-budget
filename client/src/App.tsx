@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AppShell } from "./AppShell";
 import { LoginScreen, SignupScreen } from "./AuthScreens";
 import { invalidate, onUnauthorized, prime } from "./api";
+import { currentMonthLocal } from "./format";
 import type { AuthState } from "./types";
 import { Skeleton } from "./ui";
 
@@ -39,7 +40,7 @@ export default function App() {
     // endpoints start fetching before the shell even renders, so the first
     // paint already has real data instead of skeletons popping in one by
     // one. A failed prime is harmless; the tab's own fetch surfaces it.
-    const month = new Date().toISOString().slice(0, 7);
+    const month = currentMonthLocal();
     const primes = Promise.allSettled([
       prime("/api/attention"),
       prime(`/api/pots?month=${month}`),

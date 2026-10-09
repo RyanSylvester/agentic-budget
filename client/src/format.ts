@@ -26,6 +26,21 @@ export function shiftMonth(ym: string, delta: number) {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+// Today and this month in the browser's local time zone. toISOString() is UTC,
+// which rolls over to tomorrow (and next month) hours early west of Greenwich.
+const pad2 = (n: number) => String(n).padStart(2, "0");
+export const currentMonthLocal = (now: Date = new Date()) => `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`;
+export const todayLocal = (now: Date = new Date()) => `${currentMonthLocal(now)}-${pad2(now.getDate())}`;
+
+// Default date for a new transaction while viewing `ym`: today in the current
+// month, otherwise today's day-of-month clamped to that month's length.
+export function defaultDateInMonth(ym: string, now: Date = new Date()): string {
+  if (ym === currentMonthLocal(now)) return todayLocal(now);
+  const [y, m] = ym.split("-").map(Number);
+  const last = new Date(y, m, 0).getDate();
+  return `${ym}-${pad2(Math.min(now.getDate(), last))}`;
+}
+
 // "2026-09-28" -> "Today" / "Yesterday" / "Sep 26". No raw ISO dates in the UI.
 export function fmtDate(iso: string): string {
   const d = new Date(`${iso.slice(0, 10)}T12:00:00`);

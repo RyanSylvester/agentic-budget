@@ -3,7 +3,7 @@ import { BudgetTable } from "./BudgetTable";
 import { PotSheet } from "./PotSheet";
 import { ScaffoldSheet } from "./ScaffoldSheet";
 import { useApi, send } from "./api";
-import { money, monthLabel, titleCase, trendLabel } from "./format";
+import { currentMonthLocal, money, monthLabel, titleCase, trendLabel } from "./format";
 import type { ClosePreview, Pot, PotsResponse, TrendPoint, TrendResponse } from "./types";
 import { FetchError, Skeleton } from "./ui";
 
@@ -15,7 +15,7 @@ import { FetchError, Skeleton } from "./ui";
 // close action is offered once ready-to-assign is $0. Past months are
 // read-only; the card is hidden on future months.
 export function CloseSummaryCard({ month, onClosed }: { month: string; onClosed: () => void }) {
-  const current = new Date().toISOString().slice(0, 7);
+  const current = currentMonthLocal();
   const isFuture = month > current;
   const isCurrent = month === current;
   const { data: preview, error, loading, retry } = useApi<ClosePreview>(
@@ -152,7 +152,7 @@ function focusFirstAssignCell() {
 }
 
 export function PotsTab({ month }: { month: string }) {
-  const current = new Date().toISOString().slice(0, 7);
+  const current = currentMonthLocal();
   const isFuture = month > current;
   const { data, error, loading, retry } = useApi<PotsResponse>(`/api/pots?month=${month}`);
   const { data: trendData } = useApi<TrendResponse>("/api/trend");

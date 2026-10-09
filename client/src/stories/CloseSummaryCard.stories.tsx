@@ -1,12 +1,13 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
 import { CloseSummaryCard } from "../PotsTab";
+import { currentMonthLocal } from "../format";
 import { makeClosePreview } from "./fixtures";
 import type { MockApiConfig } from "./mockApi";
 
 /* The month close card: Income, Spend, and Savings, which net to zero. */
 
-const CUR = new Date().toISOString().slice(0, 7);
+const CUR = currentMonthLocal();
 const PAST = "2026-08";
 
 const meta: Meta<typeof CloseSummaryCard> = {

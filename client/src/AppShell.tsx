@@ -6,6 +6,7 @@ import { SettingsTab } from "./SettingsTab";
 import { SharingTab } from "./SharingTab";
 import { TransactionsTab } from "./TransactionsTab";
 import { useApi, useOnline } from "./api";
+import { currentMonthLocal } from "./format";
 import { TABS, type Tab, tabFromUrl, tabLabel } from "./tabs";
 import type { Attention } from "./types";
 import { MonthNav, Sheet } from "./ui";
@@ -189,7 +190,7 @@ export function MobileTabBar({ tab, onGo, closeAlert, initialMoreOpen = false }:
  *  auth gate below has confirmed a session. Also the Storybook entry point. */
 export function AppShell() {
   const [tab, setTab] = useState<Tab>(tabFromUrl);
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [month, setMonth] = useState(currentMonthLocal);
   const { data: attention } = useApi<Attention>("/api/attention");
   const online = useOnline();
 
