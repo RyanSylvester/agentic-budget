@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useApi } from "./api";
-import { Skeleton, FetchError } from "./App";
+import { Skeleton, FetchError } from "./ui";
 
 /* Settings tab: account info and per-user agent token management.
  *

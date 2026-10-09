@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
-import { MonthNav } from "../App";
+import { MonthNav } from "../ui";
 
 const meta: Meta<typeof MonthNav> = {
   title: "Navigation/MonthNav",

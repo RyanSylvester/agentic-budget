@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
-import { CloseSummaryCard } from "../App";
+import { CloseSummaryCard } from "../PotsTab";
 import { makeClosePreview } from "./fixtures";
 import type { MockApiConfig } from "./mockApi";
 

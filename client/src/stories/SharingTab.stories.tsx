@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { userEvent, within } from "storybook/test";
-import { SharingTab } from "../App";
+import { SharingTab } from "../SharingTab";
 import { fixtureAccounts, makeContactBalance } from "./fixtures";
 import type { MockApiConfig } from "./mockApi";
 

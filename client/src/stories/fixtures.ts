@@ -2,17 +2,7 @@
    no real transaction descriptions, no personal names. Contact names used
    ("Alex", "Sam") are fictional stand-ins, never real people. */
 
-import type {
-  Account,
-  Attention,
-  ClosePreviewData,
-  ContactBalance,
-  ListedTxn,
-  Overview,
-  Pot,
-  TrendPoint,
-  Txn,
-} from "../App";
+import type { Account, Attention, ClosePreviewData, ContactBalance, ListedTxn, Overview, Pot, TrendPoint, Txn } from "../types";
 
 export const MONTH = "2026-09";
 

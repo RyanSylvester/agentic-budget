@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
-import { Eyebrow, FetchError, Skeleton } from "../App";
+import { Eyebrow, FetchError, Skeleton } from "../ui";
 
 const meta: Meta = {
   title: "Primitives",

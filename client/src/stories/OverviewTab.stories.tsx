@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
-import { OverviewTab } from "../App";
+import { OverviewTab } from "../OverviewTab";
 import { fixtureAccounts, makeAttention, makeOverview, MONTH } from "./fixtures";
 import type { MockApiConfig } from "./mockApi";
 

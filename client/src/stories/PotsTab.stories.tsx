@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { userEvent, within } from "storybook/test";
-import { PotsTab } from "../App";
+import { PotsTab } from "../PotsTab";
 import { fixtureContacts, fixturePots, fixtureTrend, makeClosePreview, MONTH } from "./fixtures";
 import type { MockApiConfig } from "./mockApi";
 

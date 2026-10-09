@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { SinkingLine, PotNameCell } from "../App";
+import { SinkingLine, PotNameCell } from "../BudgetTable";
 import { makePot } from "./fixtures";
 
 /* All fixture numbers below are invented for illustration; none come from
