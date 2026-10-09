@@ -11,6 +11,7 @@ import type { Db } from "./db-interface";
 import { registerAuth, authMiddleware, type AuthConfig, type Identity } from "./auth";
 import { monthSpend, allPotSpend, allPotInflow, recentTransactions, listTransactions, spendTrend, assignedTotal, rtaCents, potHistory } from "./queries";
 import { applySettlement, backfillSettlementAllocations, contactCredit, contactOwed, allContactCredit } from "./settle";
+import { createAccount, updateAccount } from "./accounts";
 import { contactBalances, createContact, renameContact, deleteContact } from "./contacts";
 import { createPot, updatePot, deletePot, potExists, setGroupOrder } from "./pots";
 import { reconcile, suggestClear } from "./reconcile";
@@ -22,6 +23,8 @@ import { createSchedule, getScheduleById, listSchedules, markPaid, removeSchedul
 import { validMonth } from "./money";
 import type {
   Account,
+  AccountCreatedResponse,
+  AccountType,
   AccountsResponse,
   AssignHistory,
   AssignResponse,
@@ -369,7 +372,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
   app.get("/api/accounts", async (c) => {
     const db = await getDb();
     const userId = await requestReaderId(c, db, authed);
-    const accounts = await db.all<{ id: number; name: string; type: string; last4: string | null }>(
+    const accounts = await db.all<{ id: number; name: string; type: AccountType; last4: string | null }>(
       "SELECT id, name, type, last4 FROM accounts WHERE user_id = ? ORDER BY id",
       userId
     );
@@ -416,6 +419,38 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
       });
     }
     return c.json({ accounts: out } satisfies AccountsResponse);
+  });
+
+  /** Add an account. Body: { name, type: chequing|savings|credit_card, last4? }.
+   *  Returns the new account in the GET /api/accounts item shape. */
+  app.post("/api/accounts", async (c) => {
+    const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
+    const { ok, body } = await readJson(c);
+    if (!ok) return c.json({ error: "malformed JSON" }, 400);
+    try {
+      const account = await createAccount(db, userId, body ?? {});
+      return c.json({ ok: true, id: account.id, account } satisfies AccountCreatedResponse);
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+
+  /** Rename an account or change its last four digits. Body: { name?, last4? }. */
+  app.put("/api/accounts/:id", async (c) => {
+    const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
+    const id = badId(c, "id");
+    if (id === null) return c.json({ error: "bad account id" }, 400);
+    const { ok, body } = await readJson(c);
+    if (!ok) return c.json({ error: "malformed JSON" }, 400);
+    try {
+      await updateAccount(db, userId, id, body ?? {});
+      return c.json({ ok: true } satisfies OkResponse);
+    } catch (e) {
+      const msg = (e as Error).message;
+      return c.json({ error: msg }, msg.startsWith("no account") ? 404 : 400);
+    }
   });
 
   /** Reconcile an account against its real-world balance. Body: { actualBalanceCents }.

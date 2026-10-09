@@ -15,6 +15,9 @@
  *    bun src/cli.ts pot retire --pot 12
  *    bun src/cli.ts pot unhide --pot 12
  *    bun src/cli.ts pot group-order Housing General Life   # set pot-group display order
+ *    bun src/cli.ts account list
+ *    bun src/cli.ts account add --name "Everyday" --type chequing|savings|credit_card [--last4 1234]
+ *    bun src/cli.ts account rename --account 1 --name "Joint chequing"
  *    bun src/cli.ts contact list
  *    bun src/cli.ts contact add --name "Alex"
  *    bun src/cli.ts contact rename --contact 1 --name "Alex R."
@@ -43,6 +46,7 @@ import { reconcile, suggestClear } from "./reconcile";
 import { applySettlement, backfillSettlementAllocations, contactOwed } from "./settle";
 import { closePreview, applyClose } from "./close";
 import { assignToPot } from "./assign";
+import { createAccount, updateAccount } from "./accounts";
 import { contactBalances, createContact, deleteContact, listContacts, renameContact } from "./contacts";
 import { createPot, deletePot, updatePot, setGroupOrder } from "./pots";
 import { createSchedule, listSchedules, markPaid, removeSchedule, sinkingStatus } from "./sinking";
@@ -54,7 +58,7 @@ import { runRemote, printScaffold, printClosePreview } from "./cli-remote";
 import { randomBytes } from "node:crypto";
 
 function usage(): never {
-  console.error("usage: budget <record|assign|recategorize|void|pot|contact|settle|reconcile|close|sinking|user|invite|migration|migrate-remote|serve|login> [options]");
+  console.error("usage: budget <record|assign|recategorize|void|pot|account|contact|settle|reconcile|close|sinking|user|invite|migration|migrate-remote|serve|login> [options]");
   process.exit(2);
 }
 
@@ -327,6 +331,39 @@ async function main() {
       try {
         const order = await setGroupOrder(db, userId, groups);
         console.log(`group order: ${order.join(", ")}`);
+      } catch (e) {
+        fail((e as Error).message);
+      }
+    } else {
+      usage();
+    }
+  } else if (cmd === "account") {
+    const db = await openDb();
+    const userId = await localUserId(db);
+    const [sub] = rest;
+    if (sub === "list") {
+      const rows = await db.all<{ id: number; name: string; type: string; last4: string | null }>(
+        "SELECT id, name, type, last4 FROM accounts WHERE user_id = ? ORDER BY id",
+        userId
+      );
+      if (rows.length === 0) console.log("no accounts");
+      for (const a of rows) console.log(`${a.id} "${a.name}" ${a.type}${a.last4 ? ` ••${a.last4}` : ""}`);
+    } else if (sub === "add") {
+      const name = flag("name");
+      if (!name) usage();
+      try {
+        const a = await createAccount(db, userId, { name, type: flag("type"), last4: flag("last4") });
+        console.log(`created account ${a.id} "${a.name}" (${a.type})`);
+      } catch (e) {
+        fail((e as Error).message);
+      }
+    } else if (sub === "rename") {
+      const accountId = parseInt(flag("account") ?? "NaN", 10);
+      const name = flag("name");
+      if (!Number.isFinite(accountId) || !name) usage();
+      try {
+        await updateAccount(db, userId, accountId, { name });
+        console.log(`renamed account ${accountId} to "${name}"`);
       } catch (e) {
         fail((e as Error).message);
       }
