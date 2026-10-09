@@ -8,14 +8,14 @@ import { TransactionsTab } from "./TransactionsTab";
 import { useApi } from "./api";
 import { TABS, type Tab, tabFromUrl, tabLabel } from "./tabs";
 import type { Attention } from "./types";
-import { MonthNav } from "./ui";
+import { MonthNav, Sheet } from "./ui";
 
 /* ---------- app ---------- */
 
 export const MONTH_TABS: Tab[] = ["overview", "pots", "transactions"];
 
-/* Icon-only mobile tab bar: one clean inline SVG per tab, no icon library.
- * Selected renders in dark ink, inactive in muted grey. */
+/* Tab glyphs for the mobile bar and the More sheet: one clean inline SVG per
+ * tab, no icon library. */
 export function TabIcon({ id }: { id: Tab }) {
   const common = {
     width: 24,
@@ -64,41 +64,129 @@ export function CountBadge({ n, className = "" }: { n: number; className?: strin
   );
 }
 
-/** The full app shell: tabs, sidebar, and content. Rendered only once the
- *  auth gate below has confirmed a session. Also the Storybook entry point. */
-/* Mobile bottom tab bar: icon-only, all six tabs in the same order, no
- * "More" sheet. The active dot is absolutely positioned (out of flow) so the
- * 24px icon stays optically centered in the 64px button. Dark ink when
- * active, muted grey when inactive. */
-export function MobileTabBar({ tab, onGo, closeAlert }: { tab: Tab; onGo: (t: Tab) => void; closeAlert: boolean }) {
+/* Mobile bottom tab bar: the three month tabs plus More, each an icon over a
+ * short label so nothing has to be guessed from the glyph. Sharing, Accounts
+ * and Settings live in the More sheet (same order as the desktop sidebar);
+ * More reads as active while one of them is open. 64px rows clear the 44px
+ * tap-target minimum, and the bar pads itself above the home indicator. */
+export const PRIMARY_MOBILE_TABS: Tab[] = ["overview", "pots", "transactions"];
+export const MORE_TABS: Tab[] = TABS.map((t) => t.id).filter((id) => !PRIMARY_MOBILE_TABS.includes(id));
+
+function MoreIcon() {
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--hairline)] bg-[var(--surface)] pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Primary">
-      <div className="grid grid-cols-6">
-        {TABS.map(({ id }) => {
-          const active = tab === id;
-          return (
-            <button
-              key={id}
-              onClick={() => onGo(id)}
-              aria-label={tabLabel(id)}
-              aria-current={active ? "page" : undefined}
-              className={`relative flex min-h-[64px] items-center justify-center transition active:scale-95 ${
-                active ? "text-[var(--ink)]" : "text-[var(--muted)]"
-              }`}
-            >
-              <span className={`absolute left-1/2 top-2 h-1.5 w-1.5 -translate-x-1/2 rounded-full ${active ? "bg-[var(--ink)]" : "bg-transparent"}`} />
-              <TabIcon id={id} />
-              {id === "pots" && closeAlert && (
-                <span className="absolute right-4 top-3 h-2 w-2 rounded-full bg-[var(--warning)]" />
-              )}
-            </button>
-          );
-        })}
-      </div>
-    </nav>
+    <svg width={24} height={24} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <circle cx="5.5" cy="12" r="1.7" />
+      <circle cx="12" cy="12" r="1.7" />
+      <circle cx="18.5" cy="12" r="1.7" />
+    </svg>
   );
 }
 
+function TabBarButton({ active, label, onClick, icon, dot, ...rest }: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+  icon: React.ReactNode;
+  dot?: boolean;
+} & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      {...rest}
+      onClick={onClick}
+      className={`flex min-h-[64px] flex-col items-center justify-center gap-1 pt-1 transition active:scale-95 ${
+        active ? "text-[var(--ink)]" : "text-[var(--muted)]"
+      }`}
+    >
+      <span className="relative">
+        {icon}
+        {dot && (
+          <span
+            aria-hidden
+            className="absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-[var(--warning)] ring-2 ring-[var(--surface)]"
+          />
+        )}
+      </span>
+      <span className={`text-[11px] leading-none tracking-[0.01em] ${active ? "font-semibold" : "font-medium"}`}>{label}</span>
+    </button>
+  );
+}
+
+export function MobileTabBar({ tab, onGo, closeAlert, initialMoreOpen = false }: {
+  tab: Tab;
+  onGo: (t: Tab) => void;
+  closeAlert: boolean;
+  /** Storybook only: render with the More sheet already open. */
+  initialMoreOpen?: boolean;
+}) {
+  const [moreOpen, setMoreOpen] = useState(initialMoreOpen);
+  const moreActive = MORE_TABS.includes(tab);
+  return (
+    <>
+      <nav
+        className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--hairline)] bg-[var(--surface)] pb-[env(safe-area-inset-bottom)] md:hidden"
+        aria-label="Primary"
+      >
+        <div className="grid grid-cols-4">
+          {PRIMARY_MOBILE_TABS.map((id) => (
+            <TabBarButton
+              key={id}
+              active={tab === id}
+              aria-current={tab === id ? "page" : undefined}
+              label={tabLabel(id)}
+              onClick={() => onGo(id)}
+              icon={<TabIcon id={id} />}
+              dot={id === "pots" && closeAlert}
+              aria-label={id === "pots" && closeAlert ? `${tabLabel(id)}, month close needs attention` : undefined}
+            />
+          ))}
+          <TabBarButton
+            active={moreActive}
+            aria-current={moreActive ? "page" : undefined}
+            aria-haspopup="dialog"
+            aria-expanded={moreOpen}
+            aria-label={moreActive ? `More, ${tabLabel(tab)} open` : "More: Sharing, Accounts, Settings"}
+            label="More"
+            onClick={() => setMoreOpen(true)}
+            icon={<MoreIcon />}
+          />
+        </div>
+      </nav>
+      {moreOpen && (
+        <Sheet label="More" onClose={() => setMoreOpen(false)}>
+          <div className="mb-2 text-[17px] font-semibold">More</div>
+          <ul className="-mx-2">
+            {MORE_TABS.map((id) => {
+              const active = tab === id;
+              return (
+                <li key={id}>
+                  <button
+                    onClick={() => {
+                      setMoreOpen(false);
+                      onGo(id);
+                    }}
+                    aria-current={active ? "page" : undefined}
+                    className={`flex min-h-[52px] w-full items-center gap-3.5 rounded-[var(--r-md)] px-2 text-left text-[15px] transition active:scale-[0.99] active:bg-[var(--bg-sunken)] ${
+                      active ? "bg-[var(--bg-sunken)] font-semibold text-[var(--ink)]" : "font-medium text-[var(--ink-2)]"
+                    }`}
+                  >
+                    <span className={active ? "text-[var(--ink)]" : "text-[var(--muted)]"}>
+                      <TabIcon id={id} />
+                    </span>
+                    <span className="flex-1">{tabLabel(id)}</span>
+                    <span aria-hidden className="text-[17px] text-[var(--faint)]">›</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </Sheet>
+      )}
+    </>
+  );
+}
+
+/** The full app shell: tabs, sidebar, and content. Rendered only once the
+ *  auth gate below has confirmed a session. Also the Storybook entry point. */
 export function AppShell() {
   const [tab, setTab] = useState<Tab>(tabFromUrl);
   const [refreshKey, setRefreshKey] = useState(0);
