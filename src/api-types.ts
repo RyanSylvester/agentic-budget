@@ -148,6 +148,9 @@ export interface ListedTransaction {
   sharedCents: number;
   splitContactId: number | null;
   splitContactName: string | null;
+  /** 1 when linked to a contact settlement (or is the settlement itself):
+   *  amounts are locked and it cannot be voided, whatever its cleared state. */
+  settled: number;
 }
 
 /** GET /api/transactions?month= */

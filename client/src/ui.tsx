@@ -111,11 +111,12 @@ export function Sheet({ label, onClose, children }: { label: string; onClose: ()
 }
 
 // Pill segmented control. Used for Out/In and for the type filter.
-export function Segmented<T extends string>({ options, value, onChange, ariaLabel }: {
+export function Segmented<T extends string>({ options, value, onChange, ariaLabel, disabled }: {
   options: { value: T; label: string }[];
   value: T;
   onChange: (v: T) => void;
   ariaLabel: string;
+  disabled?: boolean;
 }) {
   return (
     <div role="group" aria-label={ariaLabel} className="inline-flex shrink-0 rounded-[var(--r-pill)] border border-[var(--hairline-strong)] p-0.5">
@@ -124,8 +125,9 @@ export function Segmented<T extends string>({ options, value, onChange, ariaLabe
           key={o.value}
           type="button"
           onClick={() => onChange(o.value)}
+          disabled={disabled}
           aria-pressed={value === o.value}
-          className={`rounded-full px-3 py-1.5 text-sm transition active:scale-95 ${
+          className={`rounded-full px-3 py-1.5 text-sm transition active:scale-95 disabled:opacity-50 ${
             value === o.value
               ? "bg-[var(--ink)] font-medium text-[var(--bg)]"
               : "text-[var(--muted)] hover:text-[var(--ink-2)]"

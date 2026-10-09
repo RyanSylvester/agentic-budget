@@ -191,6 +191,7 @@ export function makeListedTxn(over: Partial<ListedTransaction> = {}): ListedTran
     sharedCents: 0,
     splitContactId: null,
     splitContactName: null,
+    settled: 0,
     ...over,
   };
 }

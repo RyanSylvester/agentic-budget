@@ -11,7 +11,7 @@ import {
 import type { MockApiConfig } from "./mockApi";
 
 /* The Transactions tab: the full ledger for a month with search, pot and
-   type filters, and the add/edit sheet (with delete confirmation). */
+   type filters, and the add/edit sheet (with void confirmation). */
 
 const firstTxn = fixtureListedTxns[0];
 
@@ -24,6 +24,8 @@ const txnsApi = {
   },
   post: {
     "/api/transactions": { ok: true, id: 999 },
+    [`/api/transactions/${firstTxn.id}/recategorize`]: { ok: true },
+    [`/api/transactions/${firstTxn.id}/unvoid`]: { ok: true },
   },
   put: {
     [`/api/transactions/${firstTxn.id}`]: { ok: true },
@@ -140,7 +142,7 @@ export const EditSheet: Story = {
     docs: {
       description: {
         story:
-          "Editing an existing transaction: every field prefilled from the row, with a delete option at the bottom.",
+          "Editing an existing transaction: every field prefilled from the row, with a void option at the bottom.",
       },
     },
   },
@@ -178,20 +180,32 @@ export const SplitSheetEditExisting: Story = {
   render: () => <TransactionSheet txn={firstTxn} {...sheetProps} />,
 };
 
-export const DeleteConfirmation: Story = {
+export const VoidConfirmation: Story = {
   parameters: {
     docs: {
       description: {
         story:
-          "Deleting asks first: tapping Delete transaction swaps the footer for a confirm panel with Keep it and Delete. (Interaction test.)",
+          "Voiding asks first: tapping Void transaction swaps the footer for a confirm panel with Keep it and Void. A void removes the row from spending and budgets but keeps it in history, and the tab offers Undo right after. (Interaction test.)",
       },
     },
   },
   render: () => <TransactionSheet txn={firstTxn} {...sheetProps} />,
   play: async ({ canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole("button", { name: "Delete transaction" }));
-    await within(canvasElement).findByText("Delete this transaction?");
+    await userEvent.click(within(canvasElement).getByRole("button", { name: "Void transaction" }));
+    await within(canvasElement).findByText("Void this transaction?");
   },
+};
+
+export const ReconciledEdit: Story = {
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "Editing a reconciled transaction: a note explains that amount, account and split are locked, those fields are disabled, and Void is disabled with the reason. The pot, date and description stay editable; a pot change goes through recategorize.",
+      },
+    },
+  },
+  render: () => <TransactionSheet txn={{ ...firstTxn, cleared: "reconciled" }} {...sheetProps} />,
 };
 
 const nowTx = new Date();

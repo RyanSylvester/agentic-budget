@@ -22,6 +22,7 @@ export function MoneyInput({
   placeholder = "0.00",
   className = "",
   hint = true,
+  disabled,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -36,6 +37,7 @@ export function MoneyInput({
   className?: string;
   /** Show the "= 85.00" live hint while an expression is typed. */
   hint?: boolean;
+  disabled?: boolean;
 }) {
   const trimmed = value.trim();
   // Show the hint only when the input is a real expression, not a plain
@@ -62,6 +64,7 @@ export function MoneyInput({
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
         onBlur={onBlur}
+        disabled={disabled}
         placeholder={placeholder}
         aria-label={ariaLabel}
         className={`field t-nums pr-3 ${className}`}
