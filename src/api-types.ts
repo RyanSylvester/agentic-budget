@@ -86,6 +86,9 @@ export interface Attention {
   rtaCents: number;
   unsettledSharedCents: number;
   sharedOwedBy: SharedOwedByContact[];
+  /** The month before `month` when it had activity but was never closed;
+   *  null when there is nothing to close. */
+  unclosedMonth: string | null;
 }
 
 /* ---------- accounts ---------- */

@@ -122,6 +122,26 @@ export async function closePreview(db: Db, userId: number, month: string): Promi
   return { month, nextMonth, inflowsCents, spentCents, assignedCents, rtaBeforeCents, movedToSavingsCents, sharedOwedCents, sharedOwedBy, pots: lines, closed };
 }
 
+/** The month before `month` when it saw activity (a transaction or an
+ *  assignment) but was never closed; otherwise null. A month with nothing in
+ *  it, like the one before a user's first, has nothing to close. */
+export async function unclosedPreviousMonth(db: Db, userId: number, month: string): Promise<string | null> {
+  const prev = shiftMonth(month, -1);
+  const row = await db.get<{ active: number; closed: number }>(
+    `SELECT
+       (EXISTS (SELECT 1 FROM transactions WHERE user_id = ? AND voided = 0 AND substr(date, 1, 7) = ?)
+        OR EXISTS (SELECT 1 FROM assignments WHERE user_id = ? AND month = ? AND cents != 0)) AS active,
+       EXISTS (SELECT 1 FROM month_closes WHERE user_id = ? AND month = ?) AS closed`,
+    userId,
+    prev,
+    userId,
+    prev,
+    userId,
+    prev
+  );
+  return row && row.active && !row.closed ? prev : null;
+}
+
 /** Apply the month-end close: record it and wireframe next month's pot targets.
  *  The $0 rule binds only here, at apply time: Ready-to-Assign must be exactly
  *  $0 when the month is closed. Mid-month it is free to be anything; the
