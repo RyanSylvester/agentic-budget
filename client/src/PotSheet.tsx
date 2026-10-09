@@ -109,20 +109,20 @@ export function PotSheet({ pot, groups, pots, onClose, onSaved }: {
     <Sheet label={pot ? `Edit ${pot.name}` : "Add pot"} onClose={onClose}>
       <div className="space-y-4">
         <div>
-          <label className="mb-1.5 block text-[13px] font-medium text-[var(--ink-2)]" htmlFor="pot-name">Name</label>
+          <label className="mb-1.5 block text-sm font-medium text-[var(--ink-2)]" htmlFor="pot-name">Name</label>
           <input id="pot-name" type="text" value={name} onChange={(e) => setName(e.target.value)}
-            placeholder="Groceries" className="field t-nums w-full px-3 py-2 text-[15px]" />
+            placeholder="Groceries" className="field t-nums w-full px-3 py-2 text-md" />
         </div>
         <div>
-          <label className="mb-1.5 block text-[13px] font-medium text-[var(--ink-2)]" htmlFor="pot-group">Group</label>
+          <label className="mb-1.5 block text-sm font-medium text-[var(--ink-2)]" htmlFor="pot-group">Group</label>
           <input id="pot-group" type="text" value={group} onChange={(e) => setGroup(e.target.value)}
-            list="pot-groups" placeholder="Life" className="field t-nums w-full px-3 py-2 text-[15px]" />
+            list="pot-groups" placeholder="Life" className="field t-nums w-full px-3 py-2 text-md" />
           <datalist id="pot-groups">
             {groups.map((g) => <option key={g} value={g} />)}
           </datalist>
         </div>
         <div>
-          <span className="mb-1.5 block text-[13px] font-medium text-[var(--ink-2)]">Next month fills with</span>
+          <span className="mb-1.5 block text-sm font-medium text-[var(--ink-2)]">Next month fills with</span>
           <Segmented
             ariaLabel="Next month fill rule"
             value={targetType}
@@ -133,14 +133,14 @@ export function PotSheet({ pot, groups, pots, onClose, onSaved }: {
               { value: "savings", label: "Leftovers" },
             ]}
           />
-          <p className="mt-1.5 text-[12px] text-[var(--muted)]">
+          <p className="mt-1.5 text-xs text-[var(--muted)]">
             {targetType === "fixed" && "The bulk fill copies what you assigned last month."}
             {targetType === "average_3mo" && "The bulk fill uses your 3-month average assignment."}
             {targetType === "savings" && "Skipped by the bulk fill; only month-end leftovers land here."}
           </p>
         </div>
         <div className="rounded-[var(--r-md)] bg-[var(--bg-sunken)] p-4">
-          <label className="flex cursor-pointer items-center gap-2.5 text-[15px] font-medium">
+          <label className="flex cursor-pointer items-center gap-2.5 text-md font-medium">
             <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} className="h-4 w-4 accent-[var(--ink)]" />
             Share with a contact
           </label>
@@ -150,35 +150,35 @@ export function PotSheet({ pot, groups, pots, onClose, onSaved }: {
                 value={contactId}
                 onChange={(e) => setContactId(e.target.value)}
                 aria-label="Contact"
-                className="field t-nums flex-1 px-2 py-2 text-[15px]"
+                className="field t-nums flex-1 px-2 py-2 text-md"
               >
                 <option value="">Pick a contact…</option>
                 {contacts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
               <input type="text" inputMode="numeric" value={sharePct} onChange={(e) => setSharePct(e.target.value)}
-                aria-label="Share percent" className="field t-nums w-20 px-2 py-2 text-center text-[15px]" />
-              <span className="text-[13px] text-[var(--muted)]">%</span>
+                aria-label="Share percent" className="field t-nums w-20 px-2 py-2 text-center text-md" />
+              <span className="text-sm text-[var(--muted)]">%</span>
             </div>
           )}
           {shared && contacts.length === 0 && (
-            <div className="mt-2 text-[13px] text-[var(--muted)]">Add a contact in Sharing first.</div>
+            <div className="mt-2 text-sm text-[var(--muted)]">Add a contact in Sharing first.</div>
           )}
-          <div className="mt-2 text-[13px] text-[var(--muted)]">New split transactions in this pot default to this share.</div>
+          <div className="mt-2 text-sm text-[var(--muted)]">New split transactions in this pot default to this share.</div>
         </div>
-        {error && <div className="text-[13px] text-[var(--danger)]">{error}</div>}
+        {error && <div className="text-sm text-[var(--danger)]">{error}</div>}
         <div className="flex items-center gap-2">
-          <button onClick={save} disabled={busy || !name.trim()} className="btn-ink flex-1 px-4 py-2.5 text-[15px]">
+          <button onClick={save} disabled={busy || !name.trim()} className="btn-ink flex-1 px-4 py-2.5 text-md">
             {busy ? "Saving…" : pot ? "Save changes" : "Add pot"}
           </button>
-          <button onClick={onClose} className="btn-ghost px-4 py-2.5 text-[15px]">Cancel</button>
+          <button onClick={onClose} className="btn-ghost px-4 py-2.5 text-md">Cancel</button>
         </div>
         {pot && !confirmDelete && (
-          <button onClick={openDelete} className="cursor-pointer text-[13px] text-[var(--muted)] hover:text-[var(--danger)]">
+          <button onClick={openDelete} className="cursor-pointer text-sm text-[var(--muted)] hover:text-[var(--danger)]">
             Delete this pot…
           </button>
         )}
         {pot && confirmDelete && (
-          <div className="rounded-[var(--r-md)] border border-[var(--danger)] p-4 text-[13px]">
+          <div className="rounded-[var(--r-md)] border border-[var(--danger)] p-4 text-sm">
             <div className="font-medium">Delete {pot.name}?</div>
             <div className="mt-1 text-[var(--ink-2)]">
               {preview

@@ -74,8 +74,8 @@ export function ScaffoldSheet({ month, onClose, onScaffolded }: {
 
   return (
     <Sheet label={`Scaffold ${monthLabel(month)}`} onClose={onClose}>
-      <div className="mb-1.5 text-[17px] font-semibold">Scaffold {monthLabel(month)}</div>
-      <p className="mb-3 text-[14px] text-[var(--muted)]">
+      <div className="mb-1.5 text-lg font-semibold">Scaffold {monthLabel(month)}</div>
+      <p className="mb-3 text-sm text-[var(--muted)]">
         Fill every pot from its assigned history. Income pots copy last month's planned income.
       </p>
       <Segmented options={SCAFFOLD_OPTIONS} value={strategy} onChange={setStrategy} ariaLabel="Scaffold strategy" />
@@ -92,7 +92,7 @@ export function ScaffoldSheet({ month, onClose, onScaffolded }: {
           <>
             <ul className="max-h-64 space-y-1.5 overflow-y-auto">
               {(lines ?? []).map((l) => (
-                <li key={l.potId} className="flex items-baseline justify-between gap-3 text-[14px]">
+                <li key={l.potId} className="flex items-baseline justify-between gap-3 text-md">
                   <span className="truncate text-[var(--ink-2)]">
                     {l.name}
                     {l.income && <span className="text-[var(--muted)]"> · planned</span>}
@@ -102,7 +102,7 @@ export function ScaffoldSheet({ month, onClose, onScaffolded }: {
                 </li>
               ))}
             </ul>
-            <div className="mt-2 flex justify-between border-t border-[var(--hairline)] pt-2 text-[14px]">
+            <div className="mt-2 flex justify-between border-t border-[var(--hairline)] pt-2 text-md">
               <span className="text-[var(--muted)]">Total</span>
               <span className="t-nums font-semibold">{money(total)}</span>
             </div>
@@ -112,18 +112,18 @@ export function ScaffoldSheet({ month, onClose, onScaffolded }: {
       <div className="mt-4 border-t border-[var(--hairline)] pt-4">
         {confirming ? (
           <div>
-            <p className="text-[14px] text-[var(--ink-2)]">
+            <p className="text-md text-[var(--ink-2)]">
               Set these assignments for {monthLabel(month)}? This overwrites any values already set.
             </p>
             <div className="mt-3 flex gap-2">
               <button
                 onClick={() => setConfirming(false)}
                 disabled={busy}
-                className="flex-1 rounded-[var(--r-md)] border border-[var(--hairline-strong)] px-4 py-2.5 text-[15px] font-medium text-[var(--ink-2)] transition active:scale-[0.99]"
+                className="flex-1 rounded-[var(--r-md)] border border-[var(--hairline-strong)] px-4 py-2.5 text-md font-medium text-[var(--ink-2)] transition active:scale-[0.99]"
               >
                 Cancel
               </button>
-              <button onClick={apply} disabled={busy} className="btn-ink flex-1 px-4 py-2.5 text-[15px]">
+              <button onClick={apply} disabled={busy} className="btn-ink flex-1 px-4 py-2.5 text-md">
                 {busy ? "Scaffolding…" : "Confirm scaffold"}
               </button>
             </div>
@@ -132,12 +132,12 @@ export function ScaffoldSheet({ month, onClose, onScaffolded }: {
           <button
             onClick={() => setConfirming(true)}
             disabled={!lines || loadingPreview}
-            className="btn-ink w-full py-2.5 text-[15px]"
+            className="btn-ink w-full py-2.5 text-md"
           >
             Scaffold {(lines ?? []).length} pots
           </button>
         )}
-        {failed && !loadingPreview && <p className="mt-2 text-center text-[13px] text-[var(--danger)]">{failed}</p>}
+        {failed && !loadingPreview && <p className="mt-2 text-center text-sm text-[var(--danger)]">{failed}</p>}
       </div>
     </Sheet>
   );

@@ -66,8 +66,8 @@ export default function App() {
     return (
       <div className="flex min-h-screen items-center justify-center px-5">
         <div className="card w-full max-w-sm p-6 text-center">
-          <p className="text-[15px] text-[var(--muted)]">Couldn't reach the server.</p>
-          <button onClick={load} className="btn-ink mt-3 px-4 py-2 text-[15px]">
+          <p className="text-md text-[var(--muted)]">Couldn't reach the server.</p>
+          <button onClick={load} className="btn-ink mt-3 px-4 py-2 text-md">
             Try again
           </button>
         </div>

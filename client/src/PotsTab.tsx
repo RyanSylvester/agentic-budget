@@ -76,13 +76,13 @@ export function CloseSummaryCard({ month, onClosed }: { month: string; onClosed:
   return (
     <section className="card mb-6 p-5" aria-label={`Month close for ${monthLabel(month)}`}>
       <div className="mb-3 flex items-baseline justify-between">
-        <div className="text-[17px] font-semibold">Month close</div>
+        <div className="text-lg font-semibold">Month close</div>
         {closed ? (
-          <span className="rounded-[var(--r-pill)] bg-[var(--bg-sunken)] px-2.5 py-1 text-[12px] font-medium text-[var(--muted)]">
+          <span className="rounded-[var(--r-pill)] bg-[var(--bg-sunken)] px-2.5 py-1 text-xs font-medium text-[var(--muted)]">
             Closed
           </span>
         ) : (
-          <span className="text-[12px] text-[var(--muted)]">{monthLabel(month)}</span>
+          <span className="text-xs text-[var(--muted)]">{monthLabel(month)}</span>
         )}
       </div>
       <div className="grid grid-cols-3 gap-2 text-center">
@@ -92,12 +92,12 @@ export function CloseSummaryCard({ month, onClosed }: { month: string; onClosed:
           { label: "Savings", cents: savings },
         ].map((s) => (
           <div key={s.label} className="rounded-[var(--r-md)] bg-[var(--bg-sunken)] px-2 py-3">
-            <div className="text-[12px] text-[var(--muted)]">{s.label}</div>
-            <div className="t-nums mt-0.5 text-[17px] font-medium leading-none">{money(s.cents)}</div>
+            <div className="text-xs text-[var(--muted)]">{s.label}</div>
+            <div className="t-nums mt-0.5 text-lg font-medium leading-none">{money(s.cents)}</div>
           </div>
         ))}
       </div>
-      <p className="mt-3 text-center text-[13px] text-[var(--muted)]">
+      <p className="mt-3 text-center text-sm text-[var(--muted)]">
         Income − Spend − Savings = <span className="t-nums font-medium text-[var(--ink-2)]">{money(income - spend - savings)}</span>
       </p>
       {isCurrent && !closed && (
@@ -105,37 +105,37 @@ export function CloseSummaryCard({ month, onClosed }: { month: string; onClosed:
           {rta === 0 ? (
             confirming ? (
               <div>
-                <p className="text-[14px] text-[var(--ink-2)]">
+                <p className="text-md text-[var(--ink-2)]">
                   Close {monthLabel(month)}? This records the close and sets next month's fill amounts.
                 </p>
                 <div className="mt-3 flex gap-2">
                   <button
                     onClick={() => setConfirming(false)}
                     disabled={busy}
-                    className="flex-1 rounded-[var(--r-md)] border border-[var(--hairline-strong)] px-4 py-2.5 text-[15px] font-medium text-[var(--ink-2)] transition active:scale-[0.99]"
+                    className="flex-1 rounded-[var(--r-md)] border border-[var(--hairline-strong)] px-4 py-2.5 text-md font-medium text-[var(--ink-2)] transition active:scale-[0.99]"
                   >
                     Cancel
                   </button>
-                  <button onClick={doClose} disabled={busy} className="btn-ink flex-1 px-4 py-2.5 text-[15px]">
+                  <button onClick={doClose} disabled={busy} className="btn-ink flex-1 px-4 py-2.5 text-md">
                     {busy ? "Closing…" : "Close month"}
                   </button>
                 </div>
               </div>
             ) : (
-              <button onClick={() => setConfirming(true)} className="btn-ink w-full py-2.5 text-[15px]">
+              <button onClick={() => setConfirming(true)} className="btn-ink w-full py-2.5 text-md">
                 Close {monthLabel(month)}
               </button>
             )
           ) : (
             // The amount itself lives in Ready to assign below; here we only
             // say what unlocks the close, so the figure is not repeated.
-            <p className="text-center text-[13px] text-[var(--muted)]">
+            <p className="text-center text-sm text-[var(--muted)]">
               {rta > 0
                 ? "Close opens once everything in Ready to assign has a job."
                 : "More is assigned than came in. Bring Ready to assign back to $0 to close the month."}
             </p>
           )}
-          {failed && <p className="mt-2 text-center text-[13px] text-[var(--danger)]">{failed}</p>}
+          {failed && <p className="mt-2 text-center text-sm text-[var(--danger)]">{failed}</p>}
         </div>
       )}
     </section>
@@ -164,14 +164,14 @@ export function PotsTab({ month }: { month: string }) {
   return (
     <div>
       <div className="mb-5 flex items-baseline justify-between">
-        <div className="font-serif-d text-[24px] font-medium">Pots</div>
+        <div className="font-serif-d text-xl font-medium">Pots</div>
         <div className="flex gap-2">
           {isFuture && !loading && !error && (
-            <button onClick={() => setScaffoldOpen(true)} className="btn-ink px-4 py-2 text-[14px]">
+            <button onClick={() => setScaffoldOpen(true)} className="btn-ink px-4 py-2 text-md">
               Scaffold month
             </button>
           )}
-          <button onClick={() => setSheetPot("new")} className="btn-ink px-4 py-2 text-[14px]">Add pot</button>
+          <button onClick={() => setSheetPot("new")} className="btn-ink px-4 py-2 text-md">Add pot</button>
         </div>
       </div>
       {loading ? (
@@ -182,11 +182,11 @@ export function PotsTab({ month }: { month: string }) {
         <FetchError onRetry={retry} label="Couldn't load pots." />
       ) : pots.length === 0 ? (
         <div className="rounded-[var(--r-lg)] border border-dashed border-[var(--line)] px-6 py-16 text-center">
-          <div className="font-serif-d text-[22px] font-medium">No pots yet</div>
-          <p className="mx-auto mt-2 max-w-[340px] text-[14px] text-[var(--ink-2)]">
+          <div className="font-serif-d text-xl font-medium">No pots yet</div>
+          <p className="mx-auto mt-2 max-w-[340px] text-md text-[var(--ink-2)]">
             Pots are the buckets your money lives in. Create your first one to start budgeting.
           </p>
-          <button onClick={() => setSheetPot("new")} className="btn-ink mt-5 px-5 py-2.5 text-[15px]">
+          <button onClick={() => setSheetPot("new")} className="btn-ink mt-5 px-5 py-2.5 text-md">
             Create your first pot
           </button>
         </div>
@@ -302,7 +302,7 @@ export function TrendSpark({ trend }: { trend: TrendPoint[] }) {
       </ul>
       <div className="mt-1 flex" aria-hidden="true">
         {trend.map((t) => (
-          <span key={t.month} className="t-nums flex-1 text-center text-[11px] text-[var(--muted)]">
+          <span key={t.month} className="t-nums flex-1 text-center text-2xs text-[var(--muted)]">
             {trendLabel(t.month)}
           </span>
         ))}
@@ -336,15 +336,15 @@ export function PotsSummary({
     <section className="card mb-6 p-5" aria-label={`Summary for ${monthLabel(month)}`}>
       <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
         <div>
-          <div className="text-[12px] text-[var(--muted)]">Ready to assign</div>
+          <div className="text-xs text-[var(--muted)]">Ready to assign</div>
           <div
-            className={`t-nums font-serif-d mt-0.5 text-[32px] font-light leading-none ${
+            className={`t-nums font-serif-d mt-0.5 text-figure font-light leading-none ${
               rtaCents > 0 ? "text-[var(--accent)]" : rtaCents < 0 ? "text-[var(--danger)]" : "text-[var(--ink)]"
             }`}
           >
             {money(rtaCents)}
           </div>
-          <div className="mt-1.5 text-[13px] text-[var(--muted)]">
+          <div className="mt-1.5 text-sm text-[var(--muted)]">
             {rtaCents > 0
               ? "Give it a job: tap any Assigned amount below."
               : rtaCents < 0
@@ -353,17 +353,17 @@ export function PotsSummary({
           </div>
         </div>
         {onAssign && rtaCents !== 0 && (
-          <button onClick={onAssign} className="btn-ink min-h-11 px-5 text-[15px]">
+          <button onClick={onAssign} className="btn-ink min-h-11 px-5 text-md">
             {rtaCents > 0 ? "Start assigning" : "Review amounts"}
           </button>
         )}
       </div>
       {top.length > 0 && (
         <div className="mt-4 border-t border-[var(--hairline)] pt-3">
-          <div className="mb-1.5 text-[12px] text-[var(--muted)]">Top groups</div>
+          <div className="mb-1.5 text-xs text-[var(--muted)]">Top groups</div>
           <ul className="space-y-1.5">
             {top.map(([group, cents]) => (
-              <li key={group} className="flex items-baseline justify-between gap-3 text-[14px]">
+              <li key={group} className="flex items-baseline justify-between gap-3 text-md">
                 <span className="truncate text-[var(--ink-2)]">{titleCase(group)}</span>
                 <span className="t-nums shrink-0 font-medium">{money(cents)}</span>
               </li>
@@ -373,12 +373,12 @@ export function PotsSummary({
       )}
       {trend.length > 1 && (
         <div className="mt-4 border-t border-[var(--hairline)] pt-3">
-          <div className="mb-2 text-[12px] text-[var(--muted)]">Six-month spend</div>
+          <div className="mb-2 text-xs text-[var(--muted)]">Six-month spend</div>
           <TrendSpark trend={trend} />
         </div>
       )}
       {spent === 0 && trend.length === 0 && (
-        <p className="mt-3 text-[14px] italic text-[var(--muted)]">No spending recorded yet.</p>
+        <p className="mt-3 text-sm italic text-[var(--muted)]">No spending recorded yet.</p>
       )}
     </section>
   );

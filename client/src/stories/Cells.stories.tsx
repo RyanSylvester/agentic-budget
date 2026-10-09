@@ -70,7 +70,7 @@ export const SplitTagUnconfigured: StoryObj = {
 
 export const SplitTagNone: StoryObj = {
   render: () => (
-    <span className="text-[13px] text-[var(--muted)]">
+    <span className="text-sm text-[var(--muted)]">
       renders nothing when the pot has no shared spend:
       <SplitTag p={makePot({ spentCents: 9000, sharedCents: 0 })} />
     </span>

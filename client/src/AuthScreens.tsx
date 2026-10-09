@@ -44,6 +44,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen items-center justify-center px-5">
       <div className="w-full max-w-sm">
+        {/* Wordmark: sized on its own, outside the type scale. */}
         <div className="mb-8 text-center font-serif-d text-[28px] font-medium tracking-tight">Daybook</div>
         <div className="card p-6">{children}</div>
       </div>
@@ -51,7 +52,8 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-const labelCls = "mb-1.5 block text-[13px] font-medium text-[var(--ink-2)]";
+const labelCls = "mb-1.5 block text-sm font-medium text-[var(--ink-2)]";
+// 16px, off the type scale: anything smaller makes iOS Safari zoom on focus.
 const inputCls = "field w-full px-3 py-2.5 text-[16px]";
 
 async function postJson(url: string, body: unknown): Promise<Response> {
@@ -100,9 +102,9 @@ export function LoginScreen({ onAuthenticated, onSignup, notice, deriveKey = der
 
   return (
     <Shell>
-      <div className="mb-5 text-[17px] font-semibold">Log in</div>
+      <div className="mb-5 text-lg font-semibold">Log in</div>
       {notice && (
-        <p role="status" className="mb-4 text-[13px] text-[var(--ink-2)]">
+        <p role="status" className="mb-4 text-sm text-[var(--ink-2)]">
           {notice}
         </p>
       )}
@@ -140,20 +142,20 @@ export function LoginScreen({ onAuthenticated, onSignup, notice, deriveKey = der
           />
         </div>
         {error && (
-          <div role="alert" className="text-[13px] text-[var(--danger)]">
+          <div role="alert" className="text-sm text-[var(--danger)]">
             {error}
           </div>
         )}
-        <button type="submit" disabled={busy || !username.trim() || !password} className="btn-ink w-full py-2.5 text-[15px]">
+        <button type="submit" disabled={busy || !username.trim() || !password} className="btn-ink w-full py-2.5 text-md">
           {busy ? "Checking…" : "Log in"}
         </button>
       </form>
       {onSignup && (
-        <button onClick={onSignup} className="mt-2 w-full py-2 text-center text-[13px] text-[var(--ink-2)] underline underline-offset-2">
+        <button onClick={onSignup} className="mt-2 w-full py-2 text-center text-sm text-[var(--ink-2)] underline underline-offset-2">
           Need an account? Sign up
         </button>
       )}
-      <p className="mt-4 text-[12px] text-[var(--muted)]">
+      <p className="mt-4 text-xs text-[var(--muted)]">
         Your password never leaves this device. Only a verification code derived from it is sent to the server.
       </p>
     </Shell>
@@ -208,8 +210,8 @@ export function SignupScreen({ onSignup, onBackToLogin, deriveKey = deriveKdfKey
 
   return (
     <Shell>
-      <div className="mb-1.5 text-[17px] font-semibold">Create your account</div>
-      <p className="mb-5 text-[14px] text-[var(--muted)]">Choose a username and password for this budget.</p>
+      <div className="mb-1.5 text-lg font-semibold">Create your account</div>
+      <p className="mb-5 text-sm text-[var(--muted)]">Choose a username and password for this budget.</p>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -264,25 +266,25 @@ export function SignupScreen({ onSignup, onBackToLogin, deriveKey = deriveKdfKey
             className={inputCls}
             placeholder="Leave blank for the very first account"
           />
-          <p className="mt-1.5 text-[12px] text-[var(--muted)]">
+          <p className="mt-1.5 text-xs text-[var(--muted)]">
             Once an account exists, a code from an existing user is required.
           </p>
         </div>
         {error && (
-          <div role="alert" className="text-[13px] text-[var(--danger)]">
+          <div role="alert" className="text-sm text-[var(--danger)]">
             {error}
           </div>
         )}
-        <button type="submit" disabled={busy || !username.trim() || !password} className="btn-ink w-full py-2.5 text-[15px]">
+        <button type="submit" disabled={busy || !username.trim() || !password} className="btn-ink w-full py-2.5 text-md">
           {busy ? "Creating…" : "Create account"}
         </button>
       </form>
       {onBackToLogin && (
-        <button onClick={onBackToLogin} className="mt-4 w-full text-center text-[13px] text-[var(--ink-2)] underline underline-offset-2">
+        <button onClick={onBackToLogin} className="mt-4 w-full text-center text-sm text-[var(--ink-2)] underline underline-offset-2">
           Already have an account? Log in
         </button>
       )}
-      <p className="mt-4 text-[12px] text-[var(--muted)]">
+      <p className="mt-4 text-xs text-[var(--muted)]">
         Your password never leaves this device. Only a verification code derived from it is sent to the server.
       </p>
     </Shell>

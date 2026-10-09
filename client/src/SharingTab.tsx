@@ -54,19 +54,19 @@ export function ContactCard({ contact, accounts }: { contact: ContactBalance; ac
 
   return (
     <div className="card p-5">
-      <div className="text-[17px] font-semibold">{contact.name}</div>
-      <div className="text-[13px] text-[var(--muted)]">
+      <div className="text-lg font-semibold">{contact.name}</div>
+      <div className="text-sm text-[var(--muted)]">
         {settled ? "Settled up" : netCents > 0 ? "owes you" : "you owe"}
       </div>
-      <div className="t-nums mt-1.5 text-[32px] font-light tracking-tight">
+      <div className="t-nums mt-1.5 text-figure font-light tracking-tight">
         {settled ? "$0.00" : money(Math.abs(netCents))}
       </div>
       {info.totalOwedCents > 0 && (
         <>
-          {info.oldest && <div className="mt-1 text-[13px] text-[var(--muted)]">oldest since {fmtDate(info.oldest)}</div>}
+          {info.oldest && <div className="mt-1 text-sm text-[var(--muted)]">oldest since {fmtDate(info.oldest)}</div>}
           <ul className="mt-3 space-y-1">
             {info.byPot.map((b) => (
-              <li key={b.pot} className="flex items-center justify-between text-[15px]">
+              <li key={b.pot} className="flex items-center justify-between text-md">
                 <span className="text-[var(--ink-2)]">{b.pot}</span>
                 <span className="t-nums">{money(b.cents)}</span>
               </li>
@@ -75,10 +75,10 @@ export function ContactCard({ contact, accounts }: { contact: ContactBalance; ac
         </>
       )}
       {info.creditCents > 0 && (
-        <div className="mt-2 text-[13px] font-medium text-[var(--success)]">{money(info.creditCents)} credit from overpayment</div>
+        <div className="mt-2 text-sm font-medium text-[var(--success)]">{money(info.creditCents)} credit from overpayment</div>
       )}
       <div className="mt-4">
-        <div className="mb-2 text-[13px] font-medium text-[var(--ink-2)]">Record a payment</div>
+        <div className="mb-2 text-sm font-medium text-[var(--ink-2)]">Record a payment</div>
         <div className="flex gap-2">
           <MoneyInput
             placeholder="Amount received"
@@ -88,21 +88,21 @@ export function ContactCard({ contact, accounts }: { contact: ContactBalance; ac
             onKeyDown={(e) => {
               if (e.key === "Enter") settle();
             }}
-            className="w-44 py-2 text-[15px]"
+            className="w-44 py-2 text-md"
           />
-          <button onClick={settle} disabled={busy || !dest} className="btn-ink px-4 py-2 text-[15px]">
+          <button onClick={settle} disabled={busy || !dest} className="btn-ink px-4 py-2 text-md">
             {busy ? "Settling…" : "Settle up"}
           </button>
         </div>
-        <div className="mt-1.5 text-[13px] text-[var(--muted)]">
+        <div className="mt-1.5 text-sm text-[var(--muted)]">
           {dest ? `Records into ${dest.name}` : "Loading accounts…"}
         </div>
-        {settleError && <div className="mt-1.5 text-[13px] text-[var(--danger)]">Couldn't record that. Try again.</div>}
+        {settleError && <div className="mt-1.5 text-sm text-[var(--danger)]">Couldn't record that. Try again.</div>}
       </div>
       {last && (
-        <div className="mt-3 rounded-[var(--r-md)] bg-[var(--bg-sunken)] p-4 text-[15px]">
+        <div className="mt-3 rounded-[var(--r-md)] bg-[var(--bg-sunken)] p-4 text-md">
           <div className="font-semibold">Buckets filled</div>
-          <ul className="mt-1.5 space-y-1 text-[13px]">
+          <ul className="mt-1.5 space-y-1 text-sm">
             {last.allocations.map((a, i) => (
               <li key={i} className="flex items-center justify-between">
                 <span className="text-[var(--ink-2)]">{a.potName ?? "(no pot)"}</span>
@@ -111,7 +111,7 @@ export function ContactCard({ contact, accounts }: { contact: ContactBalance; ac
             ))}
           </ul>
           {last.leftoverCents > 0 && (
-            <div className="mt-1.5 text-[13px] font-medium text-[var(--success)]">{money(last.leftoverCents)} kept as credit</div>
+            <div className="mt-1.5 text-sm font-medium text-[var(--success)]">{money(last.leftoverCents)} kept as credit</div>
           )}
         </div>
       )}
@@ -189,8 +189,8 @@ export function ContactsManager({ contacts, onChanged }: { contacts: ContactBala
 
   return (
     <div className="card mb-5 p-5">
-      <div className="text-[17px] font-semibold">Contacts</div>
-      <div className="mt-1 text-[13px] text-[var(--muted)]">People you share expenses with. Pots can each be shared with one of them.</div>
+      <div className="text-lg font-semibold">Contacts</div>
+      <div className="mt-1 text-sm text-[var(--muted)]">People you share expenses with. Pots can each be shared with one of them.</div>
       <ul className="mt-3 space-y-2">
         {contacts.map((c) => (
           <li key={c.id} className="flex items-center justify-between gap-3">
@@ -205,25 +205,25 @@ export function ContactsManager({ contacts, onChanged }: { contacts: ContactBala
                 }}
                 onBlur={() => { if (editingId === c.id) rename(c.id); }}
                 aria-label="Contact name"
-                className="field t-nums flex-1 px-2 py-1.5 text-[15px]"
+                className="field t-nums flex-1 px-2 py-1.5 text-md"
               />
             ) : (
               <button
                 onClick={() => { setEditingId(c.id); setEditName(c.name); }}
-                className="flex-1 cursor-pointer text-left text-[15px] font-medium hover:underline"
+                className="flex-1 cursor-pointer text-left text-md font-medium hover:underline"
                 title="Rename"
               >
                 {c.name}
               </button>
             )}
             {confirmDeleteId === c.id ? (
-              <span className="flex items-center gap-2 text-[13px]">
+              <span className="flex items-center gap-2 text-sm">
                 <span className="text-[var(--muted)]">Delete?</span>
                 <button onClick={() => remove(c.id)} disabled={busy} aria-label={`Yes, delete ${c.name}`} className="-my-2 min-h-11 cursor-pointer px-2 font-medium text-[var(--danger)]">Yes</button>
                 <button onClick={() => setConfirmDeleteId(null)} aria-label={`Keep ${c.name}`} className="-my-2 -mr-2 min-h-11 cursor-pointer px-2 text-[var(--ink-2)]">Keep</button>
               </span>
             ) : (
-              <button onClick={() => setConfirmDeleteId(c.id)} aria-label={`Delete ${c.name}`} className="-my-2 -mr-2 min-h-11 cursor-pointer px-2 text-[13px] text-[var(--muted)] hover:text-[var(--danger)]">
+              <button onClick={() => setConfirmDeleteId(c.id)} aria-label={`Delete ${c.name}`} className="-my-2 -mr-2 min-h-11 cursor-pointer px-2 text-sm text-[var(--muted)] hover:text-[var(--danger)]">
                 Delete
               </button>
             )}
@@ -231,7 +231,7 @@ export function ContactsManager({ contacts, onChanged }: { contacts: ContactBala
         ))}
       </ul>
       {contacts.length === 0 && (
-        <div className="mt-3 text-[13px] italic text-[var(--muted)]">No contacts yet. Add one to start splitting expenses.</div>
+        <div className="mt-3 text-sm italic text-[var(--muted)]">No contacts yet. Add one to start splitting expenses.</div>
       )}
       <div className="mt-3 flex gap-2">
         <input
@@ -241,13 +241,13 @@ export function ContactsManager({ contacts, onChanged }: { contacts: ContactBala
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") add(); }}
-          className="field t-nums w-44 px-3 py-2 text-[15px]"
+          className="field t-nums w-44 px-3 py-2 text-md"
         />
-        <button onClick={add} disabled={busy || !name.trim()} className="btn-ink px-4 py-2 text-[15px]">
+        <button onClick={add} disabled={busy || !name.trim()} className="btn-ink px-4 py-2 text-md">
           {busy ? "Adding…" : "Add"}
         </button>
       </div>
-      {error && <div className="mt-2 text-[13px] text-[var(--danger)]">{error}</div>}
+      {error && <div className="mt-2 text-sm text-[var(--danger)]">{error}</div>}
     </div>
   );
 }
@@ -260,7 +260,7 @@ export function SharingTab() {
 
   return (
     <div>
-      <div className="mb-5 font-serif-d text-[24px] font-medium">Sharing</div>
+      <div className="mb-5 font-serif-d text-xl font-medium">Sharing</div>
       {loading ? (
         <div className="space-y-3">
           {[0, 1].map((i) => (

@@ -14,8 +14,8 @@ export function Skeleton({ className = "" }: { className?: string }) {
 export function FetchError({ onRetry, label = "Couldn't load this." }: { onRetry: () => void; label?: string }) {
   return (
     <div className="card p-5 text-center">
-      <p className="text-[15px] text-[var(--muted)]">{label}</p>
-      <button onClick={onRetry} className="btn-ink mt-3 px-4 py-2 text-[15px]">
+      <p className="text-md text-[var(--muted)]">{label}</p>
+      <button onClick={onRetry} className="btn-ink mt-3 px-4 py-2 text-md">
         Try again
       </button>
     </div>
@@ -23,6 +23,7 @@ export function FetchError({ onRetry, label = "Couldn't load this." }: { onRetry
 }
 
 export function MonthNav({ month, onChange }: { month: string; onChange: (m: string) => void }) {
+  // Chevron glyph size, not text: kept off the type scale.
   const btn =
     "flex h-11 w-11 items-center justify-center text-[20px] text-[var(--ink-2)] transition active:scale-95";
   return (
@@ -30,7 +31,7 @@ export function MonthNav({ month, onChange }: { month: string; onChange: (m: str
       <button aria-label="Previous month" onClick={() => onChange(shiftMonth(month, -1))} className={btn}>
         ‹
       </button>
-      <span className="text-[17px] font-medium">{monthLabel(month)}</span>
+      <span className="text-lg font-medium">{monthLabel(month)}</span>
       <button aria-label="Next month" onClick={() => onChange(shiftMonth(month, 1))} className={btn}>
         ›
       </button>
@@ -124,7 +125,7 @@ export function Segmented<T extends string>({ options, value, onChange, ariaLabe
           type="button"
           onClick={() => onChange(o.value)}
           aria-pressed={value === o.value}
-          className={`rounded-full px-3 py-1.5 text-[13px] transition active:scale-95 ${
+          className={`rounded-full px-3 py-1.5 text-sm transition active:scale-95 ${
             value === o.value
               ? "bg-[var(--ink)] font-medium text-[var(--bg)]"
               : "text-[var(--muted)] hover:text-[var(--ink-2)]"
@@ -138,12 +139,12 @@ export function Segmented<T extends string>({ options, value, onChange, ariaLabe
 }
 
 export function FormLabel({ children }: { children: React.ReactNode }) {
-  return <div className="mb-1.5 text-[13px] font-medium text-[var(--ink-2)]">{children}</div>;
+  return <div className="mb-1.5 text-sm font-medium text-[var(--ink-2)]">{children}</div>;
 }
 
 export function TxnBadge({ children }: { children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center rounded-[var(--r-pill)] border border-[var(--hairline)] bg-[var(--bg-sunken)] px-2 py-0.5 text-[11px] font-medium text-[var(--ink-2)]">
+    <span className="inline-flex items-center rounded-[var(--r-pill)] border border-[var(--hairline)] bg-[var(--bg-sunken)] px-2 py-0.5 text-2xs font-medium text-[var(--ink-2)]">
       {children}
     </span>
   );

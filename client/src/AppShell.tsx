@@ -59,7 +59,7 @@ export function TabIcon({ id }: { id: Tab }) {
 
 export function CountBadge({ n, className = "" }: { n: number; className?: string }) {
   return (
-    <span className={`t-nums flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--ink)] px-1.5 text-[11px] font-bold text-[var(--bg)] ${className}`}>
+    <span className={`t-nums flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--ink)] px-1.5 text-2xs font-bold text-[var(--bg)] ${className}`}>
       {n}
     </span>
   );
@@ -107,7 +107,7 @@ function TabBarButton({ active, label, onClick, icon, dot, ...rest }: {
           />
         )}
       </span>
-      <span className={`text-[11px] leading-none tracking-[0.01em] ${active ? "font-semibold" : "font-medium"}`}>{label}</span>
+      <span className={`text-2xs leading-none tracking-[0.01em] ${active ? "font-semibold" : "font-medium"}`}>{label}</span>
     </button>
   );
 }
@@ -154,7 +154,7 @@ export function MobileTabBar({ tab, onGo, closeAlert, initialMoreOpen = false }:
       </nav>
       {moreOpen && (
         <Sheet label="More" onClose={() => setMoreOpen(false)}>
-          <div className="mb-2 text-[17px] font-semibold">More</div>
+          <div className="mb-2 text-lg font-semibold">More</div>
           <ul className="-mx-2">
             {MORE_TABS.map((id) => {
               const active = tab === id;
@@ -166,7 +166,7 @@ export function MobileTabBar({ tab, onGo, closeAlert, initialMoreOpen = false }:
                       onGo(id);
                     }}
                     aria-current={active ? "page" : undefined}
-                    className={`flex min-h-[52px] w-full items-center gap-3.5 rounded-[var(--r-md)] px-2 text-left text-[15px] transition active:scale-[0.99] active:bg-[var(--bg-sunken)] ${
+                    className={`flex min-h-[52px] w-full items-center gap-3.5 rounded-[var(--r-md)] px-2 text-left text-md transition active:scale-[0.99] active:bg-[var(--bg-sunken)] ${
                       active ? "bg-[var(--bg-sunken)] font-semibold text-[var(--ink)]" : "font-medium text-[var(--ink-2)]"
                     }`}
                   >
@@ -174,7 +174,7 @@ export function MobileTabBar({ tab, onGo, closeAlert, initialMoreOpen = false }:
                       <TabIcon id={id} />
                     </span>
                     <span className="flex-1">{tabLabel(id)}</span>
-                    <span aria-hidden className="text-[17px] text-[var(--faint)]">›</span>
+                    <span aria-hidden className="text-lg text-[var(--faint)]">›</span>
                   </button>
                 </li>
               );
@@ -225,6 +225,7 @@ export function AppShell() {
     <div className="min-h-screen md:flex">
       {/* desktop sidebar rail */}
       <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r border-[var(--hairline)] px-4 py-6 md:flex">
+        {/* Wordmark: sized on its own, outside the type scale. */}
         <div className="px-3 font-serif-d text-[20px] font-medium tracking-tight">Daybook</div>
         <div className="mx-3 my-5 border-t border-[var(--hairline)]" />
         <nav className="flex flex-col gap-0.5" aria-label="Primary">
@@ -235,7 +236,7 @@ export function AppShell() {
                 key={id}
                 onClick={() => go(id)}
                 aria-current={active ? "page" : undefined}
-                className={`flex items-center rounded-[var(--r-sm)] px-3 py-2.5 text-left text-[15px] transition active:scale-[0.99] ${
+                className={`flex items-center rounded-[var(--r-sm)] px-3 py-2.5 text-left text-md transition active:scale-[0.99] ${
                   active
                     ? "bg-[var(--surface)] font-semibold text-[var(--ink)] shadow-[var(--shadow-card)]"
                     : "font-medium text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--ink-2)]"
@@ -252,11 +253,12 @@ export function AppShell() {
       {/* content column */}
       <div className="min-w-0 flex-1">
         <header className="flex items-center justify-between px-5 pb-1 pt-5 md:hidden">
+          {/* Wordmark: sized on its own, outside the type scale. */}
           <span className="font-serif-d text-[19px] font-medium tracking-tight">Daybook</span>
         </header>
         <div className="mx-auto max-w-5xl px-5 pb-32 pt-2 md:px-8 md:py-8 md:pb-16">
           {!online && (
-            <div role="status" className="card mb-5 px-4 py-3 text-[13px] text-[var(--ink-2)]">
+            <div role="status" className="card mb-5 px-4 py-3 text-sm text-[var(--ink-2)]">
               You're offline. Showing what was last loaded; changes won't save until you're back.
             </div>
           )}
@@ -272,14 +274,14 @@ export function AppShell() {
 
           {tab === "accounts" && (
             <div>
-              <div className="mb-5 font-serif-d text-[24px] font-medium">Accounts</div>
+              <div className="mb-5 font-serif-d text-xl font-medium">Accounts</div>
               <AccountsView />
             </div>
           )}
 
           {tab === "settings" && (
             <div>
-              <div className="mb-5 font-serif-d text-[24px] font-medium">Settings</div>
+              <div className="mb-5 font-serif-d text-xl font-medium">Settings</div>
               <SettingsTab />
             </div>
           )}

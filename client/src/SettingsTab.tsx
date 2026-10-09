@@ -36,7 +36,7 @@ function AccountCard() {
 
   return (
     <section className="card p-5" aria-label="Account">
-      <h2 className="text-[16px] font-semibold">Account</h2>
+      <h2 className="text-lg font-semibold">Account</h2>
       {loading && <Skeleton className="mt-3 h-6 w-40" />}
       {error && (
         <div className="mt-3">
@@ -46,10 +46,10 @@ function AccountCard() {
       {data && (
         <div className="mt-3 flex items-center justify-between gap-3">
           <div>
-            <div className="text-[15px] font-medium">{data.username ?? "Signed in"}</div>
-            <div className="text-[13px] text-[var(--muted)]">Signed in on this device</div>
+            <div className="text-md font-medium">{data.username ?? "Signed in"}</div>
+            <div className="text-sm text-[var(--muted)]">Signed in on this device</div>
           </div>
-          <button onClick={logout} disabled={loggingOut} className="btn-ghost px-4 py-2 text-[14px]">
+          <button onClick={logout} disabled={loggingOut} className="btn-ghost px-4 py-2 text-md">
             {loggingOut ? "Logging out…" : "Log out"}
           </button>
         </div>
@@ -73,13 +73,13 @@ function TokenRow({
     <li className="border-b border-[var(--hairline)] py-3 last:border-0 last:pb-0 first:pt-0">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate text-[15px] font-medium">{token.name}</div>
-          <div className="text-[13px] text-[var(--muted)]">Created {formatDate(token.created_at)}</div>
+          <div className="truncate text-md font-medium">{token.name}</div>
+          <div className="text-sm text-[var(--muted)]">Created {formatDate(token.created_at)}</div>
         </div>
         {!confirming ? (
           <button
             onClick={() => setConfirming(true)}
-            className="-m-2 shrink-0 cursor-pointer p-2 text-[13px] text-[var(--muted)] hover:text-[var(--danger)]"
+            className="-m-2 shrink-0 cursor-pointer p-2 text-sm text-[var(--muted)] hover:text-[var(--danger)]"
           >
             Revoke…
           </button>
@@ -88,11 +88,11 @@ function TokenRow({
             <button
               onClick={onRevoke}
               disabled={revoking}
-              className="cursor-pointer rounded-[var(--r-pill)] bg-[var(--danger)] px-3 py-1.5 text-[13px] font-medium text-white"
+              className="cursor-pointer rounded-[var(--r-pill)] bg-[var(--danger)] px-3 py-1.5 text-sm font-medium text-white"
             >
               {revoking ? "Revoking…" : "Revoke"}
             </button>
-            <button onClick={() => setConfirming(false)} className="btn-ghost px-3 py-1.5 text-[13px]">
+            <button onClick={() => setConfirming(false)} className="btn-ghost px-3 py-1.5 text-sm">
               Keep
             </button>
           </div>
@@ -165,8 +165,8 @@ function AgentTokensCard() {
 
   return (
     <section className="card p-5" aria-label="Agent tokens">
-      <h2 className="text-[16px] font-semibold">Agent tokens</h2>
-      <p className="mt-1 text-[13px] text-[var(--muted)]">
+      <h2 className="text-lg font-semibold">Agent tokens</h2>
+      <p className="mt-1 text-sm text-[var(--muted)]">
         Tokens let a personal AI agent manage your budget through the API. Each token has full access
         to your data, so treat it like a password and revoke any you don't recognize.
       </p>
@@ -185,21 +185,21 @@ function AgentTokensCard() {
 
       {!loading && !error && newToken && (
         <div className="mt-4 rounded-[var(--r-md)] border border-[var(--warning)] bg-[var(--warning-soft)] p-4">
-          <div className="text-[14px] font-semibold">Token created: {newToken.name}</div>
-          <p className="mt-1 text-[13px] text-[var(--ink-2)]">
+          <div className="text-md font-semibold">Token created: {newToken.name}</div>
+          <p className="mt-1 text-sm text-[var(--ink-2)]">
             Copy it now. This is the only time it will be shown.
           </p>
           <div className="mt-3 flex items-center gap-2">
-            <code className="t-nums min-w-0 flex-1 truncate rounded-[var(--r-sm)] bg-[var(--bg-sunken)] px-3 py-2 text-[13px]">
+            <code className="t-nums min-w-0 flex-1 truncate rounded-[var(--r-sm)] bg-[var(--bg-sunken)] px-3 py-2 text-sm">
               {newToken.token}
             </code>
-            <button onClick={copyToken} className="btn-ink shrink-0 px-4 py-2 text-[14px]">
+            <button onClick={copyToken} className="btn-ink shrink-0 px-4 py-2 text-md">
               {copied ? "Copied" : "Copy"}
             </button>
           </div>
           <button
             onClick={() => setNewToken(null)}
-            className="mt-3 w-full text-center text-[13px] text-[var(--ink-2)] underline underline-offset-2"
+            className="mt-3 w-full text-center text-sm text-[var(--ink-2)] underline underline-offset-2"
           >
             I've saved it
           </button>
@@ -209,7 +209,7 @@ function AgentTokensCard() {
       {!loading && !error && !newToken && (
         <>
           {tokens.length === 0 ? (
-            <p className="mt-4 text-[14px] text-[var(--muted)]">
+            <p className="mt-4 text-sm text-[var(--muted)]">
               No agent tokens yet. Create one to connect an agent or the command-line tool.
             </p>
           ) : (
@@ -221,7 +221,7 @@ function AgentTokensCard() {
           )}
 
           <div className="mt-4 border-t border-[var(--hairline)] pt-4">
-            <label htmlFor="new-token-name" className="mb-1.5 block text-[13px] font-medium text-[var(--ink-2)]">
+            <label htmlFor="new-token-name" className="mb-1.5 block text-sm font-medium text-[var(--ink-2)]">
               New token name
             </label>
             <div className="flex gap-2">
@@ -232,18 +232,18 @@ function AgentTokensCard() {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. Home server"
                 maxLength={80}
-                className="field min-w-0 flex-1 px-3 py-2 text-[15px]"
+                className="field min-w-0 flex-1 px-3 py-2 text-md"
               />
               <button
                 onClick={create}
                 disabled={creating}
-                className="btn-ink shrink-0 px-4 py-2 text-[14px]"
+                className="btn-ink shrink-0 px-4 py-2 text-md"
               >
                 {creating ? "Creating…" : "Create token"}
               </button>
             </div>
             {createError && (
-              <div role="alert" className="mt-2 text-[13px] text-[var(--danger)]">
+              <div role="alert" className="mt-2 text-sm text-[var(--danger)]">
                 {createError}
               </div>
             )}
