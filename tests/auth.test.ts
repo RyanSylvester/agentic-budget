@@ -395,6 +395,58 @@ describe("auth endpoints", () => {
     expect(me.username).toBe("owner");
   });
 
+  test("signup stores usernames trimmed and lower-cased; clashes are case-insensitive", async () => {
+    const { app, db } = await setupApp();
+    await signupFirst(app, "  Ryan ");
+    const rows = (await db.all("SELECT username FROM users")) as any[];
+    expect(rows.map((r) => r.username)).toEqual(["ryan"]);
+
+    const cookie = await loginAs(app, "ryan");
+    const code = await mintInvite(app, cookie);
+    const clash = await jsonCall(app, "POST", "/api/auth/signup", {
+      body: { username: "RYAN", salt: SALT, kdfKey: KDF_KEY, inviteCode: code },
+    });
+    expect(clash.status).toBe(400);
+    expect(((await clash.json()) as any).error).toBe("that username is taken");
+    // The failed signup did not consume the code.
+    const unused = (await db.get("SELECT used_by FROM invite_codes WHERE code = ?", code)) as any;
+    expect(unused.used_by).toBeNull();
+  });
+
+  test("challenge and login match usernames case-insensitively, including legacy mixed-case rows", async () => {
+    const { app, db } = await setupApp();
+    await signupFirst(app, "owner");
+    // A row created before signup normalised usernames.
+    await db.run(
+      "INSERT INTO users (username, salt, verifier, kdf_params, created_at) SELECT 'Ryan', salt, verifier, kdf_params, created_at FROM users WHERE username = 'owner'"
+    );
+
+    for (const username of ["Owner", " OWNER ", "Ryan", "ryan"]) {
+      const ch = await (await jsonCall(app, "POST", "/api/auth/challenge", { body: { username } })).json();
+      expect(ch.salt).toBe(SALT);
+      const cookie = await loginAs(app, username);
+      const me = await (await call(app, "GET", "/api/auth/me", { cookie })).json();
+      // The session carries the stored spelling, not what was typed.
+      expect(me.username).toBe(username.trim().toLowerCase() === "ryan" ? "Ryan" : "owner");
+    }
+
+    const ghost = await jsonCall(app, "POST", "/api/auth/login", { body: { username: "Nobody", kdfKey: KDF_KEY } });
+    expect(ghost.status).toBe(401);
+  });
+
+  test("legacy rows differing only in case: the exact-case spelling wins", async () => {
+    const { app, db } = await setupApp();
+    await signupFirst(app, "owner");
+    await db.run(
+      "INSERT INTO users (username, salt, verifier, kdf_params, created_at) VALUES ('Owner', ?, 'ff', 'm=19456,t=2,p=1', '2026-01-01')",
+      "ef".repeat(16)
+    );
+    const lower = await (await jsonCall(app, "POST", "/api/auth/challenge", { body: { username: "owner" } })).json();
+    expect(lower.salt).toBe(SALT);
+    const upper = await (await jsonCall(app, "POST", "/api/auth/challenge", { body: { username: "Owner" } })).json();
+    expect(upper.salt).toBe("ef".repeat(16));
+  });
+
   test("middleware: 401 without credentials, 200 with session or minted bearer", async () => {
     const { app } = await setupApp();
     await signupFirst(app);
