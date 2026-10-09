@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { MoneyInput } from "./MoneyInput";
-import { useApi } from "./api";
+import { useApi, send } from "./api";
 import { fmtDate, money } from "./format";
 import { expressionToCents } from "./money";
 import type { Account, AccountsResponse, ContactBalance, ContactsResponse, SettlementSummary } from "./types";
@@ -35,7 +35,7 @@ export function ContactCard({ contact, accounts }: { contact: ContactBalance; ac
     setBusy(true);
     setSettleError(false);
     try {
-      const res = await fetch("/api/settle", {
+      const res = await send("/api/settle", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ contactId: contact.id, accountId: dest.id, amountCents: cents, note: `${contact.name} settlement` }),
@@ -136,7 +136,7 @@ export function ContactsManager({ contacts, onChanged }: { contacts: ContactBala
     setBusy(true);
     setError(null);
     try {
-      const r = await fetch("/api/contacts", {
+      const r = await send("/api/contacts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: n }),
@@ -157,7 +157,7 @@ export function ContactsManager({ contacts, onChanged }: { contacts: ContactBala
     setBusy(true);
     setError(null);
     try {
-      const r = await fetch(`/api/contacts/${id}`, {
+      const r = await send(`/api/contacts/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: n }),
@@ -177,7 +177,7 @@ export function ContactsManager({ contacts, onChanged }: { contacts: ContactBala
     setBusy(true);
     setError(null);
     try {
-      const r = await fetch(`/api/contacts/${id}`, { method: "DELETE" });
+      const r = await send(`/api/contacts/${id}`, { method: "DELETE" });
       if (!r.ok) throw new Error((await r.json()).error ?? `HTTP ${r.status}`);
       setConfirmDeleteId(null);
       onChanged();

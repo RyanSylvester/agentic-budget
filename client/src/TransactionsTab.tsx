@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { MoneyInput } from "./MoneyInput";
-import { useApi } from "./api";
+import { useApi, send } from "./api";
 import { fmtDate, money, titleCase } from "./format";
 import { expressionToCents } from "./money";
 import type { Account, AccountsResponse, ContactsResponse, ListedTransaction, Pot, PotsResponse, TransactionsResponse } from "./types";
@@ -110,7 +110,7 @@ export function TransactionSheet({ txn, pots, accounts, onClose, onSaved }: {
       shareCents: split && !isTransfer ? (direction === "out" ? -sCents : sCents) : 0,
     };
     try {
-      const r = await fetch(editing ? `/api/transactions/${txn.id}` : "/api/transactions", {
+      const r = await send(editing ? `/api/transactions/${txn.id}` : "/api/transactions", {
         method: editing ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -131,7 +131,7 @@ export function TransactionSheet({ txn, pots, accounts, onClose, onSaved }: {
     setBusy(true);
     setError(null);
     try {
-      const r = await fetch(`/api/transactions/${txn.id}`, { method: "DELETE" });
+      const r = await send(`/api/transactions/${txn.id}`, { method: "DELETE" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       onSaved();
     } catch {

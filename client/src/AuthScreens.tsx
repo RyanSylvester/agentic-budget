@@ -62,8 +62,9 @@ async function postJson(url: string, body: unknown): Promise<Response> {
   });
 }
 
-export function LoginScreen({ onAuthenticated, onSignup, deriveKey = deriveKdfKey }: {
+export function LoginScreen({ onAuthenticated, onSignup, notice, deriveKey = deriveKdfKey }: {
   onAuthenticated: () => void;
+  notice?: string | null;
   onSignup?: () => void;
   deriveKey?: DeriveKey;
 }) {
@@ -100,6 +101,11 @@ export function LoginScreen({ onAuthenticated, onSignup, deriveKey = deriveKdfKe
   return (
     <Shell>
       <div className="mb-5 text-[17px] font-semibold">Log in</div>
+      {notice && (
+        <p role="status" className="mb-4 text-[13px] text-[var(--ink-2)]">
+          {notice}
+        </p>
+      )}
       <form
         onSubmit={(e) => {
           e.preventDefault();

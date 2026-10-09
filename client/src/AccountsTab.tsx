@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { MoneyInput } from "./MoneyInput";
-import { useApi } from "./api";
+import { useApi, send } from "./api";
 import { money } from "./format";
 import { evaluateExpression } from "./money";
 import type { Account, AccountsResponse, ReconcileResponse } from "./types";
@@ -29,7 +29,7 @@ export function AccountsView() {
     const dollars = evaluateExpression(actual[id] ?? "");
     if (dollars === null) return;
     const cents = Math.round(dollars * 100);
-    const res = await fetch(`/api/accounts/${id}/reconcile`, {
+    const res = await send(`/api/accounts/${id}/reconcile`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ actualBalanceCents: cents }),
@@ -42,7 +42,7 @@ export function AccountsView() {
   };
 
   const clearTxn = async (accountId: number, txnId: number) => {
-    await fetch(`/api/transactions/${txnId}/clear`, { method: "POST" });
+    await send(`/api/transactions/${txnId}/clear`, { method: "POST" });
     setResult((prev) => ({ ...prev, [accountId]: null }));
     load();
   };

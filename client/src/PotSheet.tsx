@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useApi } from "./api";
+import { useApi, send } from "./api";
 import type { ContactsResponse, Pot, PotDeletePreview, TargetType } from "./types";
 import { Segmented, Sheet } from "./ui";
 
@@ -57,7 +57,7 @@ export function PotSheet({ pot, groups, pots, onClose, onSaved }: {
       sharePct: shared ? pct : null,
     };
     try {
-      const r = await fetch(pot ? `/api/pots/${pot.id}` : "/api/pots", {
+      const r = await send(pot ? `/api/pots/${pot.id}` : "/api/pots", {
         method: pot ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -91,7 +91,7 @@ export function PotSheet({ pot, groups, pots, onClose, onSaved }: {
     setBusy(true);
     setError(null);
     try {
-      const r = await fetch(`/api/pots/${pot.id}`, {
+      const r = await send(`/api/pots/${pot.id}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ moveToPotId: Number(moveToPotId) }),

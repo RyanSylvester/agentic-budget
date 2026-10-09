@@ -1,3 +1,4 @@
+import { send } from "./api";
 import { useEffect, useState } from "react";
 import { money, monthLabel } from "./format";
 import type { ErrorResponse, ScaffoldLine, ScaffoldResponse, ScaffoldStrategy } from "./types";
@@ -54,7 +55,7 @@ export function ScaffoldSheet({ month, onClose, onScaffolded }: {
     setBusy(true);
     setFailed(null);
     try {
-      const r = await fetch("/api/assign/scaffold", {
+      const r = await send("/api/assign/scaffold", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ month, strategy }),
