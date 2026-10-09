@@ -2,19 +2,9 @@
  *  stored here and rendered as data, never hardcoded. Pure DB functions that
  *  throw on bad input; routes translate that to 400s/404s. */
 import type { Db } from "./db-interface";
+import type { Contact, ContactBalance } from "./api-types";
+export type { Contact, ContactBalance };
 import { contactCredit, contactOwed } from "./settle";
-
-export interface Contact {
-  id: number;
-  name: string;
-}
-
-export interface ContactBalance extends Contact {
-  totalOwedCents: number;
-  creditCents: number;
-  oldest: string | null;
-  byPot: { pot: string; cents: number }[];
-}
 
 function needName(name: unknown): string {
   const n = (name ?? "").toString().trim();

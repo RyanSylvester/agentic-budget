@@ -6,33 +6,11 @@
  *  one cadence period; no re-setup, ever. Agent-managed (CLI + API); the
  *  human UI only reads the derived line on the pot row. */
 import type { Db } from "./db-interface";
+import type { SinkingSchedule, SinkingState, SinkingStatus } from "./api-types";
+export type { SinkingSchedule, SinkingState, SinkingStatus };
 import { tableExists } from "./db-interface";
 import { resolvePotId, validMonth } from "./money";
 import { shiftMonth } from "./close";
-
-export interface SinkingSchedule {
-  id: number;
-  potId: number;
-  potName: string;
-  expectedCents: number;
-  dueMonth: string;
-  cadenceMonths: number;
-}
-
-export type SinkingState = "funding" | "funded" | "overdue";
-
-export interface SinkingStatus extends SinkingSchedule {
-  /** Saved so far: cumulative assigned minus cumulative user spend. */
-  balanceCents: number;
-  /** max(0, expected - balance). */
-  remainingCents: number;
-  /** Contribution months from `month` up to (not including) the due month;
-   *  1 when at or past the due month with the bill unpaid. */
-  monthsLeft: number;
-  /** ceil(remaining / monthsLeft); 0 when funded. */
-  contributionCents: number;
-  state: SinkingState;
-}
 
 const ROW = `SELECT s.id, s.pot_id AS potId, p.name AS potName,
                     s.expected_cents AS expectedCents, s.due_month AS dueMonth,

@@ -3,6 +3,7 @@
  *  Assigning to an Income pot records planned/expected income for the month;
  *  it is stored in the same ledger but excluded from assignedTotal and RTA. */
 import type { Db, DbValue } from "./db-interface";
+import type { Assignment } from "./api-types";
 import { resolvePotId, validMonth } from "./money";
 
 /** Set a user's pot's assigned total for a month. Throws on bad input,
@@ -14,7 +15,7 @@ export async function assignToPot(
   month: string,
   potIdOrName: string | number,
   cents: number
-): Promise<{ potId: number; month: string; cents: number }> {
+): Promise<Assignment> {
   if (!validMonth(month)) throw new Error(`bad month "${month}"; expected YYYY-MM`);
   if (!Number.isInteger(cents) || cents < 0) throw new Error(`bad amount "${cents}"; expected a non-negative integer of cents`);
   const potId = await resolvePotId(db, userId, String(potIdOrName));

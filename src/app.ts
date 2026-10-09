@@ -20,6 +20,37 @@ import { scaffoldMonth, type ScaffoldStrategy } from "./scaffold";
 import { createTransaction, updateTransaction } from "./transactions";
 import { createSchedule, getScheduleById, listSchedules, markPaid, removeSchedule, sinkingStatuses } from "./sinking";
 import { validMonth } from "./money";
+import type {
+  Account,
+  AccountsResponse,
+  AssignHistory,
+  AssignResponse,
+  Attention,
+  AuthState,
+  ClosePreview,
+  CloseResponse,
+  ContactsResponse,
+  CreatedResponse,
+  GroupOrderResponse,
+  OkResponse,
+  Overview,
+  Pot,
+  PotDeletePreview,
+  PotDeleteResponse,
+  PotHistoryResponse,
+  PotsResponse,
+  ReconcileResponse,
+  ScaffoldResponse,
+  SharedOwedByContact,
+  SinkingPaidResponse,
+  SinkingResponse,
+  TargetType,
+  TransactionCreatedResponse,
+  TransactionsResponse,
+  TrendResponse,
+  UnreconciledAccount,
+  VoidResponse,
+} from "./api-types";
 
 /* Input validation helpers: 400 for bad input, 404 when the row is missing. */
 
@@ -84,7 +115,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     app.use("/api/*", authMiddleware(opts.auth, getDb));
     registerAuth(app, getDb, opts.auth);
   } else {
-    app.get("/api/auth/me", (c) => c.json({ authenticated: true, setupRequired: false }));
+    app.get("/api/auth/me", (c) => c.json({ authenticated: true, setupRequired: false } satisfies AuthState));
   }
 
   app.get("/api/overview", async (c) => {
@@ -97,7 +128,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
       recent: await recentTransactions(db, userId, 10, month),
       rtaCents: await rtaCents(db, userId, month),
       assignedCents: await assignedTotal(db, userId, month),
-    });
+    } satisfies Overview);
   });
 
   /** Recategorize a transaction to another pot. */
@@ -113,7 +144,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (!Number.isInteger(potId) || potId <= 0) return c.json({ error: "potId required" }, 400);
     if (!(await db.get("SELECT 1 FROM pots WHERE id = ? AND user_id = ?", potId, userId))) return c.json({ error: `no pot ${potId}` }, 404);
     await db.run("UPDATE splits SET pot_id = ? WHERE transaction_id = ? AND user_id = ?", potId, id, userId);
-    return c.json({ ok: true });
+    return c.json({ ok: true } satisfies OkResponse);
   });
 
   /** Soft-void a transaction: excluded from spend, inflows, and RTA, kept for audit. */
@@ -125,7 +156,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const row = await db.get<{ voided: number }>("SELECT voided FROM transactions WHERE id = ? AND user_id = ?", id, userId);
     if (!row) return c.json({ error: `no transaction ${id}` }, 404);
     await db.run("UPDATE transactions SET voided = 1 WHERE id = ? AND user_id = ?", id, userId);
-    return c.json({ ok: true, alreadyVoided: row.voided === 1 });
+    return c.json({ ok: true, alreadyVoided: row.voided === 1 } satisfies VoidResponse);
   });
 
   /** Assign dollars to a pot for a month. Body: { month: "YYYY-MM", potId, cents }. */
@@ -137,7 +168,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const { month, potId, cents } = body ?? {};
     try {
       const r = await assignToPot(db, userId, month, potId, cents);
-      return c.json({ ok: true, ...r });
+      return c.json({ ok: true, ...r } satisfies AssignResponse);
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }
@@ -154,7 +185,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const { month, strategy, dryRun } = body ?? {};
     try {
       const lines = await scaffoldMonth(db, userId, month, strategy as ScaffoldStrategy, dryRun === true);
-      return c.json({ ok: true, month, strategy, lines });
+      return c.json({ ok: true, month, strategy, lines } satisfies ScaffoldResponse);
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }
@@ -175,7 +206,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const byMonth = byPot.get(id) ?? new Map<string, number>();
     const lastCents = byMonth.get(prev[2]) ?? 0;
     const avg3moCents = Math.round(prev.reduce((s, m) => s + (byMonth.get(m) ?? 0), 0) / 3);
-    return c.json({ potId: id, month, lastMonth: { month: prev[2], cents: lastCents }, avg3moCents });
+    return c.json({ potId: id, month, lastMonth: { month: prev[2], cents: lastCents }, avg3moCents } satisfies AssignHistory);
   });
 
   /** Sinking schedules (agent-managed; the UI only reads). Query param month
@@ -189,7 +220,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     // One batched sinkingStatuses call, not one sinkingStatus per schedule.
     const byPot = await sinkingStatuses(db, userId, list.map((s) => s.potId), month);
     const schedules = list.map((s) => byPot.get(s.potId)!);
-    return c.json({ month, schedules });
+    return c.json({ month, schedules } satisfies SinkingResponse);
   });
 
   /** Create a schedule. Body: { potId | pot, expectedCents, dueMonth: "YYYY-MM", cadenceMonths? }. */
@@ -204,7 +235,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (potRef === undefined || potRef === null) return c.json({ error: "potId (or pot name) required" }, 400);
     try {
       const s = await createSchedule(db, await requestUserId(c, db, authed), potRef, expectedCents, dueMonth, cadenceMonths);
-      return c.json({ ok: true, id: s.id });
+      return c.json({ ok: true, id: s.id } satisfies CreatedResponse);
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }
@@ -220,7 +251,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (!s) return c.json({ error: `no sinking schedule ${id}` }, 404);
     try {
       const next = await markPaid(db, userId, s.potId);
-      return c.json({ ok: true, dueMonth: next.dueMonth });
+      return c.json({ ok: true, dueMonth: next.dueMonth } satisfies SinkingPaidResponse);
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }
@@ -236,7 +267,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (!s) return c.json({ error: `no sinking schedule ${id}` }, 404);
     try {
       await removeSchedule(db, userId, s.potId);
-      return c.json({ ok: true });
+      return c.json({ ok: true } satisfies OkResponse);
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }
@@ -279,7 +310,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
           ]);
     const lastBal = new Map((lastRows as { accountId: number; bal: number }[]).map((r) => [r.accountId, r.bal]));
     const clearedByAcct = new Map((clearedRows as { accountId: number; total: number }[]).map((r) => [r.accountId, r.total]));
-    const unreconciledAccounts = [];
+    const unreconciledAccounts: UnreconciledAccount[] = [];
     for (const a of accounts) {
       const diffCents = (clearedByAcct.get(a.id) ?? 0) - (lastBal.get(a.id) ?? 0);
       if (diffCents !== 0) unreconciledAccounts.push({ id: a.id, name: a.name, diffCents });
@@ -291,7 +322,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
       e.cents += o.owedCents;
       byContact.set(o.contactId, e);
     }
-    const sharedOwedBy: { contactId: number; name: string; cents: number; netCents: number }[] = [];
+    const sharedOwedBy: SharedOwedByContact[] = [];
     // One batched credit query for all contacts instead of one per contact.
     const creditByContact = await allContactCredit(db, userId);
     for (const [contactId, v] of [...byContact.entries()].sort((a, b) => b[1].cents - a[1].cents)) {
@@ -307,7 +338,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
       rtaCents: await rtaCents(db, userId, month),
       unsettledSharedCents: Math.max(0, sharedOwedCents - (await contactCredit(db, userId))),
       sharedOwedBy,
-    });
+    } satisfies Attention);
   });
 
   const balanceOf = async (db: Db, userId: number, accountId: number, clearedOnly: boolean): Promise<number> => {
@@ -322,11 +353,14 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
   app.get("/api/accounts", async (c) => {
     const db = await getDb();
     const userId = await requestReaderId(c, db, authed);
-    const accounts = await db.all<any>("SELECT id, name, type, last4 FROM accounts WHERE user_id = ? ORDER BY id", userId);
+    const accounts = await db.all<{ id: number; name: string; type: string; last4: string | null }>(
+      "SELECT id, name, type, last4 FROM accounts WHERE user_id = ? ORDER BY id",
+      userId
+    );
     // Batched per-account state: latest reconciliation row, working balance,
     // and cleared balance, each one GROUP BY query instead of three queries
     // per account.
-    const accountIds = accounts.map((a: any) => a.id);
+    const accountIds = accounts.map((a) => a.id);
     const [lastRows, balRows] =
       accountIds.length === 0
         ? [[], []]
@@ -355,7 +389,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const bals = new Map(
       (balRows as { accountId: number; working: number; cleared: number }[]).map((r) => [r.accountId, r])
     );
-    const out = [];
+    const out: Account[] = [];
     for (const a of accounts) {
       const b = bals.get(a.id) ?? { working: 0, cleared: 0 };
       out.push({
@@ -365,7 +399,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
         lastReconciledAt: lastAt.get(a.id) ?? null,
       });
     }
-    return c.json({ accounts: out });
+    return c.json({ accounts: out } satisfies AccountsResponse);
   });
 
   /** Reconcile an account against its real-world balance. Body: { actualBalanceCents }.
@@ -393,10 +427,10 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
         actualBalanceCents,
         cleared
       );
-      return c.json({ ...result, clearedBalanceCents: cleared, actualBalanceCents });
+      return c.json({ ...result, clearedBalanceCents: cleared, actualBalanceCents } satisfies ReconcileResponse);
     }
 
-    const uncleared = await db.all<{ id: number; amount_cents: number }>(
+    const uncleared = await db.all<{ id: number; date: string; description: string; amount_cents: number }>(
       "SELECT id, date, description, amount_cents FROM transactions WHERE account_id = ? AND cleared = 'uncleared' AND voided = 0 AND user_id = ? ORDER BY id",
       accountId,
       userId
@@ -407,7 +441,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
       actualBalanceCents,
       uncleared,
       suggestedClearId: suggestClear(uncleared, result.differenceCents),
-    });
+    } satisfies ReconcileResponse);
   });
 
   app.post("/api/transactions/:id/clear", async (c) => {
@@ -416,7 +450,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const id = badId(c, "id");
     if (id === null) return c.json({ error: "bad transaction id" }, 400);
     await db.run("UPDATE transactions SET cleared = 'cleared' WHERE id = ? AND cleared = 'uncleared' AND user_id = ?", id, userId);
-    return c.json({ ok: true });
+    return c.json({ ok: true } satisfies OkResponse);
   });
 
   /** Every non-voided transaction in a month, newest first, with pot and
@@ -426,7 +460,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const userId = await requestReaderId(c, db, authed);
     const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
     if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
-    return c.json({ month, transactions: await listTransactions(db, userId, month) });
+    return c.json({ month, transactions: await listTransactions(db, userId, month) } satisfies TransactionsResponse);
   });
 
   /** Record a manually entered transaction. Body: { date, accountId, potId,
@@ -445,10 +479,10 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
         return c.json({ error: "reviewReason is not accepted; resolve uncertainty in conversation instead" }, 400);
       if (b.externalId) {
         const dup = await db.get<{ id: number }>("SELECT id FROM transactions WHERE external_id = ? AND user_id = ?", b.externalId, userId);
-        if (dup) return c.json({ ok: true, id: dup.id, duplicate: true });
+        if (dup) return c.json({ ok: true, id: dup.id, duplicate: true } satisfies TransactionCreatedResponse);
       }
       const id = await createTransaction(db, userId, { ...b, enteredBy: requestKind(c) });
-      return c.json({ ok: true, id });
+      return c.json({ ok: true, id } satisfies TransactionCreatedResponse);
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }
@@ -465,7 +499,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     try {
       await updateTransaction(db, userId, id, body ?? {});
-      return c.json({ ok: true });
+      return c.json({ ok: true } satisfies OkResponse);
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }
@@ -480,7 +514,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (id === null) return c.json({ error: "bad transaction id" }, 400);
     if (!(await txnExists(db, userId, id))) return c.json({ error: `no transaction ${id}` }, 404);
     await db.run("UPDATE transactions SET voided = 1 WHERE id = ? AND user_id = ?", id, userId);
-    return c.json({ ok: true });
+    return c.json({ ok: true } satisfies OkResponse);
   });
 
   app.get("/api/pots", async (c) => {
@@ -489,7 +523,10 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
     // includeHidden=1 lets the CLI resolve retired pots by name (unhide).
     const includeHidden = c.req.query("includeHidden") === "1";
-    const pots = await db.all<any>(
+    const pots = await db.all<{
+      id: number; name: string; pot_group: string; target_type: TargetType; target_cents: number;
+      is_assignable: number; contact_id: number | null; share_pct: number | null; contact_name: string | null;
+    }>(
       `SELECT p.id, p.name, p.pot_group, p.target_type, p.target_cents, p.is_assignable, p.contact_id, p.share_pct,
               c.name AS contact_name
        FROM pots p LEFT JOIN contacts c ON c.id = p.contact_id AND c.user_id = p.user_id
@@ -499,8 +536,8 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
          p.id`,
       userId
     );
-    const out = [];
-    const potIds = pots.map((p: any) => p.id);
+    const out: Pot[] = [];
+    const potIds = pots.map((p) => p.id);
     // One GROUP BY query per metric for all pots, not one query per pot:
     // on D1 every round trip is an HTTPS request. The sinking schedule
     // states come from the same batched call.
@@ -530,7 +567,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
       month,
       rtaCents: await rtaCents(db, userId, month),
       pots: out,
-    });
+    } satisfies PotsResponse);
   });
 
   /** Create a pot. Body: { name, group?, targetCents?, targetType?, contactId?, sharePct? }. */
@@ -541,7 +578,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     try {
       const id = await createPot(db, userId, body ?? {});
-      return c.json({ ok: true, id });
+      return c.json({ ok: true, id } satisfies CreatedResponse);
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }
@@ -558,7 +595,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     try {
       await updatePot(db, userId, id, body ?? {});
-      return c.json({ ok: true });
+      return c.json({ ok: true } satisfies OkResponse);
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }
@@ -584,7 +621,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
       userId
     );
     const asg = await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM assignments WHERE pot_id = ? AND user_id = ?", id, userId);
-    return c.json({ potId: id, name: pot.name, transactionCount: txns?.n ?? 0, assignmentCount: asg?.n ?? 0 });
+    return c.json({ potId: id, name: pot.name, transactionCount: txns?.n ?? 0, assignmentCount: asg?.n ?? 0 } satisfies PotDeletePreview);
   });
 
   /** Delete a pot. Its transactions, splits, and assignments move to the
@@ -602,7 +639,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const moveToPotId = ok ? (body as any)?.moveToPotId : undefined;
     try {
       const summary = await deletePot(db, userId, id, moveToPotId);
-      return c.json({ ok: true, ...summary });
+      return c.json({ ok: true, ...summary } satisfies PotDeleteResponse);
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }
@@ -619,7 +656,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     try {
       const order = await setGroupOrder(db, userId, (body as any)?.groups);
-      return c.json({ ok: true, groups: order });
+      return c.json({ ok: true, groups: order } satisfies GroupOrderResponse);
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }
@@ -629,7 +666,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
   app.get("/api/contacts", async (c) => {
     const db = await getDb();
     const userId = await requestReaderId(c, db, authed);
-    return c.json({ contacts: await contactBalances(db, userId) });
+    return c.json({ contacts: await contactBalances(db, userId) } satisfies ContactsResponse);
   });
 
   /** Add a contact. Body: { name }. */
@@ -640,7 +677,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     try {
       const id = await createContact(db, userId, body?.name);
-      return c.json({ ok: true, id });
+      return c.json({ ok: true, id } satisfies CreatedResponse);
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }
@@ -656,7 +693,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (!ok) return c.json({ error: "malformed JSON" }, 400);
     try {
       await renameContact(db, userId, id, body?.name);
-      return c.json({ ok: true });
+      return c.json({ ok: true } satisfies OkResponse);
     } catch (e) {
       const msg = (e as Error).message;
       return c.json({ error: msg }, msg.startsWith("no contact") ? 404 : 400);
@@ -671,7 +708,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (id === null) return c.json({ error: "bad contact id" }, 400);
     try {
       await deleteContact(db, userId, id);
-      return c.json({ ok: true });
+      return c.json({ ok: true } satisfies OkResponse);
     } catch (e) {
       const msg = (e as Error).message;
       return c.json({ error: msg }, msg.startsWith("no contact") ? 404 : 400);
@@ -681,7 +718,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
   app.get("/api/trend", async (c) => {
     const db = await getDb();
     const userId = await requestReaderId(c, db, authed);
-    return c.json({ trend: await spendTrend(db, userId) });
+    return c.json({ trend: await spendTrend(db, userId) } satisfies TrendResponse);
   });
 
   /** One pot's spend per month, oldest first. Drives the per-pot history chart. */
@@ -692,7 +729,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if ("error" in parsed) return c.json({ error: parsed.error }, 400);
     const pot = await db.get("SELECT id FROM pots WHERE id = ? AND hidden = 0 AND user_id = ?", parsed.potId, userId);
     if (!pot) return c.json({ error: `no pot ${parsed.potId}` }, 404);
-    return c.json({ potId: parsed.potId, history: await potHistory(db, userId, parsed.potId, parsed.months) });
+    return c.json({ potId: parsed.potId, history: await potHistory(db, userId, parsed.potId, parsed.months) } satisfies PotHistoryResponse);
   });
 
   /** Read-only month-end close preview. The agent applies the close after
@@ -702,7 +739,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     const userId = await requestReaderId(c, db, authed);
     const month = c.req.query("month") ?? new Date().toISOString().slice(0, 7);
     if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
-    return c.json(await closePreview(db, userId, month));
+    return c.json((await closePreview(db, userId, month)) satisfies ClosePreview);
   });
 
   /** Apply the month-end close. Body: { month: "YYYY-MM" }. The $0 rule binds
@@ -717,7 +754,7 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (!validMonth(month)) return c.json({ error: `bad month "${month}"; expected YYYY-MM` }, 400);
     try {
       await applyClose(db, userId, await closePreview(db, userId, month));
-      return c.json({ ok: true, month });
+      return c.json({ ok: true, month } satisfies CloseResponse);
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }

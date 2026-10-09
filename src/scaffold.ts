@@ -5,24 +5,14 @@
  *  is actively wrong for annual bills: ~$0 for 11 months, then a spike).
  *  Reuses assignToPot per pot, so all the usual validation applies. */
 import type { Db } from "./db-interface";
+import type { ScaffoldLine, ScaffoldStrategy } from "./api-types";
+export type { ScaffoldLine, ScaffoldStrategy };
 import { assignManyToPot, allPotAssignedMonths } from "./assign";
 import { shiftMonth } from "./close";
 import { validMonth } from "./money";
 import { sinkingStatuses } from "./sinking";
 
-export type ScaffoldStrategy = "average_3mo" | "last_month";
-
 export const SCAFFOLD_STRATEGIES: ScaffoldStrategy[] = ["average_3mo", "last_month"];
-
-export interface ScaffoldLine {
-  potId: number;
-  name: string;
-  cents: number;
-  /** True for income pots, whose value is planned income, not an allocation. */
-  income: boolean;
-  /** True when the value came from the pot's sinking schedule, not the strategy. */
-  scheduled?: boolean;
-}
 
 /** Compute (and, unless dryRun, write) one month's scaffolded assignments for
  *  a user. Throws on a bad month or an unknown strategy. Sequential awaits,

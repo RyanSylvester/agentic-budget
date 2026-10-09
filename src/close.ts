@@ -6,7 +6,7 @@
 export interface PotTarget {
   potId: number;
   /** 'fixed' = copy last month's bill, 'average_3mo' = 3-month average, 'savings' = sink */
-  targetType: "fixed" | "average_3mo" | "savings";
+  targetType: TargetType;
   /** Assigned amounts per month, oldest first, in cents. */
   historyCents: number[];
 }
@@ -35,6 +35,8 @@ export function closeMonth(input: CloseInput): { rtaEndCents: number; movedToSav
 
 /* Live-data wiring: build the close preview from the database. */
 
+import type { ClosePreview, PotCloseLine, TargetType } from "./api-types";
+export type { ClosePreview, PotCloseLine };
 import type { Db } from "./db-interface";
 import { monthSpend, monthInflows, assignedTotal, rtaCents, allPotSpendHistory } from "./queries";
 import { contactOwed } from "./settle";
@@ -48,35 +50,7 @@ export function shiftMonth(month: string, delta: number): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-export interface PotCloseLine {
-  potId: number;
-  name: string;
-  targetType: "fixed" | "average_3mo" | "savings";
-  targetCents: number;
-  spentCents: number;
-  historyCents: number[];
-  wireframeCents: number;
-  assignable: boolean;
-  /** True for pots with a sinking schedule: the schedule is the source of
-   *  truth, so the wireframe leaves target_cents alone. wireframeCents then
-   *  carries the schedule's contribution for next month, for information. */
-  wireframeSkipped: boolean;
-}
 
-export interface ClosePreview {
-  month: string;
-  nextMonth: string;
-  inflowsCents: number;
-  spentCents: number;
-  assignedCents: number;
-  rtaBeforeCents: number;
-  movedToSavingsCents: number;
-  sharedOwedCents: number;
-  sharedOwedBy: { name: string; cents: number }[];
-  pots: PotCloseLine[];
-  /** True once the month-end close has been applied for this month. */
-  closed: boolean;
-}
 
 /** The close card's three numbers: income in, spend out, savings as the
  *  residual. Income minus spend minus savings is always zero. */
@@ -92,7 +66,7 @@ export function closeEquation(preview: Pick<ClosePreview, "inflowsCents" | "spen
 
 /** Everything the month-end close needs, read from live data. */
 export async function closePreview(db: Db, userId: number, month: string): Promise<ClosePreview> {
-  const pots = await db.all<{ id: number; name: string; target_type: "fixed" | "average_3mo" | "savings"; target_cents: number; is_assignable: number }>(
+  const pots = await db.all<{ id: number; name: string; target_type: TargetType; target_cents: number; is_assignable: number }>(
     `SELECT id, name, target_type, target_cents, is_assignable FROM pots WHERE hidden = 0 AND user_id = ? ORDER BY id`,
     userId
   );

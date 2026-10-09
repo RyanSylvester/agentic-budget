@@ -8,6 +8,8 @@
  *  can never leak into another user's views.
  */
 import type { Db, DbValue } from "./db-interface";
+import type { ListedTransaction, PotHistoryPoint, RecentTransaction, TrendPoint } from "./api-types";
+export type { ListedTransaction, PotHistoryPoint, RecentTransaction, TrendPoint };
 
 /** The user's confirmed outflow for a month, in positive cents.
  *  Transfers between the user's own accounts are never spending.
@@ -131,7 +133,7 @@ export async function potHistory(
   potId: number,
   months: number,
   endMonth?: string
-): Promise<{ month: string; spentCents: number }[]> {
+): Promise<PotHistoryPoint[]> {
   const end = endMonth ?? new Date().toISOString().slice(0, 7);
   const start = shiftBack(end, months - 1);
   const rows = await db.all<{ month: string; user: number }>(
@@ -149,7 +151,7 @@ export async function potHistory(
     end
   );
   const byMonth = new Map(rows.map((r) => [r.month, r.user]));
-  const out: { month: string; spentCents: number }[] = [];
+  const out: PotHistoryPoint[] = [];
   for (let i = months - 1; i >= 0; i--) {
     const m = shiftBack(end, i);
     out.push({ month: m, spentCents: byMonth.get(m) ?? 0 });
@@ -158,8 +160,8 @@ export async function potHistory(
 }
 
 /** Last N months of the user's spend, oldest first. */
-export async function spendTrend(db: Db, userId: number, limit = 6): Promise<{ month: string; spent: number }[]> {
-  const rows = await db.all<{ month: string; spent: number }>(
+export async function spendTrend(db: Db, userId: number, limit = 6): Promise<TrendPoint[]> {
+  const rows = await db.all<TrendPoint>(
     `SELECT substr(t.date, 1, 7) AS month,
             COALESCE(SUM(CASE WHEN s.owner = 'user' AND s.amount_cents < 0 THEN -s.amount_cents ELSE 0 END), 0) AS spent
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
@@ -177,7 +179,7 @@ export async function spendTrend(db: Db, userId: number, limit = 6): Promise<{ m
  *  Voided transactions never appear. The contact name comes from a derived
  *  table (one row per transaction) instead of a correlated subquery, so the
  *  splits table is scanned once rather than once per transaction row. */
-export async function recentTransactions(db: Db, userId: number, limit = 10, month?: string) {
+export async function recentTransactions(db: Db, userId: number, limit = 10, month?: string): Promise<RecentTransaction[]> {
   const params: DbValue[] = [];
   let where = `WHERE t.voided = 0 AND t.user_id = ?`;
   params.push(userId);
@@ -186,7 +188,7 @@ export async function recentTransactions(db: Db, userId: number, limit = 10, mon
     params.push(month);
   }
   params.push(limit);
-  return db.all(
+  return db.all<RecentTransaction>(
     `SELECT t.id, t.date, t.description, t.is_transfer,
             COALESCE(SUM(CASE WHEN s.owner = 'user' THEN s.amount_cents ELSE 0 END), 0) AS user_cents,
             CASE WHEN SUM(CASE WHEN s.owner = 'contact' THEN 1 ELSE 0 END) > 0 THEN 1 ELSE 0 END AS split_with_contact,
@@ -292,26 +294,6 @@ export async function rtaCents(db: Db, userId: number, month: string): Promise<n
   return (await monthInflows(db, userId, month)) - (await assignedTotal(db, userId, month));
 }
 
-/** One row of the Transactions page: the transaction plus its user-side pot
- *  and the contact's share. Newest first. Voided transactions never appear. */
-export interface ListedTransaction {
-  id: number;
-  date: string;
-  description: string;
-  amountCents: number;
-  isTransfer: number;
-  cleared: string;
-  source: string;
-  accountId: number;
-  accountName: string;
-  potId: number | null;
-  potName: string | null;
-  potGroup: string | null;
-  splitWithContact: number;
-  sharedCents: number;
-  splitContactId: number | null;
-  splitContactName: string | null;
-}
 
 export async function listTransactions(db: Db, userId: number, month: string): Promise<ListedTransaction[]> {
   // One pass over the month's transactions. The per-transaction pot pick
