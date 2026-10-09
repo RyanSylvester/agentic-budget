@@ -76,9 +76,9 @@ describe("versioned migrations", () => {
     expect(await db.get("SELECT name FROM sqlite_master WHERE name = 'agent_tokens'")).not.toBeNull();
 
     // not a byte of user data lost
-    expect(await db.get("SELECT COUNT(*) AS n FROM pots")).toEqual({ n: 2 });
-    expect(await db.get("SELECT COUNT(*) AS n FROM contacts")).toEqual({ n: 1 });
-    expect(await db.get("SELECT cents FROM assignments WHERE month = '2026-09' AND pot_id = 2")).toEqual({
+    expect(await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM pots")).toEqual({ n: 2 });
+    expect(await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM contacts")).toEqual({ n: 1 });
+    expect(await db.get<{ cents: number }>("SELECT cents FROM assignments WHERE month = '2026-09' AND pot_id = 2")).toEqual({
       cents: 29901,
     });
     const total = (await db.get<{ s: number }>("SELECT SUM(amount_cents) AS s FROM splits"))!;

@@ -105,7 +105,7 @@ describe("closePreview / applyClose (live data)", () => {
     expect(p.rtaBeforeCents).toBe(200000);
     await expect(applyClose(db, 1, p)).rejects.toThrow("RTA is $2000.00; the close applies at month-end once every dollar is assigned");
     // nothing was written: the close is all-or-nothing
-    expect(await db.get("SELECT COUNT(*) AS n FROM month_closes")).toEqual({ n: 0 });
+    expect(await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM month_closes")).toEqual({ n: 0 });
   });
 
   test("apply records the close, wireframes targets, and refuses doubles", async () => {

@@ -8,6 +8,7 @@
     "@storybook/addon-docs": "^10.6.0",
     "@storybook/react-vite": "^10.6.0",
     "@tailwindcss/vite": "^4.0.0",
+    "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4.3.0",
     "storybook": "^10.6.0",
     "tailwindcss": "^4.0.0",
@@ -21,7 +22,8 @@
     "dev": "vite",
     "preview": "vite preview",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build",
+    "typecheck": "tsc --noEmit -p ."
   },
   "type": "module",
   "version": "0.1.0"

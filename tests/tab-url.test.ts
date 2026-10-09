@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { tabFromUrl } from "../client/src/App";
+import { tabFromUrl } from "../client/src/tabs";
 
 describe("tabFromUrl", () => {
   test("reads a known tab from the query param", () => {

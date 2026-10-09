@@ -47,7 +47,7 @@ async function seedShop(db: Db): Promise<void> {
   await db.run("INSERT INTO pots (user_id, name, pot_group, target_type, target_cents) VALUES (1, 'Groceries', 'Food', 'fixed', 0)");
 }
 
-function call(
+async function call(
   app: Hono,
   method: string,
   path: string,
@@ -55,7 +55,7 @@ function call(
 ): Promise<Response> {
   const headers: Record<string, string> = { ...(opts?.headers ?? {}) };
   if (opts?.cookie) headers["Cookie"] = opts.cookie;
-  return app.request(path, {
+  return await app.request(path, {
     method,
     headers,
     body: opts?.body !== undefined ? JSON.stringify(opts.body) : undefined,
