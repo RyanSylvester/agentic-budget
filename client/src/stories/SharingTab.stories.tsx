@@ -131,7 +131,8 @@ export const Loading: Story = {
   },
 };
 
-export const Error: Story = {
+export const LoadError: Story = {
+  name: "Error",
   parameters: {
     mockApi: {
       failGet: ["/api/contacts"],

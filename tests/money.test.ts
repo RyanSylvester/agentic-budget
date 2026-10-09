@@ -57,7 +57,7 @@ describe("void", () => {
     await assignToPot(db, 1, "2026-09", 2, 120000);
     expect(await rtaCents(db, 1, "2026-09")).toBe(380000);
     // the voided row is still in the DB for audit
-    expect(await db.get("SELECT voided FROM transactions WHERE id = ?", dup)).toEqual({ voided: 1 });
+    expect(await db.get<{ voided: number }>("SELECT voided FROM transactions WHERE id = ?", dup)).toEqual({ voided: 1 });
   });
 
   test("voided contact splits are not owed", async () => {
