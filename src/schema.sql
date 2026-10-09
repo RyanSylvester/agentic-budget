@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS transactions (
 -- planned/expected income. Upserted per (month, pot).
 -- RTA = actual inflows - SUM(assignments to spending pots) for the month;
 -- planned income on income pots is informational and never reduces RTA.
+-- Spending-pot assignments may be negative (bridge or reimbursement offsets).
 CREATE TABLE IF NOT EXISTS assignments (
   month    TEXT NOT NULL,                    -- YYYY-MM
   pot_id   INTEGER NOT NULL REFERENCES pots(id),

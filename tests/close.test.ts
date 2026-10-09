@@ -94,7 +94,7 @@ describe("closePreview / applyClose (live data)", () => {
     await assignToPot(db, 1, "2026-09", "Housing", 250000); // by name, overwrite
     expect(await assignedTotal(db, 1, "2026-09")).toBe(250000);
     await expect(assignToPot(db, 1, "2026-9", 1, 100)).rejects.toThrow("bad month");
-    await expect(assignToPot(db, 1, "2026-09", 1, -100)).rejects.toThrow("bad amount");
+    await expect(assignToPot(db, 1, "2026-09", 1, 1.5)).rejects.toThrow("bad amount");
     await expect(assignToPot(db, 1, "2026-09", 999, 100)).rejects.toThrow("no pot");
   });
 

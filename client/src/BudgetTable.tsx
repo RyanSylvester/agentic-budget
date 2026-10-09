@@ -2,7 +2,7 @@ import { send } from "./api";
 import { useEffect, useRef, useState } from "react";
 import { MoneyInput } from "./MoneyInput";
 import { money, shortMonth, titleCase } from "./format";
-import { expressionToCents, moneyGrouped, shareLabel } from "./money";
+import { evaluateExpression, moneyGrouped, shareLabel } from "./money";
 import type { AssignHistory, Pot } from "./types";
 
 /* ---------- budget table ---------- */
@@ -35,7 +35,11 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
   }, [editing, pot.id, month]);
 
   const commit = async () => {
-    const cents = expressionToCents(amt);
+    // Spending pots can take a negative offset (a bridge or a reimbursed
+    // half), so evaluate directly instead of expressionToCents, which
+    // rejects negatives. The server refuses negatives on income pots.
+    const dollars = evaluateExpression(amt);
+    const cents = dollars === null ? null : Math.round(dollars * 100);
     if (cents === null || busy) {
       if (!busy) setFailed("Enter a number, or math like 25+30.");
       return;
@@ -48,6 +52,13 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ month, potId: pot.id, cents }),
       });
+      if (r.status === 400) {
+        // A rule the server enforces (e.g. no negative planned income): say it.
+        const body = (await r.json().catch(() => null)) as { error?: string } | null;
+        setFailed(body?.error ?? "Couldn't save.");
+        setBusy(false);
+        return;
+      }
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       setEditing(false);
       setAmt("");

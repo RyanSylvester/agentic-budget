@@ -128,7 +128,7 @@ describe("assignManyToPot", () => {
   test("validates like assignToPot", async () => {
     const db = await seedSinking();
     await expect(assignManyToPot(db, 1, "nope", [{ potId: 1, cents: 1 }])).rejects.toThrow("bad month");
-    await expect(assignManyToPot(db, 1, "2026-10", [{ potId: 1, cents: -5 }])).rejects.toThrow("bad amount");
+    await expect(assignManyToPot(db, 1, "2026-10", [{ potId: 1, cents: 2.5 }])).rejects.toThrow("bad amount");
     await expect(assignManyToPot(db, 1, "2026-10", [{ potId: 4242, cents: 1 }])).rejects.toThrow("no pot");
     await db.run("UPDATE pots SET hidden = 1 WHERE id = 2 AND user_id = 1");
     await expect(assignManyToPot(db, 1, "2026-10", [{ potId: 2, cents: 1 }])).rejects.toThrow("retired");
