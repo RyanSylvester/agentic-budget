@@ -147,3 +147,53 @@ export async function assignManyToPot(
     ...params
   );
 }
+
+/** Move assigned dollars between two of a user's spending pots for one month:
+ *  the source's assignment drops by `cents` and the destination's rises by
+ *  the same amount, in one statement so the pair can't half-apply. A null
+ *  side is Ready to Assign: moving from it only raises the destination, and
+ *  moving to it only lowers the source. Income pots are refused on either
+ *  side, since their assignment means planned income, not a budget. Returns
+ *  each pot's new assigned total (null for the Ready to Assign side). */
+export async function moveAssignment(
+  db: Db,
+  userId: number,
+  month: string,
+  fromPotId: number | null,
+  toPotId: number | null,
+  cents: number
+): Promise<{ from: Assignment | null; to: Assignment | null }> {
+  if (!validMonth(month)) throw new Error(`bad month "${month}"; expected YYYY-MM`);
+  if (!Number.isInteger(cents) || cents <= 0) throw new Error(`bad amount "${cents}"; expected a positive integer of cents`);
+  for (const id of [fromPotId, toPotId]) {
+    if (id !== null && !Number.isInteger(id)) throw new Error(`bad pot id "${id}"`);
+  }
+  if (fromPotId === null && toPotId === null) throw new Error("pick a pot to move from or to");
+  if (fromPotId === toPotId) throw new Error("pick two different pots");
+  const potIds = [fromPotId, toPotId].filter((id): id is number => id !== null);
+  const pots = await db.all<{ id: number; hidden: number; name: string; is_assignable: number }>(
+    `SELECT id, hidden, name, is_assignable FROM pots WHERE id IN (${potIds.map(() => "?").join(",")}) AND user_id = ?`,
+    ...potIds,
+    userId
+  );
+  const byId = new Map(pots.map((p) => [p.id, p]));
+  for (const id of potIds) {
+    const p = byId.get(id);
+    if (!p) throw new Error(`no pot with id ${id}`);
+    if (p.hidden) throw new Error(`pot "${p.name}" is retired`);
+    if (!p.is_assignable) throw new Error(`pot "${p.name}" is an income pot; move money between spending pots`);
+  }
+  const lines: [number, number][] = [];
+  if (fromPotId !== null) lines.push([fromPotId, -cents]);
+  if (toPotId !== null) lines.push([toPotId, cents]);
+  const params: DbValue[] = [];
+  for (const [potId, delta] of lines) params.push(userId, month, potId, delta);
+  await db.run(
+    `INSERT INTO assignments (user_id, month, pot_id, cents) VALUES ${lines.map(() => "(?, ?, ?, ?)").join(",")}
+     ON CONFLICT(user_id, month, pot_id) DO UPDATE SET cents = assignments.cents + excluded.cents`,
+    ...params
+  );
+  const after = await allPotAssigned(db, userId, month, potIds);
+  const side = (id: number | null): Assignment | null => (id === null ? null : { potId: id, month, cents: after.get(id) ?? 0 });
+  return { from: side(fromPotId), to: side(toPotId) };
+}

@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { fn } from "storybook/test";
 import { OverviewTab } from "../OverviewTab";
-import { fixtureAccounts, makeAttention, makeOverview, MONTH } from "./fixtures";
+import { fixtureAccounts, fixtureOverspentPots, makeAttention, makeOverview, MONTH } from "./fixtures";
 import type { MockApiConfig } from "./mockApi";
 
 const meta: Meta<typeof OverviewTab> = {
@@ -88,6 +88,22 @@ export const PreviousMonthNotClosed: Story = {
     docs: {
       description: {
         story: "Last month was never closed: the attention card links to Pots on that month (onGo receives the month).",
+      },
+    },
+  },
+};
+
+export const Overspent: Story = {
+  parameters: {
+    mockApi: {
+      get: {
+        ...fullApi.get,
+        [`/api/pots?month=${MONTH}`]: { month: MONTH, pots: fixtureOverspentPots, rtaCents: 8633 },
+      },
+    } satisfies MockApiConfig,
+    docs: {
+      description: {
+        story: "Three pots are overspent: the attention card leads with a red \"3 pots overspent · $84.10\" line that goes to Pots.",
       },
     },
   },

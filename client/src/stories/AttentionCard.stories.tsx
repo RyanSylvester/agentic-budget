@@ -120,3 +120,18 @@ export const PreviousMonthNotClosed: Story = {
     docs: { description: { story: "Last month is still open: the first item offers Close, which goes to Pots on that month." } },
   },
 };
+
+export const Overspent: Story = {
+  args: {
+    ...base,
+    attention: makeAttention({ unreconciledAccounts: [] }),
+    overspent: { month: "2026-09", count: 2, cents: 8410 },
+  },
+  parameters: {
+    docs: {
+      description: {
+        story: "Overspent pots lead the list in the danger colour; Cover goes to Pots on that month.",
+      },
+    },
+  },
+};

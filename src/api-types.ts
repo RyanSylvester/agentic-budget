@@ -276,6 +276,14 @@ export interface Assignment {
 /** POST /api/assign */
 export type AssignResponse = OkResponse & Assignment;
 
+/** POST /api/assign/move: each side's new assigned total; null is Ready to Assign. */
+export interface AssignMoveResponse extends OkResponse {
+  month: string;
+  cents: number;
+  from: Assignment | null;
+  to: Assignment | null;
+}
+
 /** GET /api/pots/:id/assign-history?month= */
 export interface AssignHistory {
   potId: number;

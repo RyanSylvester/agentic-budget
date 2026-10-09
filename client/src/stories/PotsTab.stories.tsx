@@ -4,6 +4,7 @@ import { PotsTab } from "../PotsTab";
 import {
   fixtureCloseLines,
   fixtureContacts,
+  fixtureOverspentPots,
   fixturePlannedPots,
   fixturePots,
   fixtureTrend,
@@ -318,5 +319,93 @@ export const CurrentMonthPayOnTheWay: Story = {
         story: "Received income still below planned income: the summary keeps planning in neutral tones rather than flagging over-assigned.",
       },
     },
+  },
+};
+
+/* ---------- overspending ---------- */
+
+const overUrl = `/api/pots?month=${MONTH}`;
+
+/* A tiny in-memory server for the cover flow: POST /api/assign/move changes
+ * the assignments the next GET returns, so the refetch after a move (and
+ * after Undo) shows the real result instead of snapping back. */
+let overState = fixtureOverspentPots.map((p) => ({ ...p }));
+let overRta = 8633;
+const resetOver = () => {
+  overState = fixtureOverspentPots.map((p) => ({ ...p }));
+  overRta = 8633;
+};
+const overApi = {
+  get: {
+    [overUrl]: () => ({ month: MONTH, pots: overState, rtaCents: overRta }),
+    ...trend,
+    ...closePreview,
+  },
+  post: {
+    "/api/assign/move": (body: unknown) => {
+      const { fromPotId, toPotId, cents } = body as { fromPotId: number | null; toPotId: number | null; cents: number };
+      overState = overState.map((p) =>
+        p.id === fromPotId ? { ...p, assignedCents: p.assignedCents - cents } : p.id === toPotId ? { ...p, assignedCents: p.assignedCents + cents } : p
+      );
+      if (fromPotId === null) overRta -= cents;
+      if (toPotId === null) overRta += cents;
+      return { ok: true, month: MONTH, cents, from: null, to: null };
+    },
+  },
+} satisfies MockApiConfig;
+
+export const Overspent: Story = {
+  beforeEach: resetOver,
+  parameters: {
+    mockApi: overApi,
+    docs: {
+      description: {
+        story:
+          "Three pots are overspent. The summary card ends with a red \"3 pots overspent · $84.10\" line whose Show action scrolls to the first overspent row and flashes it; each group header carries a count badge; each overspent row offers Cover $X from….",
+      },
+    },
+  },
+};
+
+export const CoverPicker: Story = {
+  beforeEach: resetOver,
+  parameters: {
+    mockApi: overApi,
+    docs: {
+      description: {
+        story:
+          "Cover from…: the picker lists Ready to assign (when positive) and every pot with money left this month, most first, with what each would move. A source with less than the overspend covers part. (Interaction test: opens the picker for Dining out.)",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const [cover] = await canvas.findAllByRole("button", { name: /Cover \$34\.50 overspent in Dining out/ });
+    await userEvent.click(cover);
+    const body = within(canvasElement.ownerDocument.body);
+    await body.findByRole("dialog", { name: "Cover Dining out" });
+  },
+};
+
+export const CoverWithUndo: Story = {
+  beforeEach: resetOver,
+  parameters: {
+    mockApi: overApi,
+    docs: {
+      description: {
+        story:
+          "After choosing a source, the move shows at once and a status bar offers Undo for a few seconds. (Interaction test: covers Dining out from Ready to assign; the overspent count drops to 2.)",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const [cover] = await canvas.findAllByRole("button", { name: /Cover \$34\.50 overspent in Dining out/ });
+    await userEvent.click(cover);
+    const body = within(canvasElement.ownerDocument.body);
+    const dialog = await body.findByRole("dialog", { name: "Cover Dining out" });
+    await userEvent.click(within(dialog).getByRole("button", { name: /Ready to assign/ }));
+    await body.findByText("Moved $34.50 from Ready to assign to Dining out");
+    await expect(await canvas.findByText(/2 pots overspent · \$49\.60/)).toBeInTheDocument();
   },
 };

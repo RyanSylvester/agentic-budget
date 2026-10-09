@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BudgetTable } from "./BudgetTable";
+import { CoverSheet, CoverToast, OverspentLine, overspentLabel, overspentSummary, revealFirstOverspent, type CoverSource } from "./Overspent";
 import { PotSheet } from "./PotSheet";
 import { ScaffoldSheet } from "./ScaffoldSheet";
 import { useApi, send } from "./api";
@@ -268,7 +269,11 @@ export function PotsTab({ month, today, onGoMonth }: {
   );
   const [sheetPot, setSheetPot] = useState<Pot | "new" | null>(null);
   const [scaffoldOpen, setScaffoldOpen] = useState(false);
-  const pots = data?.pots ?? [];
+  const [coverPot, setCoverPot] = useState<Pot | null>(null);
+  const { optimistic, moved, move, undo, dismiss } = useCoverMove(month, data);
+  const pots = optimistic.pots(data?.pots ?? []);
+  const rta = optimistic.rta(data?.rtaCents ?? 0);
+  const over = overspentSummary(pots);
   const groups = [...new Set(pots.map((p) => p.group))].sort();
   const nothingAssigned = pots.every((p) => !p.assignable || p.assignedCents === 0);
   // Fill from history is offered on future months, and on the current month
@@ -315,17 +320,38 @@ export function PotsTab({ month, today, onGoMonth }: {
           <PotsSummary
             month={month}
             pots={pots}
-            rtaCents={data?.rtaCents ?? 0}
+            rtaCents={rta}
             planning={t.isFuture ? "future" : t.isCurrent ? "current" : "past"}
             onAssign={focusFirstAssignCell}
             onFill={fillInSummary ? () => setScaffoldOpen(true) : undefined}
+            overspent={over}
+            onShowOverspent={revealFirstOverspent}
           />
           <div id="budget-table">
-            <BudgetTable pots={pots} month={month} onAssigned={retry} onEditPot={(p) => setSheetPot(p)} />
+            <BudgetTable
+              pots={pots}
+              month={month}
+              onAssigned={retry}
+              onEditPot={(p) => setSheetPot(p)}
+              onCover={(p) => setCoverPot(p)}
+            />
           </div>
           <SpendInsights month={month} pots={pots} trend={trendData?.trend ?? []} />
         </>
       )}
+      {coverPot && (
+        <CoverSheet
+          pot={coverPot}
+          pots={pots}
+          rtaCents={rta}
+          onClose={() => setCoverPot(null)}
+          onCover={(source, cents) => {
+            setCoverPot(null);
+            move(source, coverPot, cents);
+          }}
+        />
+      )}
+      {moved && <CoverToast text={moved.text} error={moved.error} onUndo={undo} onDismiss={dismiss} />}
       {scaffoldOpen && (
         <ScaffoldSheet month={month} pots={pots} onClose={() => setScaffoldOpen(false)} onScaffolded={retry} />
       )}
@@ -340,6 +366,91 @@ export function PotsTab({ month, today, onGoMonth }: {
       )}
     </div>
   );
+}
+
+/* ---------- cover an overspent pot ---------- */
+
+const UNDO_MS = 6000;
+
+/** Moves assigned dollars to an overspent pot through POST /api/assign/move,
+ *  shown at once (an override on top of the loaded pots until the refetch
+ *  lands), with Undo for a few seconds. A failed move rolls back and says so. */
+function useCoverMove(month: string, data: PotsResponse | null) {
+  // Pot id -> assigned delta, and the Ready to assign delta, not yet in `data`.
+  const [deltas, setDeltas] = useState<{ pots: Record<number, number>; rta: number } | null>(null);
+  const [moved, setMoved] = useState<{ fromId: number | null; toId: number; cents: number; text: string; error?: string | null } | null>(null);
+  const inflight = useRef(0);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Fresh pots arrived from the server: they include the move.
+  useEffect(() => {
+    if (inflight.current === 0) setDeltas(null);
+  }, [data]);
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+
+  const post = async (fromId: number | null, toId: number | null, cents: number) => {
+    setDeltas((d) => {
+      const pots = { ...(d?.pots ?? {}) };
+      if (fromId !== null) pots[fromId] = (pots[fromId] ?? 0) - cents;
+      if (toId !== null) pots[toId] = (pots[toId] ?? 0) + cents;
+      return { pots, rta: (d?.rta ?? 0) + (fromId === null ? -cents : 0) + (toId === null ? cents : 0) };
+    });
+    inflight.current++;
+    try {
+      const r = await send("/api/assign/move", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ month, fromPotId: fromId, toPotId: toId, cents }),
+      });
+      if (!r.ok) {
+        const body = (await r.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? `HTTP ${r.status}`);
+      }
+      return null;
+    } catch (e) {
+      setDeltas(null);
+      return (e as Error).message;
+    } finally {
+      inflight.current--;
+    }
+  };
+
+  const arm = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setMoved(null), UNDO_MS);
+  };
+
+  return {
+    optimistic: {
+      pots: (ps: Pot[]) =>
+        deltas ? ps.map((p) => (deltas.pots[p.id] ? { ...p, assignedCents: p.assignedCents + deltas.pots[p.id] } : p)) : ps,
+      rta: (cents: number) => cents + (deltas?.rta ?? 0),
+    },
+    moved,
+    move: async (source: CoverSource, target: Pot, cents: number) => {
+      const text = `Moved ${money(cents)} from ${source.name} to ${target.name}`;
+      setMoved({ fromId: source.potId, toId: target.id, cents, text });
+      arm();
+      const error = await post(source.potId, target.id, cents);
+      if (error) setMoved({ fromId: source.potId, toId: target.id, cents, text, error: `Couldn't cover ${target.name}: ${error}` });
+    },
+    undo: async () => {
+      if (!moved) return;
+      if (timer.current) clearTimeout(timer.current);
+      setMoved(null);
+      const error = await post(moved.toId, moved.fromId, moved.cents);
+      if (error) {
+        setMoved({ ...moved, error: `Couldn't undo: ${error}` });
+        arm();
+      }
+    },
+    dismiss: () => {
+      if (timer.current) clearTimeout(timer.current);
+      setMoved(null);
+    },
+  };
 }
 
 /* ---------- pots summary ---------- */
@@ -451,6 +562,8 @@ export function PotsSummary({
   planning = "current",
   onAssign,
   onFill,
+  overspent,
+  onShowOverspent,
 }: {
   month: string;
   pots: Pot[];
@@ -461,6 +574,10 @@ export function PotsSummary({
   onAssign?: () => void;
   /** Opens Fill from history; shown as the action while nothing is assigned. */
   onFill?: () => void;
+  /** Overspent pots this month; a danger line under the figure when any. */
+  overspent?: { count: number; cents: number };
+  /** Where the overspent line leads (the first overspent row). */
+  onShowOverspent?: () => void;
 }) {
   const { assignedCents, plannedCents, inflowsCents } = monthPlan(pots, rtaCents);
   // Before the money is in (a future month, or this month's pay still on its
@@ -527,6 +644,15 @@ export function PotsSummary({
         )}
         {action}
       </div>
+      {overspent && overspent.count > 0 && (
+        <div className="mt-4 border-t border-[var(--hairline)] pt-3">
+          {onShowOverspent ? (
+            <OverspentLine count={overspent.count} cents={overspent.cents} action="Show" onClick={onShowOverspent} className="-ml-1" />
+          ) : (
+            <p className="t-nums text-md font-medium text-[var(--danger)]">{overspentLabel(overspent.count, overspent.cents)}</p>
+          )}
+        </div>
+      )}
     </section>
   );
 }

@@ -200,7 +200,7 @@ describe("cross-user isolation", () => {
   });
 
   test("writes against the other user's ids fail and change nothing", async () => {
-    const { app, db, cookieA, potB, contactB, txnB, schedB } = await setupTwoUsers();
+    const { app, db, cookieA, potA, potB, contactB, txnB, schedB } = await setupTwoUsers();
 
     const attempt = (method: string, path: string, body?: unknown) => jsonCall(app, method, path, { cookie: cookieA, body });
 
@@ -214,6 +214,9 @@ describe("cross-user isolation", () => {
     expect((await attempt("PUT", `/api/contacts/${contactB}`, { name: "Hacked" })).status).toBe(404);
     expect((await attempt("DELETE", `/api/contacts/${contactB}`)).status).toBe(404);
     expect((await attempt("POST", "/api/assign", { month: "2026-09", potId: potB, cents: 1 })).status).toBe(400);
+    expect((await attempt("POST", "/api/assign/move", { month: "2026-09", fromPotId: potB, toPotId: potA, cents: 1 })).status).toBe(400);
+    expect((await attempt("POST", "/api/assign/move", { month: "2026-09", fromPotId: potA, toPotId: potB, cents: 1 })).status).toBe(400);
+    expect((await attempt("POST", "/api/assign/move", { month: "2026-09", fromPotId: null, toPotId: potB, cents: 1 })).status).toBe(400);
     expect((await attempt("POST", "/api/sinking", { potId: potB, expectedCents: 1, dueMonth: "2026-12" })).status).toBe(400);
     expect((await attempt("POST", `/api/sinking/${schedB}/paid`)).status).toBe(404);
     expect((await attempt("DELETE", `/api/sinking/${schedB}`)).status).toBe(404);
@@ -247,6 +250,9 @@ describe("cross-user isolation", () => {
     });
     expect(await db.get("SELECT 1 AS x FROM sinking_schedules WHERE id = ?", schedB)).toBeTruthy();
     expect(await db.get("SELECT 1 AS x FROM assignments WHERE pot_id = ? AND month = '2026-09' AND cents = 1", potB)).toBeNull();
+    // The refused moves touched neither side.
+    expect(((await db.get("SELECT cents AS c FROM assignments WHERE pot_id = ? AND month = '2026-09'", potB)) as any).c).toBe(20000);
+    expect(((await db.get("SELECT cents AS c FROM assignments WHERE pot_id = ? AND month = '2026-09'", potA)) as any).c).toBe(10000);
     expect(await db.get("SELECT 1 AS x FROM reconciliations WHERE account_id = 2")).toBeNull();
     expect(await db.get("SELECT 1 AS x FROM month_closes WHERE user_id = 2")).toBeNull();
     expect((await db.get("SELECT COUNT(*) AS n FROM month_closes WHERE user_id = 1") as any).n).toBe(1);
