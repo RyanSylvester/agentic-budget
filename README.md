@@ -16,21 +16,48 @@ balances, and trends. Data entry is the agent's job.
 
 ## Stack
 
-TypeScript on [Bun](https://bun.sh), SQLite (`bun:sqlite`), [Hono](https://hono.dev)
-API + React dashboard (Vite, Tailwind). See the
-[context graph](https://github.com/RyanSylvester/agentic-budget-context) for
-architecture notes and ADRs.
+TypeScript, [Hono](https://hono.dev) API and a React dashboard (Vite,
+Tailwind). In production Daybook runs on **Cloudflare Workers**: one Worker
+(`src/worker.ts`) serves the JSON API and the built client as static assets,
+data lives in **D1** (hosted SQLite) and sessions in **KV**. It is
+multi-user: people sign up with an invite code, and the agent authenticates
+with a per-user bearer token. See `wrangler.toml` for the bindings.
 
-## Quick start
+Locally the same Hono app runs on [Bun](https://bun.sh) against a
+`bun:sqlite` file, which is also what the tests use. Both runtimes share one
+async database interface (`src/db-interface.ts`).
+
+See the [context graph](https://github.com/RyanSylvester/agentic-budget-context)
+for architecture notes and ADRs.
+
+## Quick start (local)
 
 ```sh
-bun install
+bun install && (cd client && bun install)
+bun run typecheck   # server, tests and client
 bun test            # close math, settlement allocation, reconcile logic
+bun src/cli.ts user create <username>
 bun src/cli.ts record --account 1 --amount -12.50 --description "Voila" --source mention
 bun src/cli.ts assign --month 2026-09 --pot "Eating Out" --cents 60000
 bun run --cwd client build   # build the dashboard
 bun src/cli.ts serve         # dashboard at http://localhost:3111
 ```
+
+## Using the hosted Worker
+
+The `budget` CLI talks to the Worker instead of a local database once it has
+remote config:
+
+```sh
+bun src/cli.ts login --api-url https://<your-worker>   # prompts for an agent token
+```
+
+`BUDGET_API_URL` and `BUDGET_API_TOKEN` override the saved config. In remote
+mode `serve`, `user` and `migration` are local-only and refuse to run.
+Database migrations live in `src/migrations` and are applied to D1 with
+`budget migrate-remote` (or `wrangler d1 migrations apply daybook --local`
+for `wrangler dev`). Deploying is `bun run --cwd client build` followed by
+`wrangler deploy`.
 
 ## How it works
 
@@ -73,5 +100,6 @@ bun src/cli.ts serve         # dashboard at http://localhost:3111
 
 ## Status
 
-Working app with live data (Aug 27 – Sep 26 2026).
-The agent manages the budget directly.
+Live on Cloudflare Workers + D1 with real data since August 2026. The agent
+manages the budget directly through the CLI in remote mode. CI runs the
+typecheck, tests and client build on every pull request.
