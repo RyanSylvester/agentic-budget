@@ -2,14 +2,10 @@ import { useEffect, useState } from "react";
 import { AppShell } from "./AppShell";
 import { LoginScreen, SignupScreen } from "./AuthScreens";
 import { prime } from "./api";
+import type { AuthState } from "./types";
 import { Skeleton } from "./ui";
 
 /* ---------- auth gate ---------- */
-
-export interface AuthState {
-  authenticated: boolean;
-  setupRequired: boolean;
-}
 
 /** Root component: gates the app on GET /api/auth/me. No users yet shows the
  *  signup screen, logged-out shows login (with a link to signup for later

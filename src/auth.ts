@@ -35,6 +35,7 @@
 
 import { Hono } from "hono";
 import type { Db, BatchStatement, BatchResult } from "./db-interface";
+import type { AgentToken, AgentTokenCreated, AgentTokensResponse, AuthChallenge, AuthState, InviteCreated, OkResponse } from "./api-types";
 
 /** Minimal KV surface used by auth. Cloudflare's KVNamespace satisfies this
  *  structurally; tests use a Map-backed double. */
@@ -251,8 +252,8 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
       "SELECT salt, kdf_params FROM users WHERE username = ?",
       body.username.trim()
     );
-    if (row) return c.json({ salt: row.salt, kdf_params: row.kdf_params });
-    return c.json({ salt: randomHex(16), kdf_params: DEFAULT_KDF_PARAMS });
+    if (row) return c.json({ salt: row.salt, kdf_params: row.kdf_params } satisfies AuthChallenge);
+    return c.json({ salt: randomHex(16), kdf_params: DEFAULT_KDF_PARAMS } satisfies AuthChallenge);
   });
 
   /** Retired in M2: one-time setup was replaced by invite-code signup.
@@ -334,7 +335,7 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
     // client lands in the app instead of bouncing back to the login form.
     const token = await mintSession(config.kv, userId, username);
     c.header("Set-Cookie", sessionCookie(token, SESSION_TTL_SECONDS));
-    return c.json({ ok: true });
+    return c.json({ ok: true } satisfies OkResponse);
   });
 
   /** Login: recompute the verifier and compare in constant time. Unknown
@@ -354,7 +355,7 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
     if (!row || !timingSafeEqual(actual, expected)) return c.json({ error: "wrong username or password" }, 401);
     const token = await mintSession(config.kv, row.id, username);
     c.header("Set-Cookie", sessionCookie(token, SESSION_TTL_SECONDS));
-    return c.json({ ok: true });
+    return c.json({ ok: true } satisfies OkResponse);
   });
 
   /** Logout: delete the KV session and clear the cookie. Idempotent. */
@@ -362,7 +363,7 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
     const token = getSessionToken(c.req.header("Cookie") ?? null);
     if (token) await config.kv.delete(`sess:${token}`);
     c.header("Set-Cookie", sessionCookie("", 0));
-    return c.json({ ok: true });
+    return c.json({ ok: true } satisfies OkResponse);
   });
 
   /** Frontend gate: { authenticated, setupRequired }. Identity-aware: a valid
@@ -372,9 +373,9 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
     const identity = await identifyRequest(c, config, db);
     if (identity) {
       const row = await db.get<{ username: string }>("SELECT username FROM users WHERE id = ?", identity.userId);
-      return c.json({ authenticated: true, setupRequired: false, username: row?.username ?? null });
+      return c.json({ authenticated: true, setupRequired: false, username: row?.username ?? null } satisfies AuthState);
     }
-    return c.json({ authenticated: false, setupRequired: (await userCount(db)) === 0 });
+    return c.json({ authenticated: false, setupRequired: (await userCount(db)) === 0 } satisfies AuthState);
   });
 
   /** List the user's agent tokens (id, name, created_at; never the secret). */
@@ -382,11 +383,11 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
     const db = await getDb();
     const identity = await identifyRequest(c, config, db);
     if (!identity || identity.kind !== "user") return c.json({ error: "unauthorized" }, 401);
-    const rows = await db.all<{ id: number; name: string; created_at: string }>(
+    const rows = await db.all<AgentToken>(
       "SELECT id, name, created_at FROM agent_tokens WHERE user_id = ? ORDER BY id",
       identity.userId
     );
-    return c.json({ tokens: rows });
+    return c.json({ tokens: rows } satisfies AgentTokensResponse);
   });
 
   /** Mint a per-user agent token. Requires a user session: these are
@@ -405,7 +406,7 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
       await sha256Hex(token),
       name
     );
-    return c.json({ ok: true, id: row!.id, token });
+    return c.json({ ok: true, id: row!.id, token } satisfies AgentTokenCreated);
   });
 
   /** Revoke one of the user's agent tokens. The id is validated as pure
@@ -421,7 +422,7 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
     if (tokenId <= 0) return c.json({ error: "bad token id" }, 400);
     const r = await db.run("DELETE FROM agent_tokens WHERE id = ? AND user_id = ?", tokenId, identity.userId);
     if (r.changes === 0) return c.json({ error: "no such token" }, 404);
-    return c.json({ ok: true });
+    return c.json({ ok: true } satisfies OkResponse);
   });
 
   /** Mint a single-use invite code. Any authenticated identity may do this:
@@ -433,6 +434,6 @@ export function registerAuth(app: Hono, getDb: () => Promise<Db>, config: AuthCo
     if (!identity) return c.json({ error: "unauthorized" }, 401);
     const code = randomHex(16);
     await db.run("INSERT INTO invite_codes (code, created_by) VALUES (?, ?)", code, identity.userId);
-    return c.json({ ok: true, code });
+    return c.json({ ok: true, code } satisfies InviteCreated);
   });
 }

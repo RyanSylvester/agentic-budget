@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { money, monthLabel } from "./format";
+import type { ErrorResponse, ScaffoldLine, ScaffoldResponse, ScaffoldStrategy } from "./types";
 import { FetchError, Segmented, Sheet, Skeleton } from "./ui";
 
 /* ---------- scaffold sheet ---------- */
@@ -7,20 +8,11 @@ import { FetchError, Segmented, Sheet, Skeleton } from "./ui";
 // Bulk-fill a future month's assignments from history. The user picks one of
 // two strategies, previews the per-pot values, then confirms. Income pots
 // always copy last month's planned income.
-export type ScaffoldStrategy = "average_3mo" | "last_month";
 
 export const SCAFFOLD_OPTIONS: { value: ScaffoldStrategy; label: string }[] = [
   { value: "average_3mo", label: "3-month average" },
   { value: "last_month", label: "Last month" },
 ];
-
-export interface ScaffoldLine {
-  potId: number;
-  name: string;
-  cents: number;
-  income: boolean;
-  scheduled?: boolean;
-}
 
 export function ScaffoldSheet({ month, onClose, onScaffolded }: {
   month: string;
@@ -43,9 +35,9 @@ export function ScaffoldSheet({ month, onClose, onScaffolded }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ month, strategy: s, dryRun: true }),
       });
-      const d = await r.json().catch(() => ({}));
+      const d = (await r.json().catch(() => ({}))) as Partial<ScaffoldResponse & ErrorResponse>;
       if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
-      setLines(d.lines);
+      setLines(d.lines ?? []);
     } catch (e) {
       setFailed((e as Error).message);
     }
@@ -67,7 +59,7 @@ export function ScaffoldSheet({ month, onClose, onScaffolded }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ month, strategy }),
       });
-      const d = await r.json().catch(() => ({}));
+      const d = (await r.json().catch(() => ({}))) as Partial<ScaffoldResponse & ErrorResponse>;
       if (!r.ok) throw new Error(d.error ?? `HTTP ${r.status}`);
       onScaffolded();
       onClose();

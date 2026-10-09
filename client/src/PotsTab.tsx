@@ -4,7 +4,7 @@ import { PotSheet } from "./PotSheet";
 import { ScaffoldSheet } from "./ScaffoldSheet";
 import { useApi } from "./api";
 import { money, monthLabel, titleCase, trendLabel } from "./format";
-import { ClosePreviewData, Pot, TrendPoint } from "./types";
+import type { ClosePreview, Pot, PotsResponse, TrendPoint, TrendResponse } from "./types";
 import { FetchError, Skeleton } from "./ui";
 
 /* ---------- close summary card ---------- */
@@ -18,7 +18,7 @@ export function CloseSummaryCard({ month, onClosed }: { month: string; onClosed:
   const current = new Date().toISOString().slice(0, 7);
   const isFuture = month > current;
   const isCurrent = month === current;
-  const { data: preview, error, loading, retry } = useApi<ClosePreviewData>(
+  const { data: preview, error, loading, retry } = useApi<ClosePreview>(
     isFuture ? null : `/api/close-preview?month=${month}`
   );
   const [confirming, setConfirming] = useState(false);
@@ -142,8 +142,8 @@ export function CloseSummaryCard({ month, onClosed }: { month: string; onClosed:
 export function PotsTab({ month }: { month: string }) {
   const current = new Date().toISOString().slice(0, 7);
   const isFuture = month > current;
-  const { data, error, loading, retry } = useApi<{ pots: Pot[]; rtaCents: number }>(`/api/pots?month=${month}`);
-  const { data: trendData } = useApi<{ trend: TrendPoint[] }>("/api/trend");
+  const { data, error, loading, retry } = useApi<PotsResponse>(`/api/pots?month=${month}`);
+  const { data: trendData } = useApi<TrendResponse>("/api/trend");
   const [sheetPot, setSheetPot] = useState<Pot | "new" | null>(null);
   const [scaffoldOpen, setScaffoldOpen] = useState(false);
   const pots = data?.pots ?? [];

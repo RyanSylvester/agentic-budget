@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { argon2id } from "hash-wasm";
+import type { AuthChallenge } from "./types";
 
 /* Login and signup screens for in-app auth.
  *
@@ -78,7 +79,7 @@ export function LoginScreen({ onAuthenticated, onSignup, deriveKey = deriveKdfKe
     try {
       const ch = await postJson("/api/auth/challenge", { username: username.trim() });
       if (!ch.ok) throw new Error("challenge");
-      const { salt, kdf_params } = (await ch.json()) as { salt: string; kdf_params: string };
+      const { salt, kdf_params } = (await ch.json()) as AuthChallenge;
       const kdfKey = await deriveKey(password, salt, kdf_params);
       const login = await postJson("/api/auth/login", { username: username.trim(), kdfKey });
       if (login.status === 401) {

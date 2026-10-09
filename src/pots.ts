@@ -5,9 +5,9 @@
  *  (except the user's last one, since every transaction needs a home).
  *  Pure DB functions that throw on bad input; routes translate to 400s/404s. */
 import type { Db, DbValue } from "./db-interface";
+import type { PotDeleteSummary, TargetType } from "./api-types";
+export type { PotDeleteSummary, TargetType };
 import { tableExists } from "./db-interface";
-
-export type TargetType = "fixed" | "average_3mo" | "savings";
 
 export interface PotInput {
   name?: unknown;
@@ -234,13 +234,6 @@ export async function updatePot(db: Db, userId: number, id: number, input: PotIn
     await ensureGroupOrderRow(db, userId, newGroup);
     if (oldGroup !== null && oldGroup !== newGroup) await pruneEmptyGroup(db, userId, oldGroup);
   }
-}
-
-export interface PotDeleteSummary {
-  moveToPotId: number;
-  moveToPotName: string;
-  movedTransactions: number;
-  movedAssignments: number;
 }
 
 /** Delete a pot, moving its history to the destination pot the caller names.

@@ -2,6 +2,8 @@
  *  balance (read by the agent from a statement).
  *  Pure functions; the server handles the database writes.
  */
+import type { ReconcileResult } from "./api-types";
+export type { ReconcileResult };
 
 export interface ReconcileInput {
   /** Sum of cleared + reconciled transactions only, in cents.
@@ -9,12 +11,6 @@ export interface ReconcileInput {
   clearedBalanceCents: number;
   /** Real balance from the bank/statement, in cents. */
   actualBalanceCents: number;
-}
-
-export interface ReconcileResult {
-  /** actual - cleared. Zero means balanced. */
-  differenceCents: number;
-  balanced: boolean;
 }
 
 export function reconcile(input: ReconcileInput): ReconcileResult {

@@ -1,7 +1,7 @@
 import { useApi } from "./api";
 import { fmtDate, money, monthLabel } from "./format";
 import { type Tab } from "./tabs";
-import { Account, Attention, Overview, Txn } from "./types";
+import type { Account, AccountsResponse, Attention, Overview, RecentTransaction } from "./types";
 import { Eyebrow, FetchError, Skeleton } from "./ui";
 
 /* ---------- overview pieces ---------- */
@@ -38,7 +38,7 @@ export function Hero({ overview, isCurrent, loading }: { overview: Overview | nu
           <span className="text-[var(--muted)]">{monthLabel(overview.month)}</span>
         )}
       </div>
-      {isCurrent && overview.rtaCents != null && (
+      {isCurrent && (
         <div className="mt-1.5 text-[15px]">
           <span className="t-nums font-medium text-[var(--accent)]">{money(overview.rtaCents)}</span>
           <span className="text-[var(--muted)]"> ready to assign</span>
@@ -48,7 +48,7 @@ export function Hero({ overview, isCurrent, loading }: { overview: Overview | nu
   );
 }
 
-export function RecentActivity({ txns, loading }: { txns: Txn[]; loading?: boolean }) {
+export function RecentActivity({ txns, loading }: { txns: RecentTransaction[]; loading?: boolean }) {
   // Transfer pairs (e.g. +$891.82 / -$891.82 between own accounts) are net-zero
   // noise, not spending: keep them out of the activity feed.
   const visible = txns.filter((t) => !t.is_transfer);
@@ -96,7 +96,7 @@ export function RecentActivity({ txns, loading }: { txns: Txn[]; loading?: boole
 export function OverviewTab({ month, onGo }: { month: string; onGo: (t: Tab) => void }) {
   const { data: overview, error, loading, retry } = useApi<Overview>(`/api/overview?month=${month}`);
   const { data: attention } = useApi<Attention>("/api/attention");
-  const { data: accountsData } = useApi<{ accounts: Account[] }>("/api/accounts");
+  const { data: accountsData } = useApi<AccountsResponse>("/api/accounts");
 
   const current = new Date().toISOString().slice(0, 7);
 
@@ -130,19 +130,17 @@ export function AttentionCard({ attention, overview, accounts, onGo }: {
 }) {
   const items: { label: React.ReactNode; tab: Tab }[] = [];
   if (attention) {
-    for (const a of attention.unreconciledAccounts ?? []) {
-      const name = typeof a === "string" ? a : a.name;
-      items.push({ label: `${name} not reconciled yet`, tab: "accounts" });
+    for (const a of attention.unreconciledAccounts) {
+      items.push({ label: `${a.name} not reconciled yet`, tab: "accounts" });
     }
     if (attention.unsettledSharedCents > 0) {
-      const names = attention.sharedOwedBy ?? [];
+      const names = attention.sharedOwedBy;
       items.push({
         label:
           names.length === 1 ? (
             // The per-contact line is the NET owed (gross minus credit), same
-            // convention as the contact card headline. Falls back to gross for
-            // older servers that do not send netCents.
-            <>{names[0].name} owes <span className="t-nums font-medium">{money(names[0].netCents ?? names[0].cents)}</span></>
+            // convention as the contact card headline.
+            <>{names[0].name} owes <span className="t-nums font-medium">{money(names[0].netCents)}</span></>
           ) : (
             <><span className="t-nums font-medium">{money(attention.unsettledSharedCents)}</span> in shared balances owed</>
           ),

@@ -3,7 +3,7 @@ import { MoneyInput } from "./MoneyInput";
 import { useApi } from "./api";
 import { fmtDate, money } from "./format";
 import { expressionToCents } from "./money";
-import { Account, ContactBalance } from "./types";
+import type { Account, AccountsResponse, ContactBalance, ContactsResponse, SettlementSummary } from "./types";
 import { FetchError, Skeleton } from "./ui";
 
 /* ---------- contact balance ---------- */
@@ -15,10 +15,10 @@ export function ContactCard({ contact, accounts }: { contact: ContactBalance; ac
   const [busy, setBusy] = useState(false);
   const [settleError, setSettleError] = useState(false);
   const [settledTick, setSettledTick] = useState(0);
-  const [last, setLast] = useState<{ allocations: { potName: string | null; amountCents: number }[]; leftoverCents: number } | null>(null);
+  const [last, setLast] = useState<SettlementSummary | null>(null);
 
   // Re-read this contact's balance after a settlement lands.
-  const { data: fresh } = useApi<{ contacts: ContactBalance[] }>(
+  const { data: fresh } = useApi<ContactsResponse>(
     settledTick === 0 ? null : "/api/contacts"
   );
   const info = fresh?.contacts.find((c) => c.id === contact.id) ?? contact;
@@ -41,7 +41,7 @@ export function ContactCard({ contact, accounts }: { contact: ContactBalance; ac
         body: JSON.stringify({ contactId: contact.id, accountId: dest.id, amountCents: cents, note: `${contact.name} settlement` }),
       }).then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
+        return r.json() as Promise<SettlementSummary>;
       });
       setLast(res);
       setAmount("");
@@ -253,8 +253,8 @@ export function ContactsManager({ contacts, onChanged }: { contacts: ContactBala
 }
 
 export function SharingTab() {
-  const { data, error, loading, retry } = useApi<{ contacts: ContactBalance[] }>("/api/contacts");
-  const { data: accountsData } = useApi<{ accounts: Account[] }>("/api/accounts");
+  const { data, error, loading, retry } = useApi<ContactsResponse>("/api/contacts");
+  const { data: accountsData } = useApi<AccountsResponse>("/api/accounts");
   const contacts = data?.contacts ?? [];
   const accounts = accountsData?.accounts ?? [];
 

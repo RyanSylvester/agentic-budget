@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useApi } from "./api";
-import { ContactBalance, Pot } from "./types";
+import type { ContactsResponse, Pot, PotDeletePreview, TargetType } from "./types";
 import { Segmented, Sheet } from "./ui";
 
 /* ---------- tabs: pots / close / sharing ---------- */
@@ -15,7 +15,7 @@ export function PotSheet({ pot, groups, pots, onClose, onSaved }: {
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const { data: contactsData } = useApi<{ contacts: ContactBalance[] }>("/api/contacts");
+  const { data: contactsData } = useApi<ContactsResponse>("/api/contacts");
   const contacts = contactsData?.contacts ?? [];
   const [name, setName] = useState(pot?.name ?? "");
   // New pots start in the last-used group (remembered across sessions), so
@@ -23,11 +23,7 @@ export function PotSheet({ pot, groups, pots, onClose, onSaved }: {
   const [group, setGroup] = useState(
     pot?.group ?? (typeof localStorage !== "undefined" ? localStorage.getItem("daybook:lastGroup") : null) ?? ""
   );
-  const [targetType, setTargetType] = useState<"fixed" | "average_3mo" | "savings">(
-    pot && ["fixed", "average_3mo", "savings"].includes(pot.targetType)
-      ? (pot.targetType as "fixed" | "average_3mo" | "savings")
-      : "average_3mo"
-  );
+  const [targetType, setTargetType] = useState<TargetType>(pot?.targetType ?? "average_3mo");
   const [shared, setShared] = useState(pot?.contactId != null);
   const [contactId, setContactId] = useState<string>(pot?.contactId != null ? String(pot.contactId) : "");
   const [sharePct, setSharePct] = useState<string>(pot?.sharePct != null ? String(pot.sharePct) : "50");
@@ -76,7 +72,7 @@ export function PotSheet({ pot, groups, pots, onClose, onSaved }: {
   };
 
   const [moveToPotId, setMoveToPotId] = useState<string>("");
-  const [preview, setPreview] = useState<{ transactionCount: number; assignmentCount: number } | null>(null);
+  const [preview, setPreview] = useState<PotDeletePreview | null>(null);
   const openDelete = async () => {
     setConfirmDelete(true);
     setMoveToPotId("");
@@ -84,7 +80,7 @@ export function PotSheet({ pot, groups, pots, onClose, onSaved }: {
     setError(null);
     try {
       const r = await fetch(`/api/pots/${pot!.id}/delete-preview`);
-      if (r.ok) setPreview(await r.json());
+      if (r.ok) setPreview((await r.json()) as PotDeletePreview);
     } catch {
       /* counts are a nicety; the delete still works without them */
     }

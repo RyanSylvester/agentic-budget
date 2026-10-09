@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useApi } from "./api";
+import type { AgentToken, AgentTokenCreated, AgentTokensResponse, AuthState } from "./types";
 import { Skeleton, FetchError } from "./ui";
 
 /* Settings tab: account info and per-user agent token management.
@@ -9,12 +10,6 @@ import { Skeleton, FetchError } from "./ui";
  * once at creation; the server stores only its SHA-256. Minting and revoking
  * require the cookie session, so a stolen agent token cannot mint more. */
 
-interface AgentToken {
-  id: number;
-  name: string;
-  created_at: string;
-}
-
 function formatDate(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime())
@@ -23,7 +18,7 @@ function formatDate(iso: string): string {
 }
 
 function AccountCard() {
-  const { data, error, loading, retry } = useApi<{ authenticated: boolean; username: string | null }>(
+  const { data, error, loading, retry } = useApi<AuthState>(
     "/api/auth/me"
   );
   const [loggingOut, setLoggingOut] = useState(false);
@@ -108,7 +103,7 @@ function TokenRow({
 }
 
 function AgentTokensCard() {
-  const { data, error, loading, retry } = useApi<{ tokens: AgentToken[] }>("/api/auth/agent-tokens");
+  const { data, error, loading, retry } = useApi<AgentTokensResponse>("/api/auth/agent-tokens");
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -126,7 +121,7 @@ function AgentTokensCard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim() || "cli" }),
       });
-      const body = (await r.json().catch(() => null)) as { id?: number; token?: string } | null;
+      const body = (await r.json().catch(() => null)) as Partial<AgentTokenCreated> | null;
       if (!r.ok || !body?.token) throw new Error("create failed");
       setNewToken({ name: name.trim() || "cli", token: body.token });
       setName("");

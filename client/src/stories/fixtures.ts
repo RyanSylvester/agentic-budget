@@ -2,7 +2,7 @@
    no real transaction descriptions, no personal names. Contact names used
    ("Alex", "Sam") are fictional stand-ins, never real people. */
 
-import type { Account, Attention, ClosePreviewData, ContactBalance, ListedTxn, Overview, Pot, TrendPoint, Txn } from "../types";
+import type { Account, Attention, ClosePreview, ContactBalance, ListedTransaction, Overview, Pot, RecentTransaction, TrendPoint } from "../types";
 
 export const MONTH = "2026-09";
 
@@ -20,9 +20,11 @@ export function makePot(over: Partial<Pot> = {}): Pot {
     sharedCents: 0,
     assignable: true,
     assignedCents: 0,
+    receivedCents: 0,
     contactId: null,
     contactName: null,
     sharePct: null,
+    sinking: null,
     ...over,
   };
 }
@@ -41,7 +43,7 @@ export const fixturePots: Pot[] = [
   makePot({ name: "Interest", group: "Income", assignable: false, spentCents: 0 }),
 ];
 
-export function makeTxn(over: Partial<Txn> = {}): Txn {
+export function makeTxn(over: Partial<RecentTransaction> = {}): RecentTransaction {
   return {
     id: nid(),
     date: "2026-09-26",
@@ -50,18 +52,16 @@ export function makeTxn(over: Partial<Txn> = {}): Txn {
     is_transfer: 0,
     split_with_contact: 0,
     split_contact_name: null,
-    source: "mock-import",
-    shared_cents: 0,
     ...over,
   };
 }
 
-export const fixtureTxns: Txn[] = [
-  makeTxn({ date: "2026-09-27", description: "Mock grocery run", user_cents: -8421, split_with_contact: 1, split_contact_name: "Alex", shared_cents: 4210 }),
+export const fixtureTxns: RecentTransaction[] = [
+  makeTxn({ date: "2026-09-27", description: "Mock grocery run", user_cents: -8421, split_with_contact: 1, split_contact_name: "Alex" }),
   makeTxn({ date: "2026-09-26", description: "Mock transit top-up", user_cents: -15000 }),
   makeTxn({ date: "2026-09-25", description: "Mock paycheck deposit", user_cents: 250000, is_transfer: 0 }),
   makeTxn({ date: "2026-09-24", description: "Mock transfer between accounts", user_cents: 89182, is_transfer: 1 }),
-  makeTxn({ date: "2026-09-23", description: "Mock dinner out", user_cents: -9650, split_with_contact: 1, split_contact_name: "Alex", shared_cents: 4825 }),
+  makeTxn({ date: "2026-09-23", description: "Mock dinner out", user_cents: -9650, split_with_contact: 1, split_contact_name: "Alex" }),
   makeTxn({ date: "2026-09-22", description: "Mock coffee stop", user_cents: -485 }),
 ];
 
@@ -79,7 +79,10 @@ export function makeOverview(over: Partial<Overview> = {}): Overview {
 export function makeAttention(over: Partial<Attention> = {}): Attention {
   return {
     month: MONTH,
-    unreconciledAccounts: [{ name: "Mock Chequing" }, { name: "Mock Credit Card" }],
+    unreconciledAccounts: [
+      { id: 1, name: "Mock Chequing", diffCents: -4210 },
+      { id: 2, name: "Mock Credit Card", diffCents: 12999 },
+    ],
     rtaCents: 487250,
     unsettledSharedCents: 0,
     sharedOwedBy: [],
@@ -87,7 +90,7 @@ export function makeAttention(over: Partial<Attention> = {}): Attention {
   };
 }
 
-export function makeClosePreview(over: Partial<ClosePreviewData> = {}): ClosePreviewData {
+export function makeClosePreview(over: Partial<ClosePreview> = {}): ClosePreview {
   return {
     month: MONTH,
     nextMonth: "2026-10",
@@ -98,6 +101,7 @@ export function makeClosePreview(over: Partial<ClosePreviewData> = {}): ClosePre
     movedToSavingsCents: 487250,
     sharedOwedCents: 0,
     sharedOwedBy: [],
+    pots: [],
     closed: false,
     ...over,
   };
@@ -169,7 +173,7 @@ const paycheckPot = fixturePots.find((p) => p.name === "Paycheck")!;
 const diningPot = fixturePots.find((p) => p.name === "Dining out")!;
 const coffeePot = fixturePots.find((p) => p.name === "Coffee")!;
 
-export function makeListedTxn(over: Partial<ListedTxn> = {}): ListedTxn {
+export function makeListedTxn(over: Partial<ListedTransaction> = {}): ListedTransaction {
   return {
     id: nid(),
     date: "2026-09-26",
@@ -191,7 +195,7 @@ export function makeListedTxn(over: Partial<ListedTxn> = {}): ListedTxn {
   };
 }
 
-export const fixtureListedTxns: ListedTxn[] = [
+export const fixtureListedTxns: ListedTransaction[] = [
   makeListedTxn({ date: "2026-09-27", description: "Mock grocery run", amountCents: -8421, splitWithContact: 1, sharedCents: 4210, splitContactId: 1, splitContactName: "Alex" }),
   makeListedTxn({ date: "2026-09-26", description: "Mock transit top-up", amountCents: -15000, potId: transitPot.id, potName: transitPot.name, potGroup: transitPot.group }),
   makeListedTxn({ date: "2026-09-25", description: "Mock paycheck deposit", amountCents: 250000, potId: paycheckPot.id, potName: paycheckPot.name, potGroup: paycheckPot.group }),

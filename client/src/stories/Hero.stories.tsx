@@ -32,13 +32,6 @@ export const CurrentMonth: Story = {
   },
 };
 
-export const CurrentMonthNoRta: Story = {
-  args: { overview: makeOverview({ rtaCents: undefined, assignedCents: undefined }), isCurrent: true },
-  parameters: {
-    docs: { description: { story: "Ready-to-assign hidden for months where the figure does not apply." } },
-  },
-};
-
 export const CurrentMonthZeroRta: Story = {
   args: { overview: makeOverview({ rtaCents: 0 }), isCurrent: true },
   parameters: {

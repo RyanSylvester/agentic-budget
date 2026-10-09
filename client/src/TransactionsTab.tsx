@@ -3,7 +3,7 @@ import { MoneyInput } from "./MoneyInput";
 import { useApi } from "./api";
 import { fmtDate, money, titleCase } from "./format";
 import { expressionToCents } from "./money";
-import { Account, ContactBalance, ListedTxn, Pot } from "./types";
+import type { Account, AccountsResponse, ContactsResponse, ListedTransaction, Pot, PotsResponse, TransactionsResponse } from "./types";
 import { FetchError, FormLabel, Segmented, Sheet, Skeleton, TxnBadge } from "./ui";
 
 /* ---------- transaction add/edit sheet ---------- */
@@ -12,7 +12,7 @@ import { FetchError, FormLabel, Segmented, Sheet, Skeleton, TxnBadge } from "./u
 // a Sheet; the parent refetches on onSaved. All inputs keep a fixed size so
 // focusing never shifts the layout.
 export function TransactionSheet({ txn, pots, accounts, onClose, onSaved }: {
-  txn: ListedTxn | null;
+  txn: ListedTransaction | null;
   pots: Pot[];
   accounts: Account[];
   onClose: () => void;
@@ -37,7 +37,7 @@ export function TransactionSheet({ txn, pots, accounts, onClose, onSaved }: {
   const [error, setError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
-  const { data: contactsData } = useApi<{ contacts: ContactBalance[] }>("/api/contacts");
+  const { data: contactsData } = useApi<ContactsResponse>("/api/contacts");
   const contacts = contactsData?.contacts ?? [];
 
   const toggleSplit = (on: boolean) => {
@@ -338,15 +338,15 @@ export function TransactionSheet({ txn, pots, accounts, onClose, onSaved }: {
 /* ---------- transactions page ---------- */
 
 export function TransactionsTab({ month }: { month: string }) {
-  const { data, error, loading, retry } = useApi<{ month: string; transactions: ListedTxn[] }>(
+  const { data, error, loading, retry } = useApi<TransactionsResponse>(
     `/api/transactions?month=${month}`
   );
-  const { data: potsData } = useApi<{ pots: Pot[] }>(`/api/pots?month=${month}`);
-  const { data: accountsData } = useApi<{ accounts: Account[] }>("/api/accounts");
+  const { data: potsData } = useApi<PotsResponse>(`/api/pots?month=${month}`);
+  const { data: accountsData } = useApi<AccountsResponse>("/api/accounts");
   const [query, setQuery] = useState("");
   const [potFilter, setPotFilter] = useState("all");
   const [kind, setKind] = useState<"all" | "out" | "in" | "transfer">("all");
-  const [sheet, setSheet] = useState<{ txn: ListedTxn | null } | null>(null);
+  const [sheet, setSheet] = useState<{ txn: ListedTransaction | null } | null>(null);
 
   const pots = potsData?.pots ?? [];
   const accounts = accountsData?.accounts ?? [];

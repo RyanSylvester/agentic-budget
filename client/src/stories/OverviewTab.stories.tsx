@@ -25,7 +25,7 @@ const overviewUrl = `/api/overview?month=${MONTH}`;
 const fullApi = {
   get: {
     [overviewUrl]: makeOverview(),
-    "/api/attention": makeAttention({ unsettledSharedCents: 42180, sharedOwedBy: [{ contactId: 1, name: "Alex", cents: 42180 }] }),
+    "/api/attention": makeAttention({ unsettledSharedCents: 42180, sharedOwedBy: [{ contactId: 1, name: "Alex", cents: 42180, netCents: 42180 }] }),
     "/api/accounts": { accounts: fixtureAccounts },
   },
 } satisfies MockApiConfig;

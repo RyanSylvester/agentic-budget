@@ -4,6 +4,8 @@
  *  allocateSettlement; DB writes live in applySettlement, run as sequential
  *  awaits (single writer: one user, one agent). */
 import type { Db, DbValue } from "./db-interface";
+import type { Allocation, BackfillSummary, SettlementSummary } from "./api-types";
+export type { Allocation, BackfillSummary, SettlementSummary };
 import { assertSplitsSum } from "./money";
 
 export interface OwedSplit {
@@ -13,12 +15,6 @@ export interface OwedSplit {
   potName: string | null;
   date: string;
   owedCents: number; // positive
-}
-
-export interface Allocation {
-  splitId: number;
-  potName: string | null;
-  amountCents: number; // positive
 }
 
 /** Allocate a lump sum against what a contact owes, oldest first. */
@@ -68,16 +64,6 @@ export async function contactOwed(db: Db, userId: number, contactId?: number): P
     ...params
   );
   return rows.filter((r) => r.owedCents > 0);
-}
-
-export interface SettlementSummary {
-  contactId: number;
-  contactName: string;
-  allocations: Allocation[];
-  /** Splits paid down from prior credit (zero cash moved). */
-  creditAllocations: Allocation[];
-  creditConsumedCents: number;
-  leftoverCents: number;
 }
 
 /** Record a lump sum from a contact and allocate it against what they owe.
@@ -225,7 +211,7 @@ export async function backfillSettlementAllocations(
   db: Db,
   userId: number,
   contactId: number
-): Promise<{ contactId: number; allocationsWritten: number; creditRemainingCents: number }> {
+): Promise<BackfillSummary> {
   const contact = await db.get<{ id: number }>(
     "SELECT id FROM contacts WHERE id = ? AND user_id = ?",
     contactId,

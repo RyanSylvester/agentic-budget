@@ -15,6 +15,10 @@ RUN bun install
 # Client deps + build
 COPY client/package.json client/bun.lock ./client/
 RUN cd client && bun install
+# The client imports the API contract (types only) from src/api-types.ts.
+# The type-only import is erased by the build, but copy it first so the
+# client tree is complete for anything that type-checks it.
+COPY src/api-types.ts ./src/api-types.ts
 COPY client ./client
 RUN cd client && bun run build
 
