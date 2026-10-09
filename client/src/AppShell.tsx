@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AccountsView } from "./AccountsTab";
 import { OverviewTab } from "./OverviewTab";
 import { PotsTab } from "./PotsTab";
@@ -7,7 +7,7 @@ import { SharingTab } from "./SharingTab";
 import { TransactionsTab } from "./TransactionsTab";
 import { useApi, useOnline } from "./api";
 import { currentMonthLocal } from "./format";
-import { TABS, type Tab, tabFromUrl, tabLabel } from "./tabs";
+import { TABS, type Tab, monthFromUrl, tabFromUrl, tabLabel } from "./tabs";
 import type { Attention } from "./types";
 import { MonthNav, Sheet } from "./ui";
 
@@ -186,21 +186,53 @@ export function MobileTabBar({ tab, onGo, closeAlert, initialMoreOpen = false }:
   );
 }
 
+/** Page heading for the tabs without a month bar. On phones the top bar
+ *  already shows the tab name, so the heading is kept for screen readers
+ *  only there. */
+function PageTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <h1 tabIndex={-1} className="sr-only font-serif-d text-xl font-medium outline-none md:not-sr-only md:mb-5">
+      {children}
+    </h1>
+  );
+}
+
 /** The full app shell: tabs, sidebar, and content. Rendered only once the
  *  auth gate below has confirmed a session. Also the Storybook entry point. */
 export function AppShell() {
   const [tab, setTab] = useState<Tab>(tabFromUrl);
-  const [month, setMonth] = useState(currentMonthLocal);
+  const [month, setMonth] = useState(() => monthFromUrl() ?? currentMonthLocal());
   const { data: attention } = useApi<Attention>("/api/attention");
   const online = useOnline();
+  const mainRef = useRef<HTMLElement>(null);
+  // Set when the user moves between tabs, so focus follows the navigation
+  // but a fresh page load leaves focus where the browser put it.
+  const navigated = useRef(false);
 
-  // Keep the tab in the URL (?tab=pots) so a refresh lands back on the
-  // current tab, and browser back/forward moves between tabs.
+  // Keep the tab and month in the URL (?tab=pots&month=2026-10) so a refresh
+  // lands back on the same screen, and browser back/forward moves between
+  // tabs.
   useEffect(() => {
-    const onPopState = () => setTab(tabFromUrl());
+    const onPopState = () => {
+      navigated.current = true;
+      setTab(tabFromUrl());
+      setMonth(monthFromUrl() ?? currentMonthLocal());
+    };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+
+  // Name the page after the tab, and after a tab change move focus to its
+  // heading so screen readers announce the new page instead of staying on
+  // the nav button.
+  useEffect(() => {
+    document.title = `${tabLabel(tab)} · Daybook`;
+    if (!navigated.current) return;
+    navigated.current = false;
+    const main = mainRef.current;
+    const target = main?.querySelector<HTMLElement>("h1") ?? main;
+    target?.focus({ preventScroll: true });
+  }, [tab]);
 
   // Near month-end with money still unassigned, the Pots tab earns a dot:
   // the close card now lives there.
@@ -209,13 +241,28 @@ export function AppShell() {
   const closeAlert =
     (now.getDate() >= lastDay - 2 && (attention?.rtaCents ?? 0) > 0) || !!attention?.unclosedMonth;
 
-  const go = (t: Tab, m?: string) => {
-    if (m) setMonth(m);
-    setTab(t);
+  const writeUrl = (t: Tab, m: string, push: boolean) => {
     const url = new URL(window.location.href);
     url.searchParams.set("tab", t);
-    window.history.pushState(null, "", url);
+    if (MONTH_TABS.includes(t)) url.searchParams.set("month", m);
+    else url.searchParams.delete("month");
+    if (push) window.history.pushState(null, "", url);
+    else window.history.replaceState(null, "", url);
+  };
+
+  const go = (t: Tab, m?: string) => {
+    if (t !== tab) navigated.current = true;
+    if (m) setMonth(m);
+    setTab(t);
+    writeUrl(t, m ?? month, true);
     window.scrollTo(0, 0);
+  };
+
+  // Stepping months replaces the URL rather than pushing: back goes to the
+  // previous tab, not through every month visited.
+  const changeMonth = (m: string) => {
+    setMonth(m);
+    writeUrl(tab, m, false);
   };
 
   const navBadge = (id: Tab) => {
@@ -254,17 +301,23 @@ export function AppShell() {
 
       {/* content column */}
       <div className="min-w-0 flex-1">
-        <header className="flex items-center justify-between px-5 pb-1 pt-5 md:hidden">
-          {/* Wordmark: sized on its own, outside the type scale. */}
-          <span className="font-serif-d text-[19px] font-medium tracking-tight">Daybook</span>
-        </header>
-        <div className="mx-auto max-w-5xl px-5 pb-32 pt-2 md:px-8 md:py-8 md:pb-16">
+        {/* Phones have no sidebar, so the top bar names the current tab.
+            Hidden from screen readers: the h1 in <main> carries the name. */}
+        <div aria-hidden className="flex items-center justify-between px-5 pb-1 pt-5 md:hidden">
+          <span className="font-serif-d text-xl font-medium tracking-tight">{tabLabel(tab)}</span>
+        </div>
+        <main
+          id="main"
+          ref={mainRef}
+          tabIndex={-1}
+          className="mx-auto max-w-5xl px-5 pb-32 pt-2 outline-none md:px-8 md:py-8 md:pb-16"
+        >
           {!online && (
             <div role="status" className="card mb-5 px-4 py-3 text-sm text-[var(--ink-2)]">
               You're offline. Showing what was last loaded; changes won't save until you're back.
             </div>
           )}
-          {MONTH_TABS.includes(tab) && <MonthNav month={month} onChange={setMonth} />}
+          {MONTH_TABS.includes(tab) && <MonthNav month={month} onChange={changeMonth} heading={tabLabel(tab)} />}
 
           {tab === "overview" && <OverviewTab key={`o-${month}`} month={month} onGo={go} />}
 
@@ -273,7 +326,7 @@ export function AppShell() {
               key={`p-${month}`}
               month={month}
               onGoMonth={(m) => {
-                setMonth(m);
+                changeMonth(m);
                 window.scrollTo(0, 0);
               }}
             />
@@ -281,17 +334,23 @@ export function AppShell() {
 
           {tab === "transactions" && <TransactionsTab key={`t-${month}`} month={month} />}
 
-          {tab === "sharing" && <SharingTab />}
+          {tab === "sharing" && (
+            <>
+              {/* SharingTab draws its own visible title. */}
+              <h1 tabIndex={-1} className="sr-only">Sharing</h1>
+              <SharingTab />
+            </>
+          )}
 
           {tab === "accounts" && <AccountsView />}
 
           {tab === "settings" && (
             <div>
-              <div className="mb-5 font-serif-d text-xl font-medium">Settings</div>
+              <PageTitle>Settings</PageTitle>
               <SettingsTab />
             </div>
           )}
-        </div>
+        </main>
       </div>
 
       {/* mobile bottom tab bar */}

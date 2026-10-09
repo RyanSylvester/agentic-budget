@@ -419,7 +419,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved,
               <button
                 onClick={voidTxn}
                 disabled={busy}
-                className="rounded-[var(--r-pill)] bg-[var(--danger)] px-4 py-2 text-md font-medium text-white transition hover:opacity-90 active:scale-95"
+                className="rounded-[var(--r-pill)] bg-[var(--danger)] px-4 py-2 text-md font-medium text-[var(--on-danger)] transition hover:opacity-90 active:scale-95"
               >
                 {busy ? "Voiding…" : "Void"}
               </button>

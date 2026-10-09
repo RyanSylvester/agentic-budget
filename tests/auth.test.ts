@@ -520,7 +520,7 @@ describe("auth endpoints", () => {
     const listA = (await (await call(app, "GET", "/api/auth/agent-tokens", { cookie: cookieA })).json()) as any;
     expect(listA.tokens.map((t: any) => t.name).sort()).toEqual(["cli", "home"]);
     for (const t of listA.tokens) {
-      expect(Object.keys(t).sort()).toEqual(["created_at", "id", "name"]);
+      expect(Object.keys(t).sort()).toEqual(["created_at", "id", "last_used_at", "name"]);
     }
     const listB = (await (await call(app, "GET", "/api/auth/agent-tokens", { cookie: cookieB })).json()) as any;
     expect(listB.tokens).toEqual([]);
@@ -532,6 +532,34 @@ describe("auth endpoints", () => {
         .status
     ).toBe(401);
     expect((await call(app, "GET", "/api/auth/agent-tokens")).status).toBe(401);
+  });
+
+  test("agent token last_used_at: null until used, then refreshed at most hourly", async () => {
+    const { app, db } = await setupApp();
+    await signupFirst(app);
+    const cookie = await loginAs(app);
+    const { id, token } = await mintAgentToken(app, cookie, "cli");
+    const list = async () =>
+      ((await (await call(app, "GET", "/api/auth/agent-tokens", { cookie })).json()) as any).tokens[0].last_used_at;
+    expect(await list()).toBeNull();
+
+    const bearer = { headers: { Authorization: `Bearer ${token}` } };
+    expect((await call(app, "GET", "/api/overview", bearer)).status).toBe(200);
+    const first = await list();
+    expect(typeof first).toBe("string");
+    expect(Date.now() - Date.parse(first)).toBeLessThan(60_000);
+
+    // A recent stamp is left alone: no write per request.
+    const recent = new Date(Date.now() - 5 * 60_000).toISOString();
+    await db.run("UPDATE agent_tokens SET last_used_at = ? WHERE id = ?", recent, id);
+    await call(app, "GET", "/api/overview", bearer);
+    expect(await list()).toBe(recent);
+
+    // An hour-old stamp is refreshed.
+    const stale = new Date(Date.now() - 2 * 3600_000).toISOString();
+    await db.run("UPDATE agent_tokens SET last_used_at = ? WHERE id = ?", stale, id);
+    await call(app, "GET", "/api/overview", bearer);
+    expect(Date.parse(await list())).toBeGreaterThan(Date.parse(stale) + 3600_000);
   });
 
   test("invite codes can be minted by a session or an agent token, never anonymously", async () => {

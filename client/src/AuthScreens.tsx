@@ -56,6 +56,64 @@ const labelCls = "mb-1.5 block text-sm font-medium text-[var(--ink-2)]";
 // 16px, off the type scale: anything smaller makes iOS Safari zoom on focus.
 const inputCls = "field w-full px-3 py-2.5 text-[16px]";
 
+/** Enforced here only: the server receives the Argon2id output, never the
+ *  password, so it cannot see the length. */
+export const MIN_PASSWORD_LENGTH = 8;
+
+/** Invite codes are 32 hex characters. People paste them from chats with
+ *  stray spaces, dashes or capitals, so tidy those before checking. */
+export function normaliseInviteCode(raw: string): string {
+  return raw.replace(/[\s-]+/g, "").toLowerCase();
+}
+
+export const validInviteCode = (code: string) => /^[0-9a-f]{32}$/.test(code);
+
+/** ?invite=CODE from a shared invite link, if any. */
+export function inviteFromUrl(search: string = window.location.search): string {
+  return new URLSearchParams(search).get("invite") ?? "";
+}
+
+/** Password field with a Show/Hide toggle, so a long password can be
+ *  checked on a phone keyboard before submitting. */
+function PasswordInput({ id, value, onChange, autoComplete, shown, onToggle, describedBy }: {
+  id: string;
+  value: string;
+  onChange: (v: string) => void;
+  autoComplete: string;
+  shown: boolean;
+  onToggle?: () => void;
+  describedBy?: string;
+}) {
+  return (
+    <div className="relative">
+      <input
+        id={id}
+        type={shown ? "text" : "password"}
+        autoComplete={autoComplete}
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-describedby={describedBy}
+        className={`${inputCls}${onToggle ? " pr-16" : ""}`}
+      />
+      {onToggle && (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-pressed={shown}
+          aria-controls={id}
+          className="absolute inset-y-0 right-0 px-3 text-sm font-medium text-[var(--ink-2)]"
+        >
+          {shown ? "Hide" : "Show"}
+          <span className="sr-only"> password</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
 async function postJson(url: string, body: unknown): Promise<Response> {
   return fetch(url, {
     method: "POST",
@@ -72,6 +130,7 @@ export function LoginScreen({ onAuthenticated, onSignup, notice, deriveKey = der
 }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -132,13 +191,13 @@ export function LoginScreen({ onAuthenticated, onSignup, notice, deriveKey = der
         </div>
         <div>
           <label className={labelCls} htmlFor="login-password">Password</label>
-          <input
+          <PasswordInput
             id="login-password"
-            type="password"
             autoComplete="current-password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className={inputCls}
+            onChange={setPassword}
+            shown={showPassword}
+            onToggle={() => setShowPassword((v) => !v)}
           />
         </div>
         {error && (
@@ -162,22 +221,41 @@ export function LoginScreen({ onAuthenticated, onSignup, notice, deriveKey = der
   );
 }
 
-export function SignupScreen({ onSignup, onBackToLogin, deriveKey = deriveKdfKey }: {
+export function SignupScreen({ onSignup, onBackToLogin, firstAccount = false, deriveKey = deriveKdfKey }: {
   onSignup: () => void;
   onBackToLogin?: () => void;
+  /** No accounts exist yet: this one bootstraps the budget and needs no
+   *  invite code, so the field is hidden. */
+  firstAccount?: boolean;
   deriveKey?: DeriveKey;
 }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [inviteCode, setInviteCode] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  // Prefilled from an invite link (/?invite=CODE).
+  const [inviteCode, setInviteCode] = useState(() => inviteFromUrl());
+  const [inviteTouched, setInviteTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const code = normaliseInviteCode(inviteCode);
+  const codeLooksWrong = !firstAccount && code !== "" && !validInviteCode(code);
+  const passwordShort = password.length > 0 && password.length < MIN_PASSWORD_LENGTH;
+
   const submit = async () => {
     if (busy || !username.trim() || !password) return;
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setError(`Use at least ${MIN_PASSWORD_LENGTH} characters for your password.`);
+      return;
+    }
     if (password !== confirm) {
       setError("Passwords don't match.");
+      return;
+    }
+    if (!firstAccount && !validInviteCode(code)) {
+      setInviteTouched(true);
+      setError(code ? "That code doesn't look right." : "Enter your invite code.");
       return;
     }
     setBusy(true);
@@ -185,12 +263,11 @@ export function SignupScreen({ onSignup, onBackToLogin, deriveKey = deriveKdfKey
     try {
       const salt = randomSaltHex();
       const kdfKey = await deriveKey(password, salt, "m=19456,t=2,p=1");
-      const code = inviteCode.trim();
       const r = await postJson("/api/auth/signup", {
         username: username.trim(),
         salt,
         kdfKey,
-        ...(code ? { inviteCode: code } : {}),
+        ...(!firstAccount && code ? { inviteCode: code } : {}),
       });
       if (r.status === 400) {
         const body = (await r.json().catch(() => null)) as { error?: string } | null;
@@ -200,6 +277,13 @@ export function SignupScreen({ onSignup, onBackToLogin, deriveKey = deriveKdfKey
       } else if (!r.ok) {
         throw new Error("signup");
       } else {
+        // The invite is spent: drop it from the URL so a refresh or a
+        // bookmark does not carry it around.
+        const url = new URL(window.location.href);
+        if (url.searchParams.has("invite")) {
+          url.searchParams.delete("invite");
+          window.history.replaceState(null, "", url);
+        }
         onSignup();
       }
     } catch {
@@ -235,41 +319,58 @@ export function SignupScreen({ onSignup, onBackToLogin, deriveKey = deriveKdfKey
         </div>
         <div>
           <label className={labelCls} htmlFor="signup-password">Password</label>
-          <input
+          <PasswordInput
             id="signup-password"
-            type="password"
             autoComplete="new-password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className={inputCls}
+            onChange={setPassword}
+            shown={showPassword}
+            onToggle={() => setShowPassword((v) => !v)}
+            describedBy="signup-password-hint"
           />
+          <p
+            id="signup-password-hint"
+            className={`mt-1.5 text-xs ${passwordShort ? "text-[var(--danger)]" : "text-[var(--muted)]"}`}
+          >
+            At least {MIN_PASSWORD_LENGTH} characters
+            {passwordShort ? ` (${MIN_PASSWORD_LENGTH - password.length} more)` : ""}.
+          </p>
         </div>
         <div>
           <label className={labelCls} htmlFor="signup-confirm">Confirm password</label>
-          <input
+          <PasswordInput
             id="signup-confirm"
-            type="password"
             autoComplete="new-password"
             value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            className={inputCls}
+            onChange={setConfirm}
+            shown={showPassword}
           />
         </div>
-        <div>
-          <label className={labelCls} htmlFor="signup-invite">Invite code</label>
-          <input
-            id="signup-invite"
-            type="text"
-            autoComplete="off"
-            value={inviteCode}
-            onChange={(e) => setInviteCode(e.target.value)}
-            className={inputCls}
-            placeholder="Leave blank for the very first account"
-          />
-          <p className="mt-1.5 text-xs text-[var(--muted)]">
-            Once an account exists, a code from an existing user is required.
-          </p>
-        </div>
+        {!firstAccount && (
+          <div>
+            <label className={labelCls} htmlFor="signup-invite">Invite code (required)</label>
+            <input
+              id="signup-invite"
+              type="text"
+              autoComplete="off"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              value={inviteCode}
+              onChange={(e) => setInviteCode(e.target.value)}
+              onBlur={() => setInviteTouched(true)}
+              aria-invalid={inviteTouched && codeLooksWrong}
+              aria-describedby="signup-invite-hint"
+              className={`${inputCls} t-nums`}
+            />
+            <p
+              id="signup-invite-hint"
+              className={`mt-1.5 text-xs ${inviteTouched && codeLooksWrong ? "text-[var(--danger)]" : "text-[var(--muted)]"}`}
+            >
+              {inviteTouched && codeLooksWrong ? "That code doesn't look right." : "Ask the person who invited you."}
+            </p>
+          </div>
+        )}
         {error && (
           <div role="alert" className="text-sm text-[var(--danger)]">
             {error}

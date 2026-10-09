@@ -13,7 +13,7 @@ export function Skeleton({ className = "" }: { className?: string }) {
 
 export function FetchError({ onRetry, label = "Couldn't load this." }: { onRetry: () => void; label?: string }) {
   return (
-    <div className="card p-5 text-center">
+    <div role="alert" className="card p-5 text-center">
       <p className="text-md text-[var(--muted)]">{label}</p>
       <button onClick={onRetry} className="btn-ink mt-3 px-4 py-2 text-md">
         Try again
@@ -22,9 +22,16 @@ export function FetchError({ onRetry, label = "Couldn't load this." }: { onRetry
   );
 }
 
-// Away from the running month, a "Back to <Month>" pill sits under the label
-// so the way home is one tap instead of counting chevrons.
-export function MonthNav({ month, onChange }: { month: string; onChange: (m: string) => void }) {
+/** Month stepper. With `heading` (the tab's name) the month label is the
+ *  page's h1, read as "Pots, October 2026": the tab name is visually hidden
+ *  because the tab bar and the page already show it. Away from the running
+ *  month, a "Back to <Month>" pill sits under the label so the way home is
+ *  one tap instead of counting chevrons. */
+export function MonthNav({ month, onChange, heading }: {
+  month: string;
+  onChange: (m: string) => void;
+  heading?: string;
+}) {
   // Chevron glyph size, not text: kept off the type scale.
   const btn =
     "flex h-11 w-11 items-center justify-center text-[20px] text-[var(--ink-2)] transition active:scale-95";
@@ -35,7 +42,14 @@ export function MonthNav({ month, onChange }: { month: string; onChange: (m: str
         ‹
       </button>
       <div className="flex flex-col items-center gap-1">
-        <span className="text-lg font-medium">{monthLabel(month)}</span>
+        {heading ? (
+          <h1 tabIndex={-1} className="text-lg font-medium outline-none">
+            <span className="sr-only">{heading}, </span>
+            {monthLabel(month)}
+          </h1>
+        ) : (
+          <span className="text-lg font-medium">{monthLabel(month)}</span>
+        )}
         {month !== current && (
           <button
             onClick={() => onChange(current)}
@@ -54,12 +68,12 @@ export function MonthNav({ month, onChange }: { month: string; onChange: (m: str
 
 /* ---------- sheet (modal) ---------- */
 
-// Bottom sheet on mobile, centered dialog on desktop. Backdrop click or
-// Escape dismisses. Keyboard and screen-reader behaviour of a real modal:
-// focus moves into the sheet on open (to an autoFocus field if there is one,
-// otherwise the panel itself, so phones do not pop the keyboard), Tab and
-// Shift+Tab stay inside, the page behind does not scroll, and focus returns
-// to whatever opened the sheet when it closes.
+// Bottom sheet on mobile, centered dialog on desktop. Backdrop click, Escape
+// or the Close button in the corner dismisses. Keyboard and screen-reader
+// behaviour of a real modal: focus moves into the sheet on open (to an
+// autoFocus field if there is one, otherwise the panel itself, so phones do
+// not pop the keyboard), Tab and Shift+Tab stay inside, the page behind does
+// not scroll, and focus returns to whatever opened the sheet when it closes.
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -117,6 +131,15 @@ export function Sheet({ label, onClose, children }: { label: string; onClose: ()
         className="absolute inset-x-0 bottom-0 max-h-[92dvh] overflow-y-auto rounded-t-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--surface)] p-5 pb-[calc(env(safe-area-inset-bottom)+1.25rem)] outline-none sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:w-full sm:max-w-md sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[var(--r-lg)]"
         style={{ boxShadow: "var(--shadow-elev)" }}
       >
+        {/* A visible way out for touch users, who have no Escape key and may
+            not guess that the backdrop dismisses. */}
+        <button
+          type="button"
+          onClick={onClose}
+          className="btn-ghost absolute right-3 top-3 z-10 bg-[var(--surface)] px-3 py-1 text-sm"
+        >
+          Close
+        </button>
         {children}
       </div>
     </div>

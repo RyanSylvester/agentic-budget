@@ -12,8 +12,8 @@ const me = { authenticated: true, setupRequired: false, username: "owner" };
 
 const twoTokens = {
   tokens: [
-    { id: 1, name: "Home server", created_at: "2026-11-02T14:10:00.000Z" },
-    { id: 2, name: "Laptop CLI", created_at: "2026-10-18T09:32:00.000Z" },
+    { id: 1, name: "Home server", created_at: "2026-09-02T14:10:00.000Z", last_used_at: new Date(Date.now() - 2 * 3600_000).toISOString() },
+    { id: 2, name: "Laptop CLI", created_at: "2026-08-18T09:32:00.000Z", last_used_at: null },
   ],
 };
 
@@ -138,4 +138,50 @@ RevokeFlow.parameters = {
       },
     } satisfies MockApiConfig;
   })(),
+};
+
+export const RevokeFails: Story = {
+  parameters: {
+    mockApi: {
+      get: { ...baseGet, "/api/auth/agent-tokens": twoTokens },
+    } satisfies MockApiConfig,
+    docs: {
+      description: {
+        story:
+          "Confirming moves focus to Keep, the safe choice. A failed revoke keeps the row and says so inline instead of failing silently. (Interaction test.)",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const [trigger] = await canvas.findAllByRole("button", { name: "Revoke…" });
+    await userEvent.click(trigger);
+    await waitFor(() => expect(canvas.getByRole("button", { name: "Keep" })).toHaveFocus());
+    await userEvent.click(canvas.getByRole("button", { name: "Revoke" }));
+    await expect(await canvas.findByRole("alert")).toHaveTextContent("Couldn't revoke. Try again.");
+    await expect(canvas.getByText("Home server")).toBeInTheDocument();
+    await userEvent.click(canvas.getByRole("button", { name: "Keep" }));
+    await waitFor(() => expect(canvas.getAllByRole("button", { name: "Revoke…" })[0]).toHaveFocus());
+  },
+};
+
+export const InviteFlow: Story = {
+  parameters: {
+    mockApi: {
+      get: { ...baseGet, "/api/auth/agent-tokens": twoTokens },
+      post: { "/api/auth/invite-codes": { ok: true, code: "0123456789abcdef0123456789abcdef" } },
+    } satisfies MockApiConfig,
+    docs: {
+      description: {
+        story: "Create invite mints a single-use code and offers the code and a /?invite= link to copy. (Interaction test.)",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Create invite" }));
+    await expect(await canvas.findByText("0123456789abcdef0123456789abcdef")).toBeInTheDocument();
+    await expect(canvas.getByText(/\?invite=0123456789abcdef0123456789abcdef$/)).toBeInTheDocument();
+    await expect(canvas.getByRole("button", { name: "Copy link" })).toBeInTheDocument();
+  },
 };
