@@ -83,7 +83,7 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
             ? `Set planned income for ${pot.name}, currently ${money(pot.assignedCents)}`
             : `Assign to ${pot.name}, currently ${money(pot.assignedCents)}`
         }
-        className="t-nums w-24 rounded-[var(--r-sm)] border border-transparent px-2 py-1.5 text-left text-[15px] text-[var(--ink)] underline decoration-[var(--hairline-strong)] decoration-dotted underline-offset-4 transition hover:bg-[var(--surface)] active:scale-95"
+        className="t-nums w-24 rounded-[var(--r-sm)] border border-transparent px-2 py-1.5 text-left text-md text-[var(--ink)] underline decoration-[var(--hairline-strong)] decoration-dotted underline-offset-4 transition hover:bg-[var(--surface)] active:scale-95"
       >
         {money(pot.assignedCents)}
       </button>
@@ -128,9 +128,9 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
               setFailed(null);
             }
           }}
-          className="w-24 py-1.5 text-[15px]"
+          className="w-24 py-1.5 text-md"
         />
-        {failed && <span className="text-[13px] text-[var(--danger)]">{failed}</span>}
+        {failed && <span className="text-sm text-[var(--danger)]">{failed}</span>}
       </span>
       {showQuick && (
         <span className="flex gap-1.5">
@@ -138,7 +138,7 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
             type="button"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => fillFrom(hist.lastMonth.cents)}
-            className="t-nums rounded-full border border-[var(--hairline-strong)] px-2 py-0.5 text-[12px] text-[var(--ink-2)] transition hover:bg-[var(--bg-sunken)] active:scale-95"
+            className="t-nums rounded-full border border-[var(--hairline-strong)] px-2 py-0.5 text-xs text-[var(--ink-2)] transition hover:bg-[var(--bg-sunken)] active:scale-95"
           >
             Last month · {money(hist.lastMonth.cents)}
           </button>
@@ -146,7 +146,7 @@ export function AssignCell({ pot, month, onAssigned, purpose = "assign" }: { pot
             type="button"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => fillFrom(hist.avg3moCents)}
-            className="t-nums rounded-full border border-[var(--hairline-strong)] px-2 py-0.5 text-[12px] text-[var(--ink-2)] transition hover:bg-[var(--bg-sunken)] active:scale-95"
+            className="t-nums rounded-full border border-[var(--hairline-strong)] px-2 py-0.5 text-xs text-[var(--ink-2)] transition hover:bg-[var(--bg-sunken)] active:scale-95"
           >
             3-mo avg · {money(hist.avg3moCents)}
           </button>
@@ -166,7 +166,7 @@ export function SplitTag({ p }: { p: Pot }) {
     : p.sharePct === 50 ? "split 50/50"
     : `${p.contactName ?? "Shared"} ${p.sharePct}%`;
   return (
-    <span className="t-nums ml-2 inline-flex items-center rounded-[var(--r-pill)] border border-transparent bg-[var(--accent-soft)] px-2 py-0.5 align-middle text-[11px] font-medium text-[var(--accent)]">
+    <span className="t-nums ml-2 inline-flex items-center rounded-[var(--r-pill)] border border-transparent bg-[var(--accent-soft)] px-2 py-0.5 align-middle text-2xs font-medium text-[var(--accent)]">
       {label}
     </span>
   );
@@ -188,9 +188,9 @@ export function PotNameCell({ p, onEdit }: { p: Pot; onEdit?: () => void }) {
   return (
     <div className="min-w-0">
       <div className="flex items-baseline gap-2">
-        <div className="truncate text-[15px] font-semibold">{p.name}</div>
+        <div className="truncate text-md font-semibold">{p.name}</div>
         {onEdit && (
-          <button onClick={onEdit} aria-label={`Edit ${p.name}`} className="-m-2 shrink-0 cursor-pointer p-2 text-[12px] text-[var(--muted)] hover:text-[var(--ink)] hover:underline">
+          <button onClick={onEdit} aria-label={`Edit ${p.name}`} className="-m-2 shrink-0 cursor-pointer p-2 text-xs text-[var(--muted)] hover:text-[var(--ink)] hover:underline">
             Edit
           </button>
         )}
@@ -229,7 +229,7 @@ export function SinkingLine({ sinking }: { sinking: NonNullable<Pot["sinking"]> 
       >
         <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: fillColor }} />
       </div>
-      <div className="mt-0.5 text-[12px] font-medium" style={{ color: lineColor }}>
+      <div className="mt-0.5 text-xs font-medium" style={{ color: lineColor }}>
         {line}
       </div>
     </div>
@@ -239,7 +239,7 @@ export function SinkingLine({ sinking }: { sinking: NonNullable<Pot["sinking"]> 
 export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[]; month: string; onAssigned: () => void; onEditPot?: (pot: Pot) => void }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   if (pots.length === 0)
-    return <p className="text-[17px] italic text-[var(--muted)]">No pots yet. They'll appear here once the budget is set up.</p>;
+    return <p className="text-lg italic text-[var(--muted)]">No pots yet. They'll appear here once the budget is set up.</p>;
 
   const earners = pots.filter((p) => p.assignable);
   const income = pots.filter((p) => !p.assignable);
@@ -288,15 +288,16 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
               className="flex w-full items-baseline justify-between gap-3 px-4 py-3 text-left sm:px-5"
             >
               <span className="flex min-w-0 flex-1 items-baseline gap-2">
-                <span aria-hidden="true" className="shrink-0 text-[13px] text-[var(--faint)]">{isOpen ? "▾" : "▸"}</span>
-                <span className="truncate text-[17px] font-semibold text-[var(--ink)]">{titleCase(g.name)}</span>
+                <span aria-hidden="true" className="shrink-0 text-sm text-[var(--faint)]">{isOpen ? "▾" : "▸"}</span>
+                <span className="truncate text-lg font-semibold text-[var(--ink)]">{titleCase(g.name)}</span>
               </span>
               <span className="t-nums flex shrink-0 items-baseline gap-2 whitespace-nowrap">
+                {/* 22px sits between text-lg and text-xl; text-xl would make every group row taller. */}
                 <span className={`text-[22px] font-semibold ${assigned === 0 ? "text-[var(--muted)]" : "text-[var(--ink)]"}`}>
                   {moneyGrouped(assigned)}
                 </span>
                 {share !== "" && (
-                  <span className="rounded-[var(--r-pill)] border border-[var(--hairline-strong)] px-2 py-0.5 text-[12px] font-semibold text-[var(--ink-2)]">
+                  <span className="rounded-[var(--r-pill)] border border-[var(--hairline-strong)] px-2 py-0.5 text-xs font-semibold text-[var(--ink-2)]">
                     {share}
                   </span>
                 )}
@@ -314,7 +315,7 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
                     </div>
                     <div className="mt-2 flex items-center gap-4">
                       <AssignCell pot={p} month={month} onAssigned={onAssigned} />
-                      <span className="t-nums text-[13px] text-[var(--ink-2)]">
+                      <span className="t-nums text-sm text-[var(--ink-2)]">
                         {money(p.spentCents)}
                         <SplitTag p={p} />
                       </span>
@@ -324,7 +325,7 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
                   <div className="hidden grid-cols-[minmax(0,1fr)_130px_170px_120px] items-center gap-3 sm:grid">
                     <PotNameCell p={p} onEdit={onEditPot ? () => onEditPot(p) : undefined} />
                     <AssignCell pot={p} month={month} onAssigned={onAssigned} />
-                    <span className="t-nums whitespace-nowrap text-[15px]">
+                    <span className="t-nums whitespace-nowrap text-md">
                       {money(p.spentCents)}
                       <SplitTag p={p} />
                     </span>
@@ -360,18 +361,18 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
       </div>
       {income.length > 0 && (
         <div className="mt-8">
-          <div className="mb-1 text-[15px] font-semibold">Income</div>
-          <p className="mb-2 text-[13px] text-[var(--muted)]">Money in. Set planned income when you fill out the month; received shows what has actually landed. Planned income is just your expectation; only actual inflows become ready to assign.</p>
+          <div className="mb-1 text-md font-semibold">Income</div>
+          <p className="mb-2 text-sm text-[var(--muted)]">Money in. Set planned income when you fill out the month; received shows what has actually landed. Planned income is just your expectation; only actual inflows become ready to assign.</p>
           {income.map((p) => (
             <div key={p.id} className="flex items-center justify-between gap-3 border-b border-[var(--hairline)] py-3">
               <PotNameCell p={p} onEdit={onEditPot ? () => onEditPot(p) : undefined} />
               <div className="flex shrink-0 items-center gap-4">
                 <span className="flex items-baseline gap-1.5">
-                  <span className="text-[12px] text-[var(--muted)]">planned</span>
+                  <span className="text-xs text-[var(--muted)]">planned</span>
                   <AssignCell pot={p} month={month} onAssigned={onAssigned} purpose="planned" />
                 </span>
-                <span className="t-nums whitespace-nowrap text-[13px] text-[var(--muted)]">
-                  <span className="text-[12px] text-[var(--muted)]">received </span>
+                <span className="t-nums whitespace-nowrap text-sm text-[var(--muted)]">
+                  <span className="text-xs text-[var(--muted)]">received </span>
                   {money(p.receivedCents)}
                 </span>
               </div>

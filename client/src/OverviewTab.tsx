@@ -11,7 +11,7 @@ import { Eyebrow, FetchError, Skeleton } from "./ui";
  * happens; at zero it settles into a quiet confirmation. */
 export function RtaLine({ cents, onAssign }: { cents: number; onAssign?: () => void }) {
   if (cents === 0) {
-    return <div className="mt-3 text-[15px] text-[var(--muted)]">Every dollar is assigned</div>;
+    return <div className="mt-3 text-md text-[var(--muted)]">Every dollar is assigned</div>;
   }
   const over = cents < 0;
   const body = (
@@ -22,11 +22,11 @@ export function RtaLine({ cents, onAssign }: { cents: number; onAssign?: () => v
       <span className="text-[var(--ink-2)]">{over ? " over-assigned" : " ready to assign"}</span>
     </>
   );
-  if (!onAssign) return <div className="mt-3 text-[15px]">{body}</div>;
+  if (!onAssign) return <div className="mt-3 text-md">{body}</div>;
   return (
     <button
       onClick={onAssign}
-      className={`mt-3 inline-flex min-h-11 items-center gap-1 rounded-[var(--r-pill)] pl-4 pr-3 text-[15px] transition active:scale-[0.98] ${
+      className={`mt-3 inline-flex min-h-11 items-center gap-1 rounded-[var(--r-pill)] pl-4 pr-3 text-md transition active:scale-[0.98] ${
         over ? "bg-[var(--danger-soft)]" : "bg-[var(--accent-soft)]"
       }`}
     >
@@ -61,12 +61,13 @@ export function Hero({ overview, isCurrent, loading, onAssign }: {
   return (
     <div className="pb-1 pt-2">
       {!isCurrent && (
-        <div className="text-[17px] text-[var(--muted)]">final for the month</div>
+        <div className="text-lg text-[var(--muted)]">final for the month</div>
       )}
+      {/* Hero figure: deliberately larger than the top of the type scale. */}
       <div className="t-nums font-serif-d mt-1 text-[56px] font-light leading-none tracking-[-0.02em]">
         {money(spent)}
       </div>
-      <div className="mt-2.5 text-[15px]">
+      <div className="mt-2.5 text-md">
         {isCurrent ? (
           <>
             <span className="t-nums font-medium text-[var(--ink-2)]">{money(Math.round(daily))}/day</span>
@@ -99,7 +100,7 @@ export function RecentActivity({ txns, loading }: { txns: RecentTransaction[]; l
     return (
       <div>
         <div className="mb-2"><Eyebrow>Recent activity</Eyebrow></div>
-        <p className="text-[17px] italic text-[var(--muted)]">Nothing here yet.</p>
+        <p className="text-lg italic text-[var(--muted)]">Nothing here yet.</p>
       </div>
     );
   }
@@ -110,13 +111,13 @@ export function RecentActivity({ txns, loading }: { txns: RecentTransaction[]; l
         {visible.slice(0, 8).map((t) => (
           <li key={t.id} className="flex items-center justify-between gap-3 border-b border-[var(--hairline)] py-2.5 last:border-0">
             <div className="min-w-0">
-              <div className="truncate text-[15px]">{t.description}</div>
-              <div className="mt-0.5 text-[13px] text-[var(--muted)]">
+              <div className="truncate text-md">{t.description}</div>
+              <div className="mt-0.5 text-sm text-[var(--muted)]">
                 {fmtDate(t.date)}
                 {t.split_with_contact ? ` · split${t.split_contact_name ? ` with ${t.split_contact_name}` : ""}` : ""}
               </div>
             </div>
-            <span className={`t-nums shrink-0 text-[15px] ${t.user_cents < 0 ? "" : "font-medium text-[var(--success)]"}`}>
+            <span className={`t-nums shrink-0 text-md ${t.user_cents < 0 ? "" : "font-medium text-[var(--success)]"}`}>
               {money(t.user_cents)}
             </span>
           </li>
@@ -195,14 +196,14 @@ export function AttentionCard({ attention, overview, accounts, onGo }: {
       <ul>
         {items.map((it, i) => (
           <li key={i} className="border-b border-[var(--hairline)] last:border-0">
-            <button onClick={() => onGo(it.tab)} className="-mx-2 flex w-[calc(100%+1rem)] items-center rounded-[var(--r-md)] px-2 py-2.5 text-left text-[15px] transition hover:bg-[var(--bg-sunken)] active:scale-[0.99] active:bg-[var(--bg-sunken)]">
+            <button onClick={() => onGo(it.tab)} className="-mx-2 flex w-[calc(100%+1rem)] items-center rounded-[var(--r-md)] px-2 py-2.5 text-left text-md transition hover:bg-[var(--bg-sunken)] active:scale-[0.99] active:bg-[var(--bg-sunken)]">
               <span className="flex items-center gap-2.5">
                 <span aria-hidden className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--warning)]" />
                 {/* One flex item for the whole label: otherwise each text and
                     amount fragment becomes its own item and picks up the gap. */}
                 <span className="min-w-0">{it.label}</span>
               </span>
-              <span aria-hidden className="ml-auto pl-3 text-[17px] text-[var(--muted)]">›</span>
+              <span aria-hidden className="ml-auto pl-3 text-lg text-[var(--muted)]">›</span>
             </button>
           </li>
         ))}

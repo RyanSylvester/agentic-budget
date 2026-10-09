@@ -43,7 +43,7 @@ export function MoneyInput({
     <span className="relative inline-flex items-center">
       <span
         aria-hidden
-        className="pointer-events-none absolute left-2.5 select-none text-[15px] text-[var(--muted)]"
+        className="pointer-events-none absolute left-2.5 select-none text-md text-[var(--muted)]"
       >
         $
       </span>
@@ -63,7 +63,7 @@ export function MoneyInput({
       {computed !== null && (
         <span
           aria-hidden
-          className="t-nums pointer-events-none absolute left-0 top-full z-10 mt-1 whitespace-nowrap rounded-[var(--r-sm)] border border-[var(--hairline)] bg-[var(--surface)] px-2 py-0.5 text-[12px] text-[var(--ink-2)] shadow-sm"
+          className="t-nums pointer-events-none absolute left-0 top-full z-10 mt-1 whitespace-nowrap rounded-[var(--r-sm)] border border-[var(--hairline)] bg-[var(--surface)] px-2 py-0.5 text-xs text-[var(--ink-2)] shadow-sm"
         >
           = {computed.toFixed(2)}
         </span>

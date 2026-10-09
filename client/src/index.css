@@ -1,5 +1,24 @@
 @import "tailwindcss";
 
+/* Type scale. Replaces Tailwind's default font-size scale, so text-xs/sm/lg/
+   xl/2xl mean the Mist sizes below, not Tailwind's. No line-heights are paired
+   with the sizes: like the arbitrary text-[Npx] values they replace, they
+   leave line-height to the element (inherited, or set with leading-*). Use
+   these over one-off sizes; text-2xs is for dense meta only (badges, tab bar
+   labels, chart ticks). */
+@theme {
+  --text-*: initial;
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 15px;
+  --text-lg: 17px;
+  --text-xl: 24px;
+  /* Headline money figures (pot sheet, accounts, sharing). */
+  --text-figure: 32px;
+  --text-2xl: 42px;
+}
+
 /* Mist design system (light) with Dusk as its dark mode. Light/dark via
    variable swap: prefers-color-scheme by default, overridable with a
    data-theme="light" | "dark" attribute on <html> or any wrapper (Storybook
@@ -10,14 +29,6 @@
   --r-md: 14px;
   --r-lg: 20px;
   --r-pill: 999px;
-
-  /* Type scale. Prefer these over one-off sizes in new code. */
-  --text-xs: 12px;
-  --text-sm: 13px;
-  --text-md: 15px;
-  --text-lg: 17px;
-  --text-xl: 24px;
-  --text-2xl: 42px;
 
   --font-sans: "Onest", -apple-system, "SF Pro Text", "Segoe UI", sans-serif;
   --font-display: var(--font-sans);
@@ -217,7 +228,7 @@
     letter-spacing: -0.02em;
   }
   .eyebrow {
-    font-size: 12px;
+    font-size: var(--text-xs);
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;

@@ -73,16 +73,16 @@ function SheetDemo() {
   const [open, setOpen] = useState(false);
   return (
     <div>
-      <button onClick={() => setOpen(true)} className="btn-ink px-4 py-2 text-[15px]">
+      <button onClick={() => setOpen(true)} className="btn-ink px-4 py-2 text-md">
         Open sheet
       </button>
       {open && (
         <Sheet label="Demo sheet" onClose={() => setOpen(false)}>
-          <div className="mb-3 text-[17px] font-semibold">Demo sheet</div>
-          <input aria-label="Name" className="field w-full px-3 py-2.5 text-[15px]" />
+          <div className="mb-3 text-lg font-semibold">Demo sheet</div>
+          <input aria-label="Name" className="field w-full px-3 py-2.5 text-md" />
           <div className="mt-4 flex gap-2">
-            <button onClick={() => setOpen(false)} className="btn-ghost flex-1 py-2.5 text-[15px]">Cancel</button>
-            <button onClick={() => setOpen(false)} className="btn-ink flex-1 py-2.5 text-[15px]">Save</button>
+            <button onClick={() => setOpen(false)} className="btn-ghost flex-1 py-2.5 text-md">Cancel</button>
+            <button onClick={() => setOpen(false)} className="btn-ink flex-1 py-2.5 text-md">Save</button>
           </div>
         </Sheet>
       )}

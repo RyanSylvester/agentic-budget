@@ -145,7 +145,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
 
   return (
     <Sheet label={editing ? "Edit transaction" : "Add transaction"} onClose={onClose}>
-      <div className="mb-4 text-[17px] font-semibold">{editing ? "Edit transaction" : "Add transaction"}</div>
+      <div className="mb-4 text-lg font-semibold">{editing ? "Edit transaction" : "Add transaction"}</div>
       <div className="space-y-4">
         <div>
           <FormLabel>Description</FormLabel>
@@ -155,7 +155,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
             onChange={(e) => setDescription(e.target.value)}
             placeholder="What was it?"
             aria-label="Description"
-            className="field w-full px-3 py-2.5 text-[15px]"
+            className="field w-full px-3 py-2.5 text-md"
           />
         </div>
         <div>
@@ -175,7 +175,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
               onChange={setAmount}
               placeholder="0.00"
               ariaLabel="Amount"
-              className="min-w-0 flex-1 py-2.5 text-[15px]"
+              className="min-w-0 flex-1 py-2.5 text-md"
             />
           </div>
         </div>
@@ -187,7 +187,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
               value={date}
               onChange={(e) => setDate(e.target.value)}
               aria-label="Date"
-              className="field w-full px-3 py-2.5 text-[15px]"
+              className="field w-full px-3 py-2.5 text-md"
             />
           </div>
           <div>
@@ -196,7 +196,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
               value={accountId}
               onChange={(e) => setAccountId(e.target.value)}
               aria-label="Account"
-              className="field w-full px-3 py-2.5 text-[15px]"
+              className="field w-full px-3 py-2.5 text-md"
             >
               {accounts.map((a) => (
                 <option key={a.id} value={a.id}>{a.name}</option>
@@ -210,7 +210,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
             value={potId}
             onChange={(e) => setPotId(e.target.value)}
             aria-label="Pot"
-            className="field w-full px-3 py-2.5 text-[15px]"
+            className="field w-full px-3 py-2.5 text-md"
           >
             {isTransfer ? (
               <option value="">No pot</option>
@@ -228,7 +228,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
             ))}
           </select>
         </div>
-        <label className="flex cursor-pointer items-center gap-2.5 text-[15px]">
+        <label className="flex cursor-pointer items-center gap-2.5 text-md">
           <input
             type="checkbox"
             checked={isTransfer}
@@ -245,7 +245,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
         </label>
         {!isTransfer && (
           <div>
-            <label className="flex cursor-pointer items-center gap-2.5 text-[15px]">
+            <label className="flex cursor-pointer items-center gap-2.5 text-md">
               <input
                 type="checkbox"
                 checked={split}
@@ -263,7 +263,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
                       value={contactId}
                       onChange={(e) => setContactId(e.target.value)}
                       aria-label="Contact to split with"
-                      className="field t-nums w-full px-3 py-2.5 text-[15px]"
+                      className="field t-nums w-full px-3 py-2.5 text-md"
                     >
                       <option value="">Pick a contact…</option>
                       {contacts.map((c) => (
@@ -271,7 +271,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
                       ))}
                     </select>
                   ) : (
-                    <div className="text-[13px] text-[var(--muted)]">Add a contact in Sharing first.</div>
+                    <div className="text-sm text-[var(--muted)]">Add a contact in Sharing first.</div>
                   )}
                 </div>
                 <div>
@@ -281,7 +281,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
                     onChange={setShareAmount}
                     placeholder="0.00"
                     ariaLabel="Contact's share"
-                    className="w-40 py-2.5 text-[15px]"
+                    className="w-40 py-2.5 text-md"
                   />
                 </div>
               </div>
@@ -289,42 +289,42 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
           </div>
         )}
         {error && (
-          <p role="alert" className="text-[13px] font-medium text-[var(--danger)]">{error}</p>
+          <p role="alert" className="text-sm font-medium text-[var(--danger)]">{error}</p>
         )}
         <div className="flex items-center gap-2 pt-1">
           <button
             onClick={onClose}
-            className="px-4 py-2.5 text-[15px] font-medium text-[var(--muted)] transition hover:text-[var(--ink)] active:scale-95"
+            className="px-4 py-2.5 text-md font-medium text-[var(--muted)] transition hover:text-[var(--ink)] active:scale-95"
           >
             Cancel
           </button>
-          <button onClick={save} disabled={busy} className="btn-ink flex-1 px-4 py-2.5 text-[15px]">
+          <button onClick={save} disabled={busy} className="btn-ink flex-1 px-4 py-2.5 text-md">
             {busy ? "Saving…" : editing ? "Save changes" : "Add transaction"}
           </button>
         </div>
         {editing && !confirmingDelete && (
           <button
             onClick={() => setConfirmingDelete(true)}
-            className="text-[15px] font-medium text-[var(--danger)] transition hover:opacity-80 active:scale-95"
+            className="text-md font-medium text-[var(--danger)] transition hover:opacity-80 active:scale-95"
           >
             Delete transaction
           </button>
         )}
         {confirmingDelete && (
           <div className="rounded-[var(--r-md)] bg-[var(--danger-soft)] p-4">
-            <p className="text-[15px] font-medium">Delete this transaction?</p>
-            <p className="mt-1 text-[13px] text-[var(--ink-2)]">It disappears from every view. This cannot be undone.</p>
+            <p className="text-md font-medium">Delete this transaction?</p>
+            <p className="mt-1 text-sm text-[var(--ink-2)]">It disappears from every view. This cannot be undone.</p>
             <div className="mt-3 flex gap-2">
               <button
                 onClick={() => setConfirmingDelete(false)}
-                className="rounded-[var(--r-pill)] border border-[var(--hairline-strong)] px-4 py-2 text-[15px] font-medium transition active:scale-95"
+                className="rounded-[var(--r-pill)] border border-[var(--hairline-strong)] px-4 py-2 text-md font-medium transition active:scale-95"
               >
                 Keep it
               </button>
               <button
                 onClick={destroy}
                 disabled={busy}
-                className="rounded-[var(--r-pill)] bg-[var(--danger)] px-4 py-2 text-[15px] font-medium text-white transition hover:opacity-90 active:scale-95"
+                className="rounded-[var(--r-pill)] bg-[var(--danger)] px-4 py-2 text-md font-medium text-white transition hover:opacity-90 active:scale-95"
               >
                 {busy ? "Deleting…" : "Delete"}
               </button>
@@ -373,8 +373,8 @@ export function TransactionsTab({ month }: { month: string }) {
   return (
     <div>
       <div className="mb-5 flex items-center justify-between">
-        <div className="font-serif-d text-[24px] font-medium">Transactions</div>
-        <button onClick={openAdd} className="btn-ink px-4 py-2 text-[15px]">Add</button>
+        <div className="font-serif-d text-xl font-medium">Transactions</div>
+        <button onClick={openAdd} className="btn-ink px-4 py-2 text-md">Add</button>
       </div>
 
       <div className="mb-3">
@@ -384,7 +384,7 @@ export function TransactionsTab({ month }: { month: string }) {
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search transactions…"
           aria-label="Search transactions"
-          className="field w-full px-3 py-2.5 text-[15px]"
+          className="field w-full px-3 py-2.5 text-md"
         />
       </div>
       <div className="mb-5 flex flex-wrap items-center gap-2">
@@ -392,7 +392,7 @@ export function TransactionsTab({ month }: { month: string }) {
           value={potFilter}
           onChange={(e) => setPotFilter(e.target.value)}
           aria-label="Filter by pot"
-          className="field max-w-[200px] px-3 py-2 text-[15px]"
+          className="field max-w-[200px] px-3 py-2 text-md"
         >
           <option value="all">All pots</option>
           {groups.map((g) => (
@@ -429,19 +429,19 @@ export function TransactionsTab({ month }: { month: string }) {
       ) : filtered.length === 0 ? (
         txns.length === 0 ? (
           <div className="py-10 text-center">
-            <p className="text-[17px] italic text-[var(--muted)]">No transactions this month yet.</p>
-            <button onClick={openAdd} className="btn-ink mt-4 px-5 py-2.5 text-[15px]">Add one</button>
+            <p className="text-lg italic text-[var(--muted)]">No transactions this month yet.</p>
+            <button onClick={openAdd} className="btn-ink mt-4 px-5 py-2.5 text-md">Add one</button>
           </div>
         ) : (
           <div className="py-10 text-center">
-            <p className="text-[17px] italic text-[var(--muted)]">Nothing matches these filters.</p>
+            <p className="text-lg italic text-[var(--muted)]">Nothing matches these filters.</p>
             <button
               onClick={() => {
                 setQuery("");
                 setPotFilter("all");
                 setKind("all");
               }}
-              className="mt-4 px-4 py-2 text-[15px] font-medium text-[var(--ink-2)] underline decoration-[var(--hairline-strong)] underline-offset-4"
+              className="mt-4 px-4 py-2 text-md font-medium text-[var(--ink-2)] underline decoration-[var(--hairline-strong)] underline-offset-4"
             >
               Clear filters
             </button>
@@ -449,7 +449,7 @@ export function TransactionsTab({ month }: { month: string }) {
         )
       ) : (
         <>
-          <div className="mb-2 text-[13px] text-[var(--muted)]">
+          <div className="mb-2 text-sm text-[var(--muted)]">
             {filtered.length} transaction{filtered.length === 1 ? "" : "s"}
           </div>
           <ul>
@@ -460,8 +460,8 @@ export function TransactionsTab({ month }: { month: string }) {
                   className="-mx-2 flex w-[calc(100%+1rem)] items-center justify-between gap-3 rounded-[var(--r-md)] px-2 py-3 text-left transition hover:bg-[var(--bg-sunken)] active:bg-[var(--bg-sunken)]"
                 >
                   <div className="min-w-0">
-                    <div className="truncate text-[15px] font-medium">{t.description}</div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] text-[var(--muted)]">
+                    <div className="truncate text-md font-medium">{t.description}</div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-[var(--muted)]">
                       <span>{fmtDate(t.date)}</span>
                       <span aria-hidden>·</span>
                       <span className="truncate">{t.potName ?? "(no pot)"}</span>
@@ -470,7 +470,7 @@ export function TransactionsTab({ month }: { month: string }) {
                     </div>
                   </div>
                   <span
-                    className={`t-nums shrink-0 text-[15px] ${
+                    className={`t-nums shrink-0 text-md ${
                       t.amountCents > 0 && !t.isTransfer
                         ? "font-medium text-[var(--success)]"
                         : t.isTransfer
