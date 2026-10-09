@@ -1,9 +1,10 @@
 import { useApi } from "./api";
 import { SetupChecklist } from "./SetupChecklist";
 import { MONTHS, currentMonthLocal, fmtDate, money, monthLabel, shiftMonth } from "./format";
+import { overspentLabel, overspentSummary } from "./Overspent";
 import { type Tab } from "./tabs";
 import { requestOpenTransaction } from "./txnList";
-import type { Account, AccountsResponse, Attention, Overview, RecentTransaction } from "./types";
+import type { Account, AccountsResponse, Attention, Overview, PotsResponse, RecentTransaction } from "./types";
 import { Eyebrow, FetchError, Skeleton } from "./ui";
 
 /* ---------- overview pieces ---------- */
@@ -170,6 +171,9 @@ export function OverviewTab({ month, onGo }: {
   const { data: overview, error, loading, retry } = useApi<Overview>(`/api/overview?month=${month}`);
   const { data: attention } = useApi<Attention>("/api/attention");
   const { data: accountsData } = useApi<AccountsResponse>("/api/accounts");
+  // Same URL as the Pots tab, so the cache serves both from one fetch.
+  const { data: potsData } = useApi<PotsResponse>(`/api/pots?month=${month}`);
+  const over = overspentSummary(potsData?.pots ?? []);
 
   const current = currentMonthLocal();
 
@@ -194,6 +198,7 @@ export function OverviewTab({ month, onGo }: {
         attention={attention}
         overview={overview}
         accounts={accountsData?.accounts ?? []}
+        overspent={over.count > 0 ? { month, count: over.count, cents: over.cents } : undefined}
         onGo={onGo}
       />
       <RecentActivity
@@ -209,13 +214,25 @@ export function OverviewTab({ month, onGo }: {
   );
 }
 
-export function AttentionCard({ attention, overview, accounts, onGo }: {
+export function AttentionCard({ attention, overview, accounts, overspent, onGo }: {
   attention: Attention | null;
   overview: Overview | null;
   accounts: Account[];
+  /** Pots overspent in the shown month; listed first, in the danger colour. */
+  overspent?: { month: string; count: number; cents: number };
   onGo: (t: Tab, month?: string) => void;
 }) {
-  const items: { label: React.ReactNode; tab: Tab; month?: string; action?: string }[] = [];
+  const items: { label: React.ReactNode; tab: Tab; month?: string; action?: string; danger?: boolean }[] = [];
+  // Overspending is fixed on Pots, where each overspent row offers a cover.
+  if (overspent && overspent.count > 0) {
+    items.push({
+      label: <span className="t-nums font-medium text-[var(--danger)]">{overspentLabel(overspent.count, overspent.cents)}</span>,
+      tab: "pots",
+      month: overspent.month,
+      action: "Cover",
+      danger: true,
+    });
+  }
   if (attention) {
     // Last month still open: the close happens on Pots, on that month.
     if (attention.unclosedMonth) {
@@ -256,13 +273,13 @@ export function AttentionCard({ attention, overview, accounts, onGo }: {
           <li key={i} className="border-b border-[var(--hairline)] last:border-0">
             <button onClick={() => onGo(it.tab, it.month)} className="-mx-2 flex w-[calc(100%+1rem)] items-center rounded-[var(--r-md)] px-2 py-2.5 text-left text-md transition hover:bg-[var(--bg-sunken)] active:scale-[0.99] active:bg-[var(--bg-sunken)]">
               <span className="flex items-center gap-2.5">
-                <span aria-hidden className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--warning)]" />
+                <span aria-hidden className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${it.danger ? "bg-[var(--danger)]" : "bg-[var(--warning)]"}`} />
                 {/* One flex item for the whole label: otherwise each text and
                     amount fragment becomes its own item and picks up the gap. */}
                 <span className="min-w-0">{it.label}</span>
               </span>
               {it.action ? (
-                <span className="ml-auto shrink-0 pl-3 text-md font-medium text-[var(--accent)]">
+                <span className={`ml-auto shrink-0 pl-3 text-md font-medium ${it.danger ? "text-[var(--danger)]" : "text-[var(--accent)]"}`}>
                   {it.action} <span aria-hidden>→</span>
                 </span>
               ) : (

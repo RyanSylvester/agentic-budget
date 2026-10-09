@@ -16,7 +16,7 @@ import { contactBalances, contactLedger, createContact, renameContact, deleteCon
 import { createPot, updatePot, deletePot, potExists, setGroupOrder } from "./pots";
 import { reconcile, suggestClear } from "./reconcile";
 import { closePreview, applyClose, shiftMonth, unclosedPreviousMonth } from "./close";
-import { assignToPot, allPotAssigned, allPotAssignedMonths } from "./assign";
+import { assignToPot, allPotAssigned, allPotAssignedMonths, moveAssignment } from "./assign";
 import { scaffoldMonth, type ScaffoldStrategy } from "./scaffold";
 import { createTransaction, updateTransaction, voidLockReason } from "./transactions";
 import { createSchedule, getScheduleById, listSchedules, markPaid, removeSchedule, sinkingStatuses } from "./sinking";
@@ -28,6 +28,7 @@ import type {
   AccountsResponse,
   AssignHistory,
   AssignResponse,
+  AssignMoveResponse,
   Attention,
   AuthState,
   ClosePreview,
@@ -188,6 +189,23 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     try {
       const r = await assignToPot(db, userId, month, potId, cents);
       return c.json({ ok: true, ...r } satisfies AssignResponse);
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+
+  /** Move assigned dollars between pots for a month (covering an overspent
+   *  pot, or undoing that). Body: { month: "YYYY-MM", fromPotId, toPotId,
+   *  cents } with cents > 0; a null or missing pot id is Ready to Assign. */
+  app.post("/api/assign/move", async (c) => {
+    const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
+    const { ok, body } = await readJson(c);
+    if (!ok) return c.json({ error: "malformed JSON" }, 400);
+    const { month, fromPotId, toPotId, cents } = body ?? {};
+    try {
+      const r = await moveAssignment(db, userId, month, fromPotId ?? null, toPotId ?? null, cents);
+      return c.json({ ok: true, month, cents, ...r } satisfies AssignMoveResponse);
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }

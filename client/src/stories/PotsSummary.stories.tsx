@@ -96,3 +96,10 @@ export const InsightsSingleMonth: StoryObj<typeof SpendInsights> = {
     docs: { description: { story: "One month of history is not a trend: no sparkline." } },
   },
 };
+
+export const Overspent: Story = {
+  args: { overspent: { count: 2, cents: 8410 }, onShowOverspent: fn() },
+  parameters: {
+    docs: { description: { story: "Pots overspent this month: a red line under the figure, whose Show action leads to the first overspent row." } },
+  },
+};

@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
 import { BudgetTable } from "../BudgetTable";
-import { fixturePots, makePot } from "./fixtures";
+import { fixtureOverspentPots, fixturePots, makePot } from "./fixtures";
 
 const meta: Meta<typeof BudgetTable> = {
   title: "Budget Table/BudgetTable",
@@ -189,5 +189,17 @@ export const ShareOfAssignedNone: Story = {
     const header = within(canvas.getByRole("button", { name: /Savings/ }));
     await expect(header.getByText("$0.00")).toBeInTheDocument();
     await expect(header.queryByText(/%/)).toBeNull();
+  },
+};
+
+export const Overspent: Story = {
+  args: { pots: fixtureOverspentPots, onCover: fn() },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "Three overspent pots: each group header shows a red count badge (Food \"2 over\", Transport \"1 over\") beside its totals, and each overspent row offers Cover $X from….",
+      },
+    },
   },
 };

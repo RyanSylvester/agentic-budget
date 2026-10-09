@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { MoneyInput } from "./MoneyInput";
 import { money, shortMonth, titleCase } from "./format";
 import { evaluateExpression, moneyGrouped, shareLabel } from "./money";
+import { availableCents, isOverspent } from "./Overspent";
 import type { AssignHistory, Pot } from "./types";
 
 /* ---------- budget table ---------- */
@@ -284,7 +285,14 @@ export function SinkingLine({ sinking }: { sinking: NonNullable<Pot["sinking"]> 
   );
 }
 
-export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[]; month: string; onAssigned: () => void; onEditPot?: (pot: Pot) => void }) {
+export function BudgetTable({ pots, month, onAssigned, onEditPot, onCover }: {
+  pots: Pot[];
+  month: string;
+  onAssigned: () => void;
+  onEditPot?: (pot: Pot) => void;
+  /** Opens the "Cover from…" picker for an overspent pot; omitted, no button. */
+  onCover?: (pot: Pot) => void;
+}) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   if (pots.length === 0)
     return <p className="text-lg italic text-[var(--muted)]">No pots yet. They'll appear here once the budget is set up.</p>;
@@ -317,6 +325,7 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
         const assigned = sum(g.pots, (p) => p.assignedCents);
         const share = shareLabel(assigned, totalAssigned);
         const isOpen = open[g.name] ?? true;
+        const overCount = g.pots.filter(isOverspent).length;
         return (
           <section key={g.name} className="card overflow-hidden">
             {/* Group header. The word "assigned" is intentionally absent from the
@@ -332,12 +341,21 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
               aria-expanded={isOpen}
               aria-label={`${titleCase(g.name)}: ${moneyGrouped(assigned)} assigned, ${
                 share ? `${share} of total assigned` : "no assigned total yet"
-              }. ${isOpen ? "Expanded" : "Collapsed"}.`}
+              }${overCount > 0 ? `, ${overCount} ${overCount === 1 ? "pot" : "pots"} overspent` : ""}. ${isOpen ? "Expanded" : "Collapsed"}.`}
               className="flex w-full items-baseline justify-between gap-3 px-4 py-3 text-left sm:px-5"
             >
               <span className="flex min-w-0 flex-1 items-baseline gap-2">
                 <span aria-hidden="true" className="shrink-0 text-sm text-[var(--faint)]">{isOpen ? "▾" : "▸"}</span>
                 <span className="truncate text-lg font-semibold text-[var(--ink)]">{titleCase(g.name)}</span>
+                {overCount > 0 && (
+                  <span
+                    aria-hidden="true"
+                    title={`${overCount} ${overCount === 1 ? "pot" : "pots"} overspent`}
+                    className="t-nums shrink-0 self-center rounded-[var(--r-pill)] bg-[var(--danger-soft)] px-2 py-0.5 text-2xs font-semibold text-[var(--danger)]"
+                  >
+                    {overCount} over
+                  </span>
+                )}
               </span>
               <span className="t-nums flex shrink-0 items-baseline gap-2 whitespace-nowrap">
                 {/* 22px sits between text-lg and text-xl; text-xl would make every group row taller. */}
@@ -354,7 +372,7 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
             {isOpen && (
               <div className="px-4 pb-1 sm:px-5">
               {g.pots.map((p) => (
-                <div key={p.id} className="border-t border-[var(--hairline)] py-3">
+                <div key={p.id} data-overspent={isOverspent(p) || undefined} className="border-t border-[var(--hairline)] py-3">
                   {/* narrow screens: name + available up top, assigned/spent below */}
                   <div className="sm:hidden">
                     <div className="flex items-start justify-between gap-3">
@@ -388,6 +406,18 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot }: { pots: Pot[
                       <Available assignedCents={p.assignedCents} spentCents={p.spentCents} />
                     </span>
                   </div>
+                  {onCover && isOverspent(p) && (
+                    <div className="mt-1.5 sm:text-right">
+                      <button
+                        data-cover
+                        onClick={() => onCover(p)}
+                        aria-label={`Cover ${money(-availableCents(p))} overspent in ${p.name} from another pot`}
+                        className="t-nums -my-1 inline-flex min-h-9 items-center rounded-[var(--r-pill)] border border-[var(--danger)] px-3 text-sm font-medium text-[var(--danger)] transition hover:bg-[var(--danger-soft)] active:scale-95"
+                      >
+                        Cover {money(-availableCents(p))} from…
+                      </button>
+                    </div>
+                  )}
                   {/* spent / assigned progress, once per row; sinking pots have their own bar */}
                   {!p.sinking && (() => {
                     const a = p.assignedCents;

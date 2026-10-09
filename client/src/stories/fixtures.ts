@@ -125,6 +125,12 @@ export const fixturePlannedPots: Pot[] = fixturePots.map((p) =>
       : { ...p, spentCents: 0, sharedCents: 0 }
 );
 
+/** A month with three overspent pots ($84.10 over in all): two in Food
+ *  (Dining out $34.50, Coffee $8.50) and one in Transport (Rideshare $41.10). */
+export const fixtureOverspentPots: Pot[] = fixturePots.map((p) =>
+  p.name === "Coffee" ? { ...p, spentCents: 5850 } : p.name === "Rideshare" ? { ...p, spentCents: 4110 } : p
+);
+
 /** Close-preview pot lines: next month's fill amounts. */
 export const fixtureCloseLines: PotCloseLine[] = [
   { name: "Rent share", wireframeCents: 172000 },
