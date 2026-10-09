@@ -93,10 +93,12 @@ export interface Attention {
 
 /* ---------- accounts ---------- */
 
+export type AccountType = "chequing" | "savings" | "credit_card";
+
 export interface Account {
   id: number;
   name: string;
-  type: string;
+  type: AccountType;
   last4: string | null;
   workingBalanceCents: number;
   clearedBalanceCents: number;
@@ -106,6 +108,11 @@ export interface Account {
 /** GET /api/accounts */
 export interface AccountsResponse {
   accounts: Account[];
+}
+
+/** POST /api/accounts. Body: { name, type, last4? }. */
+export interface AccountCreatedResponse extends CreatedResponse {
+  account: Account;
 }
 
 /** actual - cleared; zero means balanced. */

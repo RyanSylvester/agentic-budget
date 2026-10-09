@@ -155,7 +155,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved,
       return;
     }
     if (accountId === "") {
-      setError("Pick an account.");
+      setError(accounts.length === 0 ? "Add an account first" : "Pick an account.");
       return;
     }
     if (!isTransfer && potId === "") {
@@ -374,7 +374,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved,
           </div>
         )}
         {error && (
-          <p role="alert" className="text-sm font-medium text-[var(--danger)]">{error}</p>
+          <p role="alert" className="text-sm font-medium text-[var(--danger)]">{error === "Add an account first" ? <a href="?tab=accounts" className="underline">{error}</a> : error}</p>
         )}
         <div className="flex items-center gap-2 pt-1">
           <button

@@ -283,12 +283,7 @@ export function AppShell() {
 
           {tab === "sharing" && <SharingTab />}
 
-          {tab === "accounts" && (
-            <div>
-              <div className="mb-5 font-serif-d text-xl font-medium">Accounts</div>
-              <AccountsView />
-            </div>
-          )}
+          {tab === "accounts" && <AccountsView />}
 
           {tab === "settings" && (
             <div>

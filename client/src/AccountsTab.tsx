@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { AccountSheet } from "./AccountSheet";
 import { MoneyInput } from "./MoneyInput";
 import { useApi, send } from "./api";
 import { fmtDate, money } from "./format";
@@ -56,7 +57,22 @@ async function errorMessage(res: Response, fallback: string): Promise<string> {
 
 const OFFLINE = "Couldn't reach Daybook. Check your connection and try again.";
 
+/** The Accounts tab: a header with the add action, then the account list. */
 export function AccountsView() {
+  const [adding, setAdding] = useState(false);
+  return (
+    <div>
+      <div className="mb-5 flex items-baseline justify-between">
+        <div className="font-serif-d text-xl font-medium">Accounts</div>
+        <button onClick={() => setAdding(true)} className="btn-ink px-4 py-2 text-md">Add account</button>
+      </div>
+      <AccountsList onAdd={() => setAdding(true)} />
+      {adding && <AccountSheet onClose={() => setAdding(false)} />}
+    </div>
+  );
+}
+
+function AccountsList({ onAdd }: { onAdd: () => void }) {
   const { data, error, loading, retry } = useApi<AccountsResponse>("/api/accounts");
   const [actual, setActual] = useState<Record<number, string>>({});
   const [result, setResult] = useState<Record<number, ReconcileResponse | null>>({});
@@ -144,7 +160,17 @@ export function AccountsView() {
 
   const accounts = data?.accounts ?? [];
   if (accounts.length === 0)
-    return <p className="text-lg italic text-[var(--muted)]">No accounts yet.</p>;
+    return (
+      <div className="rounded-[var(--r-lg)] border border-dashed border-[var(--line)] px-6 py-16 text-center">
+        <div className="font-serif-d text-xl font-medium">No accounts yet</div>
+        <p className="mx-auto mt-2 max-w-[340px] text-md text-[var(--ink-2)]">
+          Add the chequing, savings or credit card accounts your money moves through. Every transaction belongs to one.
+        </p>
+        <button onClick={onAdd} className="btn-ink mt-5 px-5 py-2.5 text-md">
+          Add your first account
+        </button>
+      </div>
+    );
 
   return (
     <div className="space-y-4">

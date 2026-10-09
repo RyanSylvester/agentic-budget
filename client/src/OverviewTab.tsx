@@ -1,4 +1,5 @@
 import { useApi } from "./api";
+import { SetupChecklist } from "./SetupChecklist";
 import { MONTHS, currentMonthLocal, fmtDate, money, monthLabel, shiftMonth } from "./format";
 import { type Tab } from "./tabs";
 import type { Account, AccountsResponse, Attention, Overview, RecentTransaction } from "./types";
@@ -143,6 +144,7 @@ export function OverviewTab({ month, onGo }: {
 
   return (
     <div className="space-y-7">
+      <SetupChecklist month={month} onGo={onGo} />
       {loading || !overview ? (
         error ? (
           <FetchError onRetry={retry} label="Couldn't load this month." />

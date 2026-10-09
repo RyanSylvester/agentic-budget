@@ -96,9 +96,9 @@ async function setupTwoUsers() {
   await signup(app, "bob", invite.code as string); // id 2
   const cookieB = await login(app, "bob");
 
-  // No account-creation route exists; accounts are test setup, not app code.
-  await db.run("INSERT INTO accounts (user_id, name, type) VALUES (1, 'A Chequing', 'chequing')");
-  await db.run("INSERT INTO accounts (user_id, name, type) VALUES (2, 'B Chequing', 'chequing')");
+  // Each user adds their own account through the app (ids 1 and 2).
+  expect(await postId(app, cookieA, "/api/accounts", { name: "A Chequing", type: "chequing" })).toBe(1);
+  expect(await postId(app, cookieB, "/api/accounts", { name: "B Chequing", type: "chequing" })).toBe(2);
 
   const potA = await postId(app, cookieA, "/api/pots", { name: "Alice Pot", pot_group: "Test", target_type: "fixed" });
   const contactA = await postId(app, cookieA, "/api/contacts", { name: "Alice Contact" });
@@ -186,6 +186,7 @@ describe("cross-user isolation", () => {
     expect((await attempt("POST", `/api/sinking/${schedB}/paid`)).status).toBe(404);
     expect((await attempt("DELETE", `/api/sinking/${schedB}`)).status).toBe(404);
     expect((await attempt("POST", "/api/accounts/2/reconcile", { actualBalanceCents: 0 })).status).toBe(404);
+    expect((await attempt("PUT", "/api/accounts/2", { name: "Hacked" })).status).toBe(404);
     expect((await attempt("POST", "/api/settle", { contactId: contactB, accountId: 1, amountCents: 1000 })).status).toBe(404);
     expect((await attempt("POST", "/api/settle", { contactId: 1, accountId: 2, amountCents: 1000 })).status).toBe(404);
 
@@ -206,6 +207,7 @@ describe("cross-user isolation", () => {
     // Nothing of Bob's changed.
     expect(((await db.get("SELECT name AS n FROM pots WHERE id = ?", potB)) as any).n).toBe("Bob Pot");
     expect(((await db.get("SELECT name AS n FROM contacts WHERE id = ?", contactB)) as any).n).toBe("Bob Contact");
+    expect(((await db.get("SELECT name AS n, user_id AS u FROM accounts WHERE id = 2")) as any)).toEqual({ n: "B Chequing", u: 2 });
     expect(((await db.get("SELECT description AS d, voided AS v, cleared AS c FROM transactions WHERE id = ?", txnB)) as any)).toEqual({
       d: "bob spend", v: 0, c: "uncleared",
     });

@@ -16,7 +16,7 @@ function flag(rest: string[], name: string): string | undefined {
 }
 
 function usage(): never {
-  console.error("usage: budget <record|assign|recategorize|void|pot|contact|settle|reconcile|close|sinking|invite|migration|migrate-remote|serve|login> [options]");
+  console.error("usage: budget <record|assign|recategorize|void|pot|account|contact|settle|reconcile|close|sinking|invite|migration|migrate-remote|serve|login> [options]");
   process.exit(2);
 }
 
@@ -230,6 +230,32 @@ async function remotePot(remote: RemoteConfig, rest: string[]): Promise<void> {
   }
 }
 
+async function remoteAccount(remote: RemoteConfig, rest: string[]): Promise<void> {
+  const [sub] = rest;
+  if (sub === "list") {
+    const data = await api(remote, "/api/accounts");
+    const accounts = data.accounts as { id: number; name: string; type: string; last4: string | null }[];
+    if (accounts.length === 0) console.log("no accounts");
+    for (const a of accounts) console.log(`${a.id} "${a.name}" ${a.type}${a.last4 ? ` ••${a.last4}` : ""}`);
+  } else if (sub === "add") {
+    const name = flag(rest, "name");
+    if (!name) usage();
+    const data = await api(remote, "/api/accounts", {
+      method: "POST",
+      body: { name, type: flag(rest, "type"), last4: flag(rest, "last4") },
+    });
+    console.log(`created account ${data.id} "${data.account.name}" (${data.account.type})`);
+  } else if (sub === "rename") {
+    const accountId = parseInt(flag(rest, "account") ?? "NaN", 10);
+    const name = flag(rest, "name");
+    if (!Number.isFinite(accountId) || !name) usage();
+    await api(remote, `/api/accounts/${accountId}`, { method: "PUT", body: { name } });
+    console.log(`renamed account ${accountId} to "${name}"`);
+  } else {
+    usage();
+  }
+}
+
 async function remoteContact(remote: RemoteConfig, rest: string[]): Promise<void> {
   const [sub] = rest;
   if (sub === "list") {
@@ -389,6 +415,7 @@ export async function runRemote(remote: RemoteConfig, cmd: string, rest: string[
     const data = await api(remote, `/api/transactions/${id}/void`, { method: "POST" });
     console.log(data.alreadyVoided ? `transaction ${id} was already void` : `transaction ${id} voided`);
   } else if (cmd === "pot") await remotePot(remote, rest);
+  else if (cmd === "account") await remoteAccount(remote, rest);
   else if (cmd === "contact") await remoteContact(remote, rest);
   else if (cmd === "settle") await remoteSettle(remote, rest);
   else if (cmd === "reconcile") await remoteReconcile(remote, rest);
