@@ -26,6 +26,7 @@ const fullApi = {
     "/api/trend": { trend: fixtureTrend },
     [`/api/close-preview?month=${CUR}`]: makeClosePreview({ sharedOwedCents: 42180, sharedOwedBy: [{ name: "Alex", cents: 42180 }], month: CUR }),
     "/api/contacts": { contacts: fixtureContacts },
+    "/api/contacts?archived=1": { contacts: fixtureContacts },
     "/api/accounts": { accounts: fixtureAccounts },
     [`/api/transactions?month=${CUR}`]: { month: CUR, transactions: fixtureListedTxns },
     "/api/auth/me": { authenticated: true, setupRequired: false, username: "owner" },

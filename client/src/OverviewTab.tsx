@@ -2,6 +2,7 @@ import { useApi } from "./api";
 import { SetupChecklist } from "./SetupChecklist";
 import { MONTHS, currentMonthLocal, fmtDate, money, monthLabel, shiftMonth } from "./format";
 import { type Tab } from "./tabs";
+import { requestOpenTransaction } from "./txnList";
 import type { Account, AccountsResponse, Attention, Overview, RecentTransaction } from "./types";
 import { Eyebrow, FetchError, Skeleton } from "./ui";
 
@@ -86,7 +87,14 @@ export function Hero({ overview, isCurrent, isFuture = false, loading, onAssign 
   );
 }
 
-export function RecentActivity({ txns, loading }: { txns: RecentTransaction[]; loading?: boolean }) {
+export function RecentActivity({ txns, loading, onOpen, onSeeAll }: {
+  txns: RecentTransaction[];
+  loading?: boolean;
+  /** Open one transaction (on the Transactions tab); rows are plain without it. */
+  onOpen?: (id: number) => void;
+  /** Where "See all" leads; omitted, there is no link. */
+  onSeeAll?: () => void;
+}) {
   // Transfer pairs (e.g. +$891.82 / -$891.82 between own accounts) are net-zero
   // noise, not spending: keep them out of the activity feed.
   const visible = txns.filter((t) => !t.is_transfer);
@@ -108,24 +116,47 @@ export function RecentActivity({ txns, loading }: { txns: RecentTransaction[]; l
       </div>
     );
   }
+  const row = (t: RecentTransaction) => (
+    <>
+      <div className="min-w-0">
+        <div className="truncate text-md">{t.description}</div>
+        <div className="mt-0.5 text-sm text-[var(--muted)]">
+          {fmtDate(t.date)}
+          {t.split_with_contact ? ` · split${t.split_contact_name ? ` with ${t.split_contact_name}` : ""}` : ""}
+        </div>
+      </div>
+      <span className={`t-nums shrink-0 text-md ${t.user_cents < 0 ? "" : "font-medium text-[var(--success)]"}`}>
+        {money(t.user_cents)}
+      </span>
+    </>
+  );
   return (
     <div>
-      <div className="mb-2"><Eyebrow>Recent activity</Eyebrow></div>
+      <div className="mb-2 flex items-center justify-between">
+        <Eyebrow>Recent activity</Eyebrow>
+        {onSeeAll && (
+          <button onClick={onSeeAll} className="-my-2 min-h-11 px-1 text-sm font-medium text-[var(--ink-2)] transition hover:text-[var(--ink)]">
+            See all <span aria-hidden>→</span>
+          </button>
+        )}
+      </div>
       <ul>
-        {visible.slice(0, 8).map((t) => (
-          <li key={t.id} className="flex items-center justify-between gap-3 border-b border-[var(--hairline)] py-2.5 last:border-0">
-            <div className="min-w-0">
-              <div className="truncate text-md">{t.description}</div>
-              <div className="mt-0.5 text-sm text-[var(--muted)]">
-                {fmtDate(t.date)}
-                {t.split_with_contact ? ` · split${t.split_contact_name ? ` with ${t.split_contact_name}` : ""}` : ""}
-              </div>
-            </div>
-            <span className={`t-nums shrink-0 text-md ${t.user_cents < 0 ? "" : "font-medium text-[var(--success)]"}`}>
-              {money(t.user_cents)}
-            </span>
-          </li>
-        ))}
+        {visible.slice(0, 8).map((t) =>
+          onOpen ? (
+            <li key={t.id} className="border-b border-[var(--hairline)] last:border-0">
+              <button
+                onClick={() => onOpen(t.id)}
+                className="-mx-2 flex w-[calc(100%+1rem)] items-center justify-between gap-3 rounded-[var(--r-md)] px-2 py-2.5 text-left transition hover:bg-[var(--bg-sunken)] active:bg-[var(--bg-sunken)]"
+              >
+                {row(t)}
+              </button>
+            </li>
+          ) : (
+            <li key={t.id} className="flex items-center justify-between gap-3 border-b border-[var(--hairline)] py-2.5 last:border-0">
+              {row(t)}
+            </li>
+          )
+        )}
       </ul>
     </div>
   );
@@ -165,7 +196,15 @@ export function OverviewTab({ month, onGo }: {
         accounts={accountsData?.accounts ?? []}
         onGo={onGo}
       />
-      <RecentActivity txns={overview?.recent ?? []} loading={loading} />
+      <RecentActivity
+        txns={overview?.recent ?? []}
+        loading={loading}
+        onOpen={(id) => {
+          requestOpenTransaction(id);
+          onGo("transactions");
+        }}
+        onSeeAll={() => onGo("transactions")}
+      />
     </div>
   );
 }

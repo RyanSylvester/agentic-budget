@@ -79,7 +79,10 @@ for `wrangler dev`). Deploying is `bun run --cwd client build` followed by
   The user's share counts in their views; a contact's share is recorded
   as what they owe and never counted as the user's spending. Settlements
   allocate a contact's lump sums oldest-first, consuming prior credit first.
-  Each contact is managed in the Sharing tab; each pot can carry a default
+  Money paid back to a contact who overpaid (`direction: "paid"`) draws down
+  their credit. Any settlement can be undone until it is reconciled or a
+  later one builds on it. Each contact is managed in the Sharing tab
+  (archived, not deleted, once settled); each pot can carry a default
   share config (contact + percent) for new splits.
 - **Transfers** (`is_transfer`) move between the user's own accounts: counted in
   reconciliation, never in spending.

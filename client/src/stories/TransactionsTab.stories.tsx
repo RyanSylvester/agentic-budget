@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { userEvent, within } from "storybook/test";
 import { TransactionsTab, TransactionSheet } from "../TransactionsTab";
+import { requestOpenTransaction } from "../txnList";
 import {
   MONTH,
   fixtureAccounts,
@@ -44,7 +45,7 @@ const meta: Meta<typeof TransactionsTab> = {
     docs: {
       description: {
         component:
-          "The Transactions tab: every transaction in the month, newest first, with text search, a pot filter, and an Out/In/Transfers filter. Tapping a row opens the edit sheet; the Add button opens a blank one. Amounts use tabular numerals; inflows read green, transfers read muted.",
+          "The Transactions tab: every transaction in the month, newest first under day headers, with search (text or amount), a pot filter, and an Out/In/Transfers filter. Each row shows its pot, account, cleared/reconciled mark and, for splits, your share. Tapping a row opens the edit sheet; the Add button opens a blank one. Capped at a readable width on desktop.",
       },
     },
   },
@@ -65,7 +66,7 @@ export const List: Story = {
     docs: {
       description: {
         story:
-          "A typical month: outflows, an inflow, a transfer, two contact splits, and a just-imported expense.",
+          "A typical month: outflows on two accounts, an inflow, a transfer, two contact splits with your share, a settle-up, cleared and reconciled marks, and a just-imported expense.",
       },
     },
   },
@@ -114,14 +115,46 @@ export const FilteredBySearch: Story = {
     docs: {
       description: {
         story:
-          "Typing in the search box filters by description or pot name, down to the one grocery run. (Interaction test.)",
+          "Typing in the search box filters by description, pot or account, down to the one grocery run; a filtered total sits beside the count. (Interaction test.)",
       },
     },
   },
   play: async ({ canvasElement }) => {
-    const box = within(canvasElement).getByPlaceholderText("Search transactions…");
+    const box = within(canvasElement).getByLabelText("Search transactions");
     await userEvent.type(box, "grocery");
     await within(canvasElement).findByText("1 transaction");
+  },
+};
+
+export const SearchByAmount: Story = {
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "Search matches amounts too: \"12.5\" or \"$12.50\" finds the $12.50 bakery charge, and the line above the list shows how many match and what they add up to. (Interaction test.)",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const box = within(canvasElement).getByLabelText("Search transactions");
+    await userEvent.type(box, "$12.50");
+    await within(canvasElement).findByText("Mock bakery");
+    await within(canvasElement).findByText("1 transaction");
+  },
+};
+
+export const OpenedFromOverview: Story = {
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "Tapping a row in Overview's recent activity switches to this tab and opens that transaction's sheet once the list loads.",
+      },
+    },
+  },
+  render: (args) => {
+    requestOpenTransaction(firstTxn.id);
+    return <TransactionsTab {...args} />;
   },
 };
 
@@ -154,7 +187,7 @@ export const SplitSheet: Story = {
     docs: {
       description: {
         story:
-          "The contact-split section: checking the box reveals a contact picker and their share field, prefilled from the pot's share config (or half the amount).",
+          "The contact-split section: checking the box reveals a contact picker and their share, prefilled from the pot's share config (or half the amount). The share can be typed as an amount or a percent, or set with Half; your own share is shown beneath. (Interaction test.)",
       },
     },
   },
@@ -165,6 +198,10 @@ export const SplitSheet: Story = {
     await userEvent.click(within(canvasElement).getByLabelText("Split with a contact"));
     await within(canvasElement).findByLabelText("Contact to split with");
     await within(canvasElement).findByLabelText("Contact's share");
+    const pct = within(canvasElement).getByLabelText("Contact's share as a percent");
+    await userEvent.clear(pct);
+    await userEvent.type(pct, "25");
+    await within(canvasElement).findByText("Your share $63.16");
   },
 };
 

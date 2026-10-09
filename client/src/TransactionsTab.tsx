@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { MoneyInput } from "./MoneyInput";
 import { useApi, send } from "./api";
-import { defaultDateInMonth, fmtDate, money, titleCase, todayLocal } from "./format";
+import { defaultDateInMonth, money, titleCase, todayLocal } from "./format";
 import { expressionToCents } from "./money";
 import type { Account, AccountsResponse, ContactsResponse, ListedTransaction, Pot, PotsResponse, TransactionsResponse } from "./types";
 import { FetchError, FormLabel, Segmented, Sheet, Skeleton, TxnBadge } from "./ui";
+import { dayLabel, groupByDay, matchesQuery, takePendingTransaction, userShareCents } from "./txnList";
 
 /* ---------- transaction add/edit sheet ---------- */
 
@@ -78,6 +79,28 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved,
 
   const { data: contactsData } = useApi<ContactsResponse>("/api/contacts");
   const contacts = contactsData?.contacts ?? [];
+
+  // The split editor takes their share as an amount or a percent of the
+  // total; the percent field shows the share's percent unless being typed in.
+  const [pctText, setPctText] = useState("");
+  const [pctEditing, setPctEditing] = useState(false);
+  const totalCents = (() => {
+    const c = expressionToCents(amount);
+    return c !== null && c > 0 ? c : null;
+  })();
+  const shareCents = expressionToCents(shareAmount);
+  const sharePct = totalCents !== null && shareCents !== null && shareCents > 0
+    ? Math.round((shareCents / totalCents) * 1000) / 10
+    : null;
+  const yourShareCents = totalCents !== null && shareCents !== null && shareCents > 0 && shareCents < totalCents
+    ? totalCents - shareCents
+    : null;
+  const setPct = (text: string) => {
+    setPctText(text);
+    const pct = Number(text);
+    if (totalCents === null || text.trim() === "" || !Number.isFinite(pct) || pct < 0 || pct > 100) return;
+    setShareAmount((Math.round((totalCents * pct) / 100) / 100).toFixed(2));
+  };
 
   const toggleSplit = (on: boolean) => {
     setSplit(on);
@@ -360,14 +383,46 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved,
                 </div>
                 <div>
                   <FormLabel>Their share</FormLabel>
-                  <MoneyInput
-                    value={shareAmount}
-                    onChange={setShareAmount}
-                    placeholder="0.00"
-                    ariaLabel="Contact's share"
-                    disabled={locked}
-                    className="w-40 py-2.5 text-md"
-                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <MoneyInput
+                      value={shareAmount}
+                      onChange={setShareAmount}
+                      placeholder="0.00"
+                      ariaLabel="Contact's share"
+                      disabled={locked}
+                      className="w-32 py-2.5 text-md"
+                    />
+                    <span className="text-sm text-[var(--muted)]">or</span>
+                    <span className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={pctEditing ? pctText : sharePct === null ? "" : String(sharePct)}
+                        onChange={(e) => setPct(e.target.value)}
+                        onFocus={() => {
+                          setPctEditing(true);
+                          setPctText(sharePct === null ? "" : String(sharePct));
+                        }}
+                        onBlur={() => setPctEditing(false)}
+                        placeholder="50"
+                        aria-label="Contact's share as a percent"
+                        disabled={locked || totalCents === null}
+                        className="field t-nums w-16 px-2 py-2.5 text-right text-md"
+                      />
+                      <span className="text-md text-[var(--muted)]">%</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPct("50")}
+                      disabled={locked || totalCents === null}
+                      className="rounded-[var(--r-pill)] border border-[var(--hairline-strong)] px-3 py-2 text-sm font-medium text-[var(--ink-2)] transition active:scale-95 disabled:opacity-50"
+                    >
+                      Half
+                    </button>
+                  </div>
+                  {yourShareCents !== null && (
+                    <div className="t-nums mt-1.5 text-sm text-[var(--muted)]">Your share {money(yourShareCents)}</div>
+                  )}
                 </div>
               </div>
             )}
@@ -433,6 +488,82 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved,
 
 /* ---------- transactions page ---------- */
 
+/* Cleared and reconciled marks: a small check for cleared, a lock for
+ * reconciled; uncleared rows show nothing. */
+function ClearedMark({ state }: { state: string }) {
+  const common = {
+    width: 12,
+    height: 12,
+    viewBox: "0 0 16 16",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    "aria-hidden": true,
+  } as const;
+  if (state === "cleared") {
+    return (
+      <span title="Cleared" className="inline-flex items-center text-[var(--muted)]">
+        <svg {...common}><path d="M3 8.5 6.5 12 13 4.5" /></svg>
+        <span className="sr-only">Cleared</span>
+      </span>
+    );
+  }
+  if (state === "reconciled") {
+    return (
+      <span title="Reconciled" className="inline-flex items-center text-[var(--success)]">
+        <svg {...common}><rect x="3" y="7" width="10" height="7" rx="1.5" /><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" /></svg>
+        <span className="sr-only">Reconciled</span>
+      </span>
+    );
+  }
+  return null;
+}
+
+function TransactionRow({ t, onOpen }: { t: ListedTransaction; onOpen: () => void }) {
+  const mine = userShareCents(t);
+  // A settlement is wholly the contact's money: no share of yours to show.
+  const settlement = !!t.splitWithContact && mine === 0;
+  const showShare = !!t.splitWithContact && !settlement && mine !== t.amountCents;
+  return (
+    <button
+      onClick={onOpen}
+      className="-mx-2 flex w-[calc(100%+1rem)] items-center justify-between gap-3 rounded-[var(--r-md)] px-2 py-3 text-left transition hover:bg-[var(--bg-sunken)] active:bg-[var(--bg-sunken)]"
+    >
+      <div className="min-w-0">
+        <div className="truncate text-md font-medium">{t.description}</div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-[var(--muted)]">
+          <span className="truncate">{settlement ? "Settle-up" : t.potName ?? "(no pot)"}</span>
+          <span aria-hidden>·</span>
+          <span className="truncate">{t.accountName}</span>
+          <ClearedMark state={t.cleared} />
+          {t.isTransfer ? <TxnBadge>Transfer</TxnBadge> : null}
+          {t.splitWithContact ? (
+            <TxnBadge>{t.splitContactName ? `${settlement ? "with" : "split ·"} ${t.splitContactName}` : "split"}</TxnBadge>
+          ) : null}
+        </div>
+      </div>
+      <div className="shrink-0 text-right">
+        <div
+          className={`t-nums text-md ${
+            t.amountCents > 0 && !t.isTransfer
+              ? "font-medium text-[var(--success)]"
+              : t.isTransfer || settlement
+                ? "text-[var(--muted)]"
+                : ""
+          }`}
+        >
+          {money(t.amountCents)}
+        </div>
+        {showShare && (
+          <div className="t-nums mt-0.5 text-xs text-[var(--muted)]">your share {money(Math.abs(mine))}</div>
+        )}
+      </div>
+    </button>
+  );
+}
+
 export function TransactionsTab({ month }: { month: string }) {
   const { data, error, loading, retry } = useApi<TransactionsResponse>(
     `/api/transactions?month=${month}`
@@ -445,6 +576,8 @@ export function TransactionsTab({ month }: { month: string }) {
   const [sheet, setSheet] = useState<{ txn: ListedTransaction | null } | null>(null);
   // The last voided transaction, offered for undo for a few seconds.
   const [voided, setVoided] = useState<{ txn: ListedTransaction; error: string | null } | null>(null);
+  // A transaction another tab asked to open (Overview's recent activity).
+  const [openId, setOpenId] = useState<number | null>(takePendingTransaction);
 
   useEffect(() => {
     if (!voided || voided.error) return;
@@ -452,19 +585,26 @@ export function TransactionsTab({ month }: { month: string }) {
     return () => clearTimeout(t);
   }, [voided]);
 
+  useEffect(() => {
+    if (openId === null || !data) return;
+    const t = data.transactions.find((x) => x.id === openId);
+    if (t) setSheet({ txn: t });
+    setOpenId(null);
+  }, [data, openId]);
+
   const pots = potsData?.pots ?? [];
   const accounts = accountsData?.accounts ?? [];
   const txns = data?.transactions ?? [];
 
-  const q = query.trim().toLowerCase();
   const filtered = txns.filter((t) => {
     if (kind === "out" && !(t.amountCents < 0 && !t.isTransfer)) return false;
     if (kind === "in" && !(t.amountCents > 0 && !t.isTransfer)) return false;
     if (kind === "transfer" && !t.isTransfer) return false;
     if (potFilter !== "all" && t.potId !== Number(potFilter)) return false;
-    if (q && !`${t.description} ${t.potName ?? ""}`.toLowerCase().includes(q)) return false;
-    return true;
+    return matchesQuery(t, query);
   });
+  const filtering = query.trim() !== "" || potFilter !== "all" || kind !== "all";
+  const filteredTotal = filtered.reduce((a, t) => a + t.amountCents, 0);
 
   const groups = [...new Set(pots.map((p) => p.group))];
   const openAdd = () => setSheet({ txn: null });
@@ -489,7 +629,7 @@ export function TransactionsTab({ month }: { month: string }) {
   };
 
   return (
-    <div>
+    <div className="mx-auto max-w-[720px]">
       <div className="mb-5 flex items-center justify-between">
         <div className="font-serif-d text-xl font-medium">Transactions</div>
         <button onClick={openAdd} className="btn-ink px-4 py-2 text-md">Add</button>
@@ -500,7 +640,7 @@ export function TransactionsTab({ month }: { month: string }) {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search transactions…"
+          placeholder="Search by name, pot or amount…"
           aria-label="Search transactions"
           className="field w-full px-3 py-2.5 text-md"
         />
@@ -585,41 +725,29 @@ export function TransactionsTab({ month }: { month: string }) {
         )
       ) : (
         <>
-          <div className="mb-2 text-sm text-[var(--muted)]">
+          <div role="status" className="mb-1 text-sm text-[var(--muted)]">
             {filtered.length} transaction{filtered.length === 1 ? "" : "s"}
+            {filtering && (
+              <>
+                <span aria-hidden> · </span>
+                <span className="t-nums font-medium text-[var(--ink-2)]">{money(filteredTotal)}</span>
+              </>
+            )}
           </div>
-          <ul>
-            {filtered.map((t) => (
-              <li key={t.id} className="border-b border-[var(--hairline)] last:border-0">
-                <button
-                  onClick={() => setSheet({ txn: t })}
-                  className="-mx-2 flex w-[calc(100%+1rem)] items-center justify-between gap-3 rounded-[var(--r-md)] px-2 py-3 text-left transition hover:bg-[var(--bg-sunken)] active:bg-[var(--bg-sunken)]"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate text-md font-medium">{t.description}</div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-[var(--muted)]">
-                      <span>{fmtDate(t.date)}</span>
-                      <span aria-hidden>·</span>
-                      <span className="truncate">{t.potName ?? "(no pot)"}</span>
-                      {t.isTransfer ? <TxnBadge>Transfer</TxnBadge> : null}
-                      {t.splitWithContact ? <TxnBadge>{t.splitContactName ? `split · ${t.splitContactName}` : "split"}</TxnBadge> : null}
-                    </div>
-                  </div>
-                  <span
-                    className={`t-nums shrink-0 text-md ${
-                      t.amountCents > 0 && !t.isTransfer
-                        ? "font-medium text-[var(--success)]"
-                        : t.isTransfer
-                          ? "text-[var(--muted)]"
-                          : ""
-                    }`}
-                  >
-                    {money(t.amountCents)}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          {groupByDay(filtered).map((day) => (
+            <section key={day.date} aria-label={dayLabel(day.date)}>
+              <h3 className="eyebrow sticky top-0 z-[1] -mx-2 bg-[var(--bg)] px-2 pb-1 pt-4">
+                {dayLabel(day.date)}
+              </h3>
+              <ul>
+                {day.rows.map((t) => (
+                  <li key={t.id} className="border-b border-[var(--hairline)] last:border-0">
+                    <TransactionRow t={t} onOpen={() => setSheet({ txn: t })} />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
         </>
       )}
 

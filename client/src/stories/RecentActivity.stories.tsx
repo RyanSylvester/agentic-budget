@@ -29,6 +29,18 @@ export const Mixed: Story = {
   },
 };
 
+export const Tappable: Story = {
+  args: { txns: fixtureTxns, onOpen: () => {}, onSeeAll: () => {} },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "As on Overview: each row opens that transaction on the Transactions tab, and See all jumps to the full list.",
+      },
+    },
+  },
+};
+
 export const Loading: Story = {
   args: { txns: [], loading: true },
   parameters: {
