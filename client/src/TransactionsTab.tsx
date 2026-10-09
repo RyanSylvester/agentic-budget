@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { MoneyInput } from "./MoneyInput";
 import { useApi, send } from "./api";
 import { defaultDateInMonth, fmtDate, money, titleCase, todayLocal } from "./format";
@@ -8,18 +8,56 @@ import { FetchError, FormLabel, Segmented, Sheet, Skeleton, TxnBadge } from "./u
 
 /* ---------- transaction add/edit sheet ---------- */
 
+// Turn the server's terse lock/validation errors into sentences.
+function readableError(message: string | undefined, status: number): string {
+  if (!message) return status >= 500 ? "Something went wrong on our end. Try again." : "Couldn't save. Try again.";
+  const money = /^already (cleared|reconciled); amounts cannot change/.exec(message);
+  if (money) return `This transaction is ${money[1]}, so its amount, account and split can't change. You can still change the pot, date and description.`;
+  if (/settlement.*amounts cannot change/.test(message))
+    return "This transaction is part of a contact settlement, so its amount, account and split can't change. You can still change the pot, date and description.";
+  if (/^already reconciled; cannot be voided/.test(message)) return "Reconciled transactions can't be voided. Record a correcting transaction instead.";
+  if (/^already reconciled; cannot be restored/.test(message)) return "This transaction was reconciled while voided, so it can't be restored.";
+  if (/settlement.*cannot be (voided|restored)/.test(message)) return "This transaction is part of a contact settlement, so it can't be voided or restored.";
+  if (/^no pot/.test(message)) return "That pot no longer exists. Pick another one.";
+  if (/^no account/.test(message)) return "That account no longer exists. Pick another one.";
+  if (/^no transaction/.test(message)) return "This transaction no longer exists. Refresh and try again.";
+  return message;
+}
+
+// fetch that throws a readable Error on a non-2xx response.
+async function request(url: string, init: RequestInit): Promise<void> {
+  const r = await send(url, init);
+  if (!r.ok) {
+    const j = await r.json().catch(() => null);
+    throw new Error(readableError(j?.error, r.status));
+  }
+}
+
+const jsonInit = (method: string, body: unknown): RequestInit => ({
+  method,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+
 // Add/edit form for one transaction. txn === null means "add". Renders inside
 // a Sheet; the parent refetches on onSaved. All inputs keep a fixed size so
 // focusing never shifts the layout.
-export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved }: {
+export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved, onVoided }: {
   txn: ListedTransaction | null;
   month?: string;
   pots: Pot[];
   accounts: Account[];
   onClose: () => void;
   onSaved: () => void;
+  /** Called after a void; defaults to onSaved. */
+  onVoided?: (txn: ListedTransaction) => void;
 }) {
   const editing = txn !== null;
+  // Mirrors the server: cleared, reconciled and settlement rows keep their
+  // money fields; reconciled and settlement rows cannot be voided.
+  const lockedAs = !txn ? null : txn.settled ? "settled" : txn.cleared !== "uncleared" ? txn.cleared : null;
+  const locked = lockedAs !== null;
+  const voidLocked = !!txn && (!!txn.settled || txn.cleared === "reconciled");
   const [description, setDescription] = useState(txn?.description ?? "");
   const [amount, setAmount] = useState(txn ? (Math.abs(txn.amountCents) / 100).toFixed(2) : "");
   const [direction, setDirection] = useState<"out" | "in">(txn && txn.amountCents > 0 ? "in" : "out");
@@ -60,7 +98,49 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
     }
   };
 
+  const saveLocked = async (t: ListedTransaction) => {
+    if (!description.trim()) {
+      setError("Add a description.");
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      setError("Pick a valid date.");
+      return;
+    }
+    if (!t.isTransfer && potId === "") {
+      setError("Pick a pot.");
+      return;
+    }
+    const newPotId = potId === "" ? null : Number(potId);
+    const potChanged = newPotId !== t.potId;
+    const textChanged = description.trim() !== t.description || date !== t.date;
+    setBusy(true);
+    setError(null);
+    try {
+      // The pot moves through recategorize, which locked rows allow; date and
+      // description go through PUT with the money fields exactly as they were.
+      if (potChanged && newPotId !== null) await request(`/api/transactions/${t.id}/recategorize`, jsonInit("POST", { potId: newPotId }));
+      if (textChanged) {
+        await request(`/api/transactions/${t.id}`, jsonInit("PUT", {
+          date,
+          accountId: t.accountId,
+          potId: potChanged ? newPotId : t.potId,
+          amountCents: t.amountCents,
+          description: description.trim(),
+          isTransfer: !!t.isTransfer,
+          contactId: t.splitWithContact ? t.splitContactId : null,
+          shareCents: t.splitWithContact ? -t.sharedCents : 0,
+        }));
+      }
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't save.");
+    }
+    setBusy(false);
+  };
+
   const save = async () => {
+    if (txn && locked) return saveLocked(txn);
     const cents = expressionToCents(amount);
     if (!description.trim()) {
       setError("Add a description.");
@@ -111,15 +191,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
       shareCents: split && !isTransfer ? (direction === "out" ? -sCents : sCents) : 0,
     };
     try {
-      const r = await send(editing ? `/api/transactions/${txn.id}` : "/api/transactions", {
-        method: editing ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!r.ok) {
-        const j = await r.json().catch(() => null);
-        throw new Error(j?.error ?? `HTTP ${r.status}`);
-      }
+      await request(editing ? `/api/transactions/${txn.id}` : "/api/transactions", jsonInit(editing ? "PUT" : "POST", body));
       onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't save.");
@@ -127,16 +199,16 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
     setBusy(false);
   };
 
-  const destroy = async () => {
+  const voidTxn = async () => {
     if (!editing || busy) return;
     setBusy(true);
     setError(null);
     try {
-      const r = await send(`/api/transactions/${txn.id}`, { method: "DELETE" });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      onSaved();
-    } catch {
-      setError("Couldn't delete it. Try again.");
+      await request(`/api/transactions/${txn.id}`, { method: "DELETE" });
+      if (onVoided) onVoided(txn);
+      else onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't void it. Try again.");
     }
     setBusy(false);
   };
@@ -146,6 +218,11 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
   return (
     <Sheet label={editing ? "Edit transaction" : "Add transaction"} onClose={onClose}>
       <div className="mb-4 text-lg font-semibold">{editing ? "Edit transaction" : "Add transaction"}</div>
+      {lockedAs && (
+        <p className="mb-4 rounded-[var(--r-md)] bg-[var(--bg-sunken)] px-3 py-2.5 text-sm text-[var(--ink-2)]">
+          {lockedAs === "settled" ? "Part of a contact settlement" : titleCase(lockedAs)}. Amount, account and split are locked; you can still change the pot, date and description.
+        </p>
+      )}
       <div className="space-y-4">
         <div>
           <FormLabel>Description</FormLabel>
@@ -165,6 +242,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
               ariaLabel="Direction"
               value={direction}
               onChange={setDirection}
+              disabled={locked}
               options={[
                 { value: "out", label: "Out" },
                 { value: "in", label: "In" },
@@ -175,6 +253,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
               onChange={setAmount}
               placeholder="0.00"
               ariaLabel="Amount"
+              disabled={locked}
               className="min-w-0 flex-1 py-2.5 text-md"
             />
           </div>
@@ -195,6 +274,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
             <select
               value={accountId}
               onChange={(e) => setAccountId(e.target.value)}
+              disabled={locked}
               aria-label="Account"
               className="field w-full px-3 py-2.5 text-md"
             >
@@ -209,6 +289,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
           <select
             value={potId}
             onChange={(e) => setPotId(e.target.value)}
+            disabled={locked && isTransfer}
             aria-label="Pot"
             className="field w-full px-3 py-2.5 text-md"
           >
@@ -232,6 +313,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
           <input
             type="checkbox"
             checked={isTransfer}
+            disabled={locked}
             onChange={(e) => {
               setIsTransfer(e.target.checked);
               if (e.target.checked) {
@@ -249,6 +331,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
               <input
                 type="checkbox"
                 checked={split}
+                disabled={locked}
                 onChange={(e) => toggleSplit(e.target.checked)}
                 className="h-4 w-4 shrink-0 accent-[var(--accent)]"
               />
@@ -262,6 +345,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
                     <select
                       value={contactId}
                       onChange={(e) => setContactId(e.target.value)}
+                      disabled={locked}
                       aria-label="Contact to split with"
                       className="field t-nums w-full px-3 py-2.5 text-md"
                     >
@@ -281,6 +365,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
                     onChange={setShareAmount}
                     placeholder="0.00"
                     ariaLabel="Contact's share"
+                    disabled={locked}
                     className="w-40 py-2.5 text-md"
                   />
                 </div>
@@ -303,17 +388,27 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
           </button>
         </div>
         {editing && !confirmingDelete && (
-          <button
-            onClick={() => setConfirmingDelete(true)}
-            className="text-md font-medium text-[var(--danger)] transition hover:opacity-80 active:scale-95"
-          >
-            Delete transaction
-          </button>
+          <div>
+            <button
+              onClick={() => setConfirmingDelete(true)}
+              disabled={voidLocked}
+              className="text-md font-medium text-[var(--danger)] transition hover:opacity-80 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Void transaction
+            </button>
+            {voidLocked && (
+              <p className="mt-1 text-sm text-[var(--muted)]">
+                {txn.settled
+                  ? "Part of a contact settlement, so it can't be voided."
+                  : "Reconciled, so it can't be voided. Record a correcting transaction instead."}
+              </p>
+            )}
+          </div>
         )}
         {confirmingDelete && (
           <div className="rounded-[var(--r-md)] bg-[var(--danger-soft)] p-4">
-            <p className="text-md font-medium">Delete this transaction?</p>
-            <p className="mt-1 text-sm text-[var(--ink-2)]">It disappears from every view. This cannot be undone.</p>
+            <p className="text-md font-medium">Void this transaction?</p>
+            <p className="mt-1 text-sm text-[var(--ink-2)]">Removed from spending and budgets; kept in history. You can undo right after.</p>
             <div className="mt-3 flex gap-2">
               <button
                 onClick={() => setConfirmingDelete(false)}
@@ -322,11 +417,11 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved 
                 Keep it
               </button>
               <button
-                onClick={destroy}
+                onClick={voidTxn}
                 disabled={busy}
                 className="rounded-[var(--r-pill)] bg-[var(--danger)] px-4 py-2 text-md font-medium text-white transition hover:opacity-90 active:scale-95"
               >
-                {busy ? "Deleting…" : "Delete"}
+                {busy ? "Voiding…" : "Void"}
               </button>
             </div>
           </div>
@@ -348,6 +443,14 @@ export function TransactionsTab({ month }: { month: string }) {
   const [potFilter, setPotFilter] = useState("all");
   const [kind, setKind] = useState<"all" | "out" | "in" | "transfer">("all");
   const [sheet, setSheet] = useState<{ txn: ListedTransaction | null } | null>(null);
+  // The last voided transaction, offered for undo for a few seconds.
+  const [voided, setVoided] = useState<{ txn: ListedTransaction; error: string | null } | null>(null);
+
+  useEffect(() => {
+    if (!voided || voided.error) return;
+    const t = setTimeout(() => setVoided(null), 10000);
+    return () => clearTimeout(t);
+  }, [voided]);
 
   const pots = potsData?.pots ?? [];
   const accounts = accountsData?.accounts ?? [];
@@ -368,6 +471,21 @@ export function TransactionsTab({ month }: { month: string }) {
   const saved = () => {
     setSheet(null);
     retry();
+  };
+  const onVoided = (txn: ListedTransaction) => {
+    setSheet(null);
+    setVoided({ txn, error: null });
+    retry();
+  };
+  const undoVoid = async () => {
+    if (!voided) return;
+    try {
+      await request(`/api/transactions/${voided.txn.id}/unvoid`, { method: "POST" });
+      setVoided(null);
+      retry();
+    } catch (e) {
+      setVoided({ ...voided, error: e instanceof Error ? e.message : "Couldn't undo. Try again." });
+    }
   };
 
   return (
@@ -417,6 +535,24 @@ export function TransactionsTab({ month }: { month: string }) {
           ]}
         />
       </div>
+
+      {voided && (
+        <div role="status" className="mb-4 rounded-[var(--r-md)] bg-[var(--bg-sunken)] px-3 py-2.5 text-md">
+          <div className="flex items-center justify-between gap-3">
+            <span className="min-w-0 truncate">Voided · {voided.txn.description}</span>
+            {voided.error ? (
+              <button onClick={() => setVoided(null)} className="shrink-0 font-medium text-[var(--muted)] transition hover:text-[var(--ink)]">
+                Dismiss
+              </button>
+            ) : (
+              <button onClick={undoVoid} className="shrink-0 font-medium underline decoration-[var(--hairline-strong)] underline-offset-4 transition hover:opacity-80 active:scale-95">
+                Undo
+              </button>
+            )}
+          </div>
+          {voided.error && <p className="mt-1 text-sm text-[var(--danger)]">{voided.error}</p>}
+        </div>
+      )}
 
       {loading ? (
         <div className="space-y-2.5">
@@ -495,6 +631,7 @@ export function TransactionsTab({ month }: { month: string }) {
           accounts={accounts}
           onClose={() => setSheet(null)}
           onSaved={saved}
+          onVoided={onVoided}
         />
       )}
     </div>

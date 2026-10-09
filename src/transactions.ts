@@ -162,6 +162,22 @@ export async function moneyLockReason(db: Db, userId: number, id: number): Promi
   const t = await db.get<{ cleared: string }>("SELECT cleared FROM transactions WHERE id = ? AND user_id = ?", id, userId);
   if (!t) return null;
   if (t.cleared !== "uncleared") return `already ${t.cleared}; amounts cannot change`;
+  const settled = await settlementLink(db, userId, id);
+  return settled ? `${settled}; amounts cannot change` : null;
+}
+
+/** Why a transaction cannot be voided or unvoided, or null when it can.
+ *  Reconciled rows are part of a confirmed statement balance; settlement
+ *  rows back a contact's ledger. Cleared rows can still be voided. */
+export async function voidLockReason(db: Db, userId: number, id: number): Promise<string | null> {
+  const t = await db.get<{ cleared: string }>("SELECT cleared FROM transactions WHERE id = ? AND user_id = ?", id, userId);
+  if (!t) return null;
+  if (t.cleared === "reconciled") return "already reconciled; cannot be voided";
+  const settled = await settlementLink(db, userId, id);
+  return settled ? `${settled}; cannot be voided` : null;
+}
+
+async function settlementLink(db: Db, userId: number, id: number): Promise<string | null> {
   const alloc = await db.get(
     `SELECT 1 FROM settlement_allocations a JOIN splits s ON s.id = a.split_id
      WHERE s.transaction_id = ? AND a.user_id = ? AND s.user_id = ? LIMIT 1`,
@@ -169,9 +185,9 @@ export async function moneyLockReason(db: Db, userId: number, id: number): Promi
     userId,
     userId
   );
-  if (alloc) return "linked to a contact settlement; amounts cannot change";
+  if (alloc) return "linked to a contact settlement";
   const st = await db.get("SELECT 1 FROM settlements WHERE transaction_id = ? AND user_id = ? LIMIT 1", id, userId);
-  if (st) return "this is a settlement record; amounts cannot change";
+  if (st) return "this is a settlement record";
   return null;
 }
 
@@ -212,7 +228,7 @@ export async function updateTransaction(db: Db, userId: number, id: number, inpu
     have.length !== want.length ||
     have.some((s, i) => s.potId !== want[i].potId || s.owner !== want[i].owner || s.contactId !== want[i].contactId || s.amountCents !== want[i].amountCents);
   const moneyChanged =
-    f.amountCents !== cur.amount_cents || (f.isTransfer ? 1 : 0) !== cur.is_transfer || splitsChanged;
+    f.amountCents !== cur.amount_cents || f.accountId !== cur.account_id || (f.isTransfer ? 1 : 0) !== cur.is_transfer || splitsChanged;
   if (moneyChanged) {
     const lock = await moneyLockReason(db, userId, id);
     if (lock) throw new Error(lock);

@@ -176,6 +176,7 @@ describe("cross-user isolation", () => {
     expect((await attempt("POST", `/api/transactions/${txnB}/void`)).status).toBe(404);
     expect((await attempt("PUT", `/api/transactions/${txnB}`, { description: "hacked" })).status).toBe(404);
     expect((await attempt("DELETE", `/api/transactions/${txnB}`)).status).toBe(404);
+    expect((await attempt("POST", `/api/transactions/${txnB}/unvoid`)).status).toBe(404);
     expect((await attempt("PUT", `/api/pots/${potB}`, { name: "Hacked" })).status).toBe(404);
     expect((await attempt("DELETE", `/api/pots/${potB}`)).status).toBe(404);
     expect((await attempt("PUT", `/api/contacts/${contactB}`, { name: "Hacked" })).status).toBe(404);

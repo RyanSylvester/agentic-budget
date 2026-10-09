@@ -17,7 +17,7 @@ import { reconcile, suggestClear } from "./reconcile";
 import { closePreview, applyClose, shiftMonth } from "./close";
 import { assignToPot, allPotAssigned, allPotAssignedMonths } from "./assign";
 import { scaffoldMonth, type ScaffoldStrategy } from "./scaffold";
-import { createTransaction, updateTransaction } from "./transactions";
+import { createTransaction, updateTransaction, voidLockReason } from "./transactions";
 import { createSchedule, getScheduleById, listSchedules, markPaid, removeSchedule, sinkingStatuses } from "./sinking";
 import { validMonth } from "./money";
 import type {
@@ -155,8 +155,23 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
     if (id === null) return c.json({ error: "bad transaction id" }, 400);
     const row = await db.get<{ voided: number }>("SELECT voided FROM transactions WHERE id = ? AND user_id = ?", id, userId);
     if (!row) return c.json({ error: `no transaction ${id}` }, 404);
+    const lock = await voidLockReason(db, userId, id);
+    if (lock) return c.json({ error: lock }, 409);
     await db.run("UPDATE transactions SET voided = 1 WHERE id = ? AND user_id = ?", id, userId);
     return c.json({ ok: true, alreadyVoided: row.voided === 1 } satisfies VoidResponse);
+  });
+
+  /** Undo a void: the transaction counts again in spend, inflows, and RTA. */
+  app.post("/api/transactions/:id/unvoid", async (c) => {
+    const db = await getDb();
+    const userId = await requestUserId(c, db, authed);
+    const id = badId(c, "id");
+    if (id === null) return c.json({ error: "bad transaction id" }, 400);
+    if (!(await txnExists(db, userId, id))) return c.json({ error: `no transaction ${id}` }, 404);
+    const lock = await voidLockReason(db, userId, id);
+    if (lock) return c.json({ error: lock.replace("cannot be voided", "cannot be restored") }, 409);
+    await db.run("UPDATE transactions SET voided = 0 WHERE id = ? AND user_id = ?", id, userId);
+    return c.json({ ok: true } satisfies OkResponse);
   });
 
   /** Assign dollars to a pot for a month. Body: { month: "YYYY-MM", potId, cents }. */
@@ -506,13 +521,16 @@ export function createApp(getDb: () => Promise<Db>, opts?: { auth?: AuthConfig }
   });
 
   /** Delete a transaction. This is a soft void: excluded from spend, inflow,
-   *  and RTA math, kept for audit. Same semantics as the existing void route. */
+   *  and RTA math, kept for audit, undone by POST .../unvoid. Same semantics
+   *  as the void route; reconciled and settlement rows are refused (409). */
   app.delete("/api/transactions/:id", async (c) => {
     const db = await getDb();
     const userId = await requestUserId(c, db, authed);
     const id = badId(c, "id");
     if (id === null) return c.json({ error: "bad transaction id" }, 400);
     if (!(await txnExists(db, userId, id))) return c.json({ error: `no transaction ${id}` }, 404);
+    const lock = await voidLockReason(db, userId, id);
+    if (lock) return c.json({ error: lock }, 409);
     await db.run("UPDATE transactions SET voided = 1 WHERE id = ? AND user_id = ?", id, userId);
     return c.json({ ok: true } satisfies OkResponse);
   });

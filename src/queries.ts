@@ -323,7 +323,11 @@ export async function listTransactions(db: Db, userId: number, month: string): P
             up.pot_id AS potId, p.name AS potName, p.pot_group AS potGroup,
             CASE WHEN cs.n > 0 THEN 1 ELSE 0 END AS splitWithContact,
             COALESCE(-cs.total, 0) AS sharedCents,
-            cs.contact_id AS splitContactId, c.name AS splitContactName
+            cs.contact_id AS splitContactId, c.name AS splitContactName,
+            CASE WHEN EXISTS (SELECT 1 FROM settlement_allocations sa JOIN splits ss ON ss.id = sa.split_id
+                              WHERE ss.transaction_id = t.id AND ss.user_id = t.user_id AND sa.user_id = t.user_id)
+                   OR EXISTS (SELECT 1 FROM settlements st WHERE st.transaction_id = t.id AND st.user_id = t.user_id)
+                 THEN 1 ELSE 0 END AS settled
      FROM transactions t
      JOIN accounts a ON a.id = t.account_id AND a.user_id = ?
      LEFT JOIN us up ON up.transaction_id = t.id AND up.rn = 1
