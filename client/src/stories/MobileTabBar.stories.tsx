@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { expect, fn, userEvent, within } from "storybook/test";
 import { MobileTabBar } from "../AppShell";
 
-/* Six-tab mobile bottom bar: icon-only, every tab directly reachable. */
+/* Labelled mobile bottom bar: Overview, Pots, Transactions, and More. */
 
 const meta: Meta<typeof MobileTabBar> = {
   title: "App/MobileTabBar",
@@ -12,11 +13,11 @@ const meta: Meta<typeof MobileTabBar> = {
     docs: {
       description: {
         component:
-          "The mobile bottom tab bar. All six tabs sit directly in the bar in the same order as the desktop sidebar, so there is no More sheet. The active dot is absolutely positioned above the icon, keeping the 24px icon optically centered in its 64px touch target. Dark ink when active, muted grey when inactive. The Pots tab earns a warning dot near month-end when money is still unassigned.",
+          "The mobile bottom tab bar. The three month tabs (Overview, Pots, Transactions) sit directly in the bar, each an icon over a short label. Sharing, Accounts and Settings live behind More, which opens a sheet in the same order as the desktop sidebar and reads as active while one of them is open. Each button is a 64px-tall target, the bar pads itself above the home indicator, and the active tab carries aria-current. The Pots tab earns a warning dot near month-end when money is still unassigned.",
       },
     },
   },
-  args: { onGo: () => {}, closeAlert: false },
+  args: { onGo: fn(), closeAlert: false },
 };
 
 export default meta;
@@ -40,23 +41,46 @@ export const PotsActiveWithCloseAlert: Story = {
   },
 };
 
-export const SettingsActive: Story = {
-  args: { tab: "settings" },
+export const TransactionsActive: Story = {
+  args: { tab: "transactions" },
   parameters: {
-    docs: { description: { story: "A trailing tab active: the bar fits all six without scrolling." } },
+    docs: { description: { story: "Transactions active: the longest label still fits a quarter of a 320px screen." } },
   },
 };
 
 export const SharingActive: Story = {
   args: { tab: "sharing" },
   parameters: {
-    docs: { description: { story: "Sharing has its own two-person icon now that it lives in the bar." } },
+    docs: { description: { story: "A tab behind More is open, so More reads as the active tab." } },
   },
 };
 
-export const AccountsActive: Story = {
-  args: { tab: "accounts" },
+export const MoreSheetOpen: Story = {
+  args: { tab: "accounts", initialMoreOpen: true },
   parameters: {
-    docs: { description: { story: "Accounts has its own card icon now that it lives in the bar." } },
+    docs: {
+      description: {
+        story: "The More sheet: Sharing, Accounts and Settings, with the open one highlighted. Escape or a backdrop tap closes it.",
+      },
+    },
+  },
+};
+
+export const OpenMoreAndPick: Story = {
+  args: { tab: "overview" },
+  parameters: {
+    docs: {
+      description: { story: "Tapping More opens the sheet; picking Settings closes it and navigates. (Interaction test.)" },
+    },
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const more = canvas.getByRole("button", { name: /^More/ });
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(more);
+    const sheet = within(await canvas.findByRole("dialog", { name: "More" }));
+    await userEvent.click(sheet.getByRole("button", { name: "Settings" }));
+    await expect(args.onGo).toHaveBeenCalledWith("settings");
+    await expect(canvas.queryByRole("dialog")).toBeNull();
   },
 };
