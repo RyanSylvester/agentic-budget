@@ -63,8 +63,9 @@ export function AccountsView() {
   return (
     <div>
       <div className="mb-5 flex items-baseline justify-between">
-        <h1 tabIndex={-1} className="font-serif-d text-xl font-medium outline-none">Accounts</h1>
-        <button onClick={() => setAdding(true)} className="btn-ink px-4 py-2 text-md">Add account</button>
+        {/* Phones show the tab name in the top bar: the heading stays for screen readers. */}
+        <h1 tabIndex={-1} className="sr-only font-serif-d text-xl font-medium outline-none md:not-sr-only">Accounts</h1>
+        <button onClick={() => setAdding(true)} className="btn-ink ml-auto px-4 py-2 text-md">Add account</button>
       </div>
       <AccountsList onAdd={() => setAdding(true)} />
       {adding && <AccountSheet onClose={() => setAdding(false)} />}

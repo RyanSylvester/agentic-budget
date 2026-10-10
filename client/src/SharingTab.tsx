@@ -425,9 +425,10 @@ export function SharingTab() {
   return (
     <div className="mx-auto max-w-[720px]">
       <div className="mb-5 flex items-center justify-between gap-3">
-        <div className="font-serif-d text-xl font-medium">Sharing</div>
+        {/* Phones show the tab name in the top bar, so the visible title is desktop-only. */}
+        <div className="hidden font-serif-d text-xl font-medium md:block">Sharing</div>
         {archivedCount > 0 && (
-          <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-[var(--ink-2)]">
+          <label className="ml-auto flex min-h-11 cursor-pointer items-center gap-2 text-sm text-[var(--ink-2)]">
             <input
               type="checkbox"
               checked={showArchived}

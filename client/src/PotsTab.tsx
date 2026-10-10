@@ -286,10 +286,11 @@ export function PotsTab({ month, today, onGoMonth }: {
     <div>
       <div className="mb-5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
         <div className="flex items-center gap-2.5">
-          <div className="font-serif-d text-xl font-medium">Pots</div>
+          {/* Phones show the tab name in the top bar, so the visible title is desktop-only. */}
+          <div className="hidden font-serif-d text-xl font-medium md:block">Pots</div>
           {showBadge && <MonthStatusBadge closed={closeData.closed} />}
         </div>
-        <div className="flex gap-2">
+        <div className="ml-auto flex gap-2">
           {canFill && !fillInSummary && !loading && !error && pots.length > 0 && (
             <button onClick={() => setScaffoldOpen(true)} className="btn-ghost px-4 py-2 text-md">
               Fill from history

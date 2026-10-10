@@ -60,7 +60,8 @@
 
     /* 5.1:1 on --bg. */
     --success: #367156;
-    --warning: #b07a2a;
+    /* 4.7:1 on --bg, 4.6:1 on --warning-soft. */
+    --warning: #8f621e;
     --warning-soft: #f6eddd;
     --danger: #c2524c;
     --danger-soft: #f8e7e5;
