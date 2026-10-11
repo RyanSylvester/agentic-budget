@@ -53,12 +53,12 @@ async function setup() {
 }
 
 describe("recategorize on locked transactions", () => {
-  test("moves a reconciled transaction to another pot; PUT with a new pot is refused", async () => {
+  test("moves a reconciled transaction to another pot; PUT with a new amount is refused", async () => {
     const { db, json, userId, dining, txn, accountId } = await setup();
     const id = await txn("cleared");
     await db.run("UPDATE transactions SET cleared = 'reconciled' WHERE id = ?", id);
 
-    const put = await json("PUT", `/api/transactions/${id}`, { date: "2026-09-10", accountId, potId: dining, amountCents: -5000, description: "shop" });
+    const put = await json("PUT", `/api/transactions/${id}`, { date: "2026-09-10", accountId, potId: dining, amountCents: -6000, description: "shop" });
     expect(put.status).toBe(400);
     expect((await put.json()).error).toMatch("already reconciled");
 
@@ -73,6 +73,38 @@ describe("recategorize on locked transactions", () => {
     // Description and date still change through PUT when the money matches.
     const edit = await json("PUT", `/api/transactions/${id}`, { date: "2026-09-11", accountId, potId: dining, amountCents: -5000, description: "big shop" });
     expect(edit.status).toBe(200);
+  });
+
+  test("PUT reclassifies a reconciled inflow as a transfer and back", async () => {
+    const { db, json, userId, groceries, dining, accountId } = await setup();
+    const r = await json("POST", "/api/transactions", { date: "2026-09-10", accountId, potId: groceries, amountCents: 380000, description: "Transfer", cleared: "cleared" });
+    const id = (await r.json()).id as number;
+    await db.run("UPDATE transactions SET cleared = 'reconciled' WHERE id = ?", id);
+
+    const toTransfer = await json("PUT", `/api/transactions/${id}`, { date: "2026-09-10", accountId, potId: null, amountCents: 380000, description: "Transfer", isTransfer: true });
+    expect(toTransfer.status).toBe(200);
+    let row = (await listTransactions(db, userId, "2026-09")).find((t) => t.id === id)!;
+    expect(row.isTransfer).toBe(1);
+    expect(row.potId).toBe(null);
+    expect(row.cleared).toBe("reconciled");
+    expect(row.amountCents).toBe(380000);
+
+    const back = await json("PUT", `/api/transactions/${id}`, { date: "2026-09-10", accountId, potId: dining, amountCents: 380000, description: "Transfer" });
+    expect(back.status).toBe(200);
+    row = (await listTransactions(db, userId, "2026-09")).find((t) => t.id === id)!;
+    expect(row.isTransfer).toBe(0);
+    expect(row.potId).toBe(dining);
+  });
+
+  test("the transfer flag is frozen on settlement-linked rows; the pot is not", async () => {
+    const { db, json, userId, groceries, dining, accountId, txn } = await setup();
+    const id = await txn();
+    await db.run("INSERT INTO settlements (user_id, transaction_id, date, amount_cents) VALUES (?, ?, '2026-09-27', 5000)", userId, id);
+    const flag = await json("PUT", `/api/transactions/${id}`, { date: "2026-09-10", accountId, potId: groceries, amountCents: -5000, description: "shop", isTransfer: true });
+    expect(flag.status).toBe(400);
+    expect((await flag.json()).error).toMatch("settlement");
+    const pot = await json("PUT", `/api/transactions/${id}`, { date: "2026-09-10", accountId, potId: dining, amountCents: -5000, description: "shop" });
+    expect(pot.status).toBe(200);
   });
 
   test("changing the account of a cleared transaction is refused", async () => {
