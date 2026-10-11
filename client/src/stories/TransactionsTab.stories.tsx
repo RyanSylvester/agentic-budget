@@ -238,7 +238,7 @@ export const ReconciledEdit: Story = {
     docs: {
       description: {
         story:
-          "Editing a reconciled transaction: a note explains that amount, account and split are locked, those fields are disabled, and Void is disabled with the reason. The pot, date and description stay editable; a pot change goes through recategorize.",
+          "Editing a reconciled transaction: a note explains that amount, account and split are locked, those fields are disabled, and Void is disabled with the reason. The pot, transfer setting, date and description stay editable and save through one PUT with the money fields unchanged.",
       },
     },
   },

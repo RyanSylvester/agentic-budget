@@ -224,18 +224,29 @@ export async function updateTransaction(db: Db, userId: number, id: number, inpu
         ]
       : [{ potId: f.potId, owner: "user", contactId: null, amountCents: f.amountCents }];
   const have = await currentSplits(db, userId, id);
-  const splitsChanged =
+  // Pot and transfer flag are classification: they move money between pots
+  // and RTA but leave the account balance alone, so cleared and reconciled
+  // rows accept them. Amount, account and the split shape stay frozen.
+  const shapeChanged =
     have.length !== want.length ||
-    have.some((s, i) => s.potId !== want[i].potId || s.owner !== want[i].owner || s.contactId !== want[i].contactId || s.amountCents !== want[i].amountCents);
-  const moneyChanged =
-    f.amountCents !== cur.amount_cents || f.accountId !== cur.account_id || (f.isTransfer ? 1 : 0) !== cur.is_transfer || splitsChanged;
-  if (moneyChanged) {
+    have.some((s, i) => s.owner !== want[i].owner || s.contactId !== want[i].contactId || s.amountCents !== want[i].amountCents);
+  const balanceChanged = f.amountCents !== cur.amount_cents || f.accountId !== cur.account_id || shapeChanged;
+  if (balanceChanged) {
     const lock = await moneyLockReason(db, userId, id);
     if (lock) throw new Error(lock);
   }
+  if ((f.isTransfer ? 1 : 0) !== cur.is_transfer) {
+    const settled = await settlementLink(db, userId, id);
+    if (settled) throw new Error(`${settled}; transfer flag cannot change`);
+  }
 
   await db.run("UPDATE transactions SET date = ?, account_id = ?, amount_cents = ?, description = ?, is_transfer = ? WHERE id = ? AND user_id = ?", f.date, f.accountId, f.amountCents, f.description, f.isTransfer ? 1 : 0, id, userId);
-  await db.run("DELETE FROM splits WHERE transaction_id = ? AND user_id = ?", id, userId);
-  await insertSplits(db, cur.user_id, id, f.potId, f.amountCents, f.contactId, f.shareCents);
+  if (shapeChanged) {
+    await db.run("DELETE FROM splits WHERE transaction_id = ? AND user_id = ?", id, userId);
+    await insertSplits(db, cur.user_id, id, f.potId, f.amountCents, f.contactId, f.shareCents);
+  } else {
+    // Update in place so settlement allocations keep pointing at their splits.
+    await db.run("UPDATE splits SET pot_id = ? WHERE transaction_id = ? AND user_id = ?", f.potId, id, userId);
+  }
   await assertSplitsSum(db, userId, id);
 }

@@ -55,7 +55,8 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved,
 }) {
   const editing = txn !== null;
   // Mirrors the server: cleared, reconciled and settlement rows keep their
-  // money fields; reconciled and settlement rows cannot be voided.
+  // money fields but can change pot and transfer flag (settlement rows keep
+  // the flag); reconciled and settlement rows cannot be voided.
   const lockedAs = !txn ? null : txn.settled ? "settled" : txn.cleared !== "uncleared" ? txn.cleared : null;
   const locked = lockedAs !== null;
   const voidLocked = !!txn && (!!txn.settled || txn.cleared === "reconciled");
@@ -130,31 +131,25 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved,
       setError("Pick a valid date.");
       return;
     }
-    if (!t.isTransfer && potId === "") {
+    if (!isTransfer && potId === "") {
       setError("Pick a pot.");
       return;
     }
-    const newPotId = potId === "" ? null : Number(potId);
-    const potChanged = newPotId !== t.potId;
-    const textChanged = description.trim() !== t.description || date !== t.date;
     setBusy(true);
     setError(null);
     try {
-      // The pot moves through recategorize, which locked rows allow; date and
-      // description go through PUT with the money fields exactly as they were.
-      if (potChanged && newPotId !== null) await request(`/api/transactions/${t.id}/recategorize`, jsonInit("POST", { potId: newPotId }));
-      if (textChanged) {
-        await request(`/api/transactions/${t.id}`, jsonInit("PUT", {
-          date,
-          accountId: t.accountId,
-          potId: potChanged ? newPotId : t.potId,
-          amountCents: t.amountCents,
-          description: description.trim(),
-          isTransfer: !!t.isTransfer,
-          contactId: t.splitWithContact ? t.splitContactId : null,
-          shareCents: t.splitWithContact ? -t.sharedCents : 0,
-        }));
-      }
+      // Pot, transfer flag, date and description change; the money fields go
+      // back exactly as they were.
+      await request(`/api/transactions/${t.id}`, jsonInit("PUT", {
+        date,
+        accountId: t.accountId,
+        potId: potId === "" ? null : Number(potId),
+        amountCents: t.amountCents,
+        description: description.trim(),
+        isTransfer,
+        contactId: t.splitWithContact ? t.splitContactId : null,
+        shareCents: t.splitWithContact ? -t.sharedCents : 0,
+      }));
       onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't save.");
@@ -243,7 +238,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved,
       <div className="mb-4 text-lg font-semibold">{editing ? "Edit transaction" : "Add transaction"}</div>
       {lockedAs && (
         <p className="mb-4 rounded-[var(--r-md)] bg-[var(--bg-sunken)] px-3 py-2.5 text-sm text-[var(--ink-2)]">
-          {lockedAs === "settled" ? "Part of a contact settlement" : titleCase(lockedAs)}. Amount, account and split are locked; you can still change the pot, date and description.
+          {lockedAs === "settled" ? "Part of a contact settlement" : titleCase(lockedAs)}. Amount, account and split are locked; you can still change the pot, {lockedAs === "settled" || split ? "" : "transfer setting, "}date and description.
         </p>
       )}
       <div className="space-y-4">
@@ -312,7 +307,6 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved,
           <select
             value={potId}
             onChange={(e) => setPotId(e.target.value)}
-            disabled={locked && isTransfer}
             aria-label="Pot"
             className="field w-full px-3 py-2.5 text-md"
           >
@@ -336,7 +330,7 @@ export function TransactionSheet({ txn, month, pots, accounts, onClose, onSaved,
           <input
             type="checkbox"
             checked={isTransfer}
-            disabled={locked}
+            disabled={locked && (lockedAs === "settled" || split)}
             onChange={(e) => {
               setIsTransfer(e.target.checked);
               if (e.target.checked) {
