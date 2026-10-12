@@ -9,9 +9,11 @@
  */
 import type { Db, DbValue } from "./db-interface";
 import type { ListedTransaction, PotHistoryPoint, RecentTransaction, TrendPoint } from "./api-types";
+import { RTA_INFLOW_SPLIT, SPEND_SPLIT } from "./money";
 export type { ListedTransaction, PotHistoryPoint, RecentTransaction, TrendPoint };
 
-/** The user's confirmed outflow for a month, in positive cents.
+/** The user's confirmed spend for a month, in cents: outflows net of
+ *  refunds on spending pots (SPEND_SPLIT).
  *  Transfers between the user's own accounts are never spending.
  *  Voided transactions are excluded everywhere. */
 export async function monthSpend(db: Db, userId: number, month: string): Promise<number> {
@@ -20,7 +22,7 @@ export async function monthSpend(db: Db, userId: number, month: string): Promise
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
      WHERE substr(t.date, 1, 7) = ?
        AND t.is_transfer = 0 AND t.voided = 0
-       AND s.owner = 'user' AND s.amount_cents < 0
+       AND s.owner = 'user' AND ${SPEND_SPLIT}
        AND s.user_id = ? AND t.user_id = ?`,
     month,
     userId,
@@ -29,14 +31,15 @@ export async function monthSpend(db: Db, userId: number, month: string): Promise
   return r!.spent;
 }
 
-/** The user's confirmed outflow for one pot in a month: user share + contact share. */
+/** The user's confirmed spend for one pot in a month, net of refunds on
+ *  spending pots: user share + contact share. */
 export async function potSpend(db: Db, userId: number, potId: number, month: string): Promise<{ userCents: number; sharedCents: number }> {
   const r = await db.get<{ user: number; shared: number }>(
     `SELECT
        COALESCE(SUM(CASE WHEN s.owner = 'user' THEN -s.amount_cents ELSE 0 END), 0) AS user,
        COALESCE(SUM(CASE WHEN s.owner = 'contact' THEN -s.amount_cents ELSE 0 END), 0) AS shared
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
-     WHERE s.pot_id = ? AND substr(t.date, 1, 7) = ? AND t.is_transfer = 0 AND t.voided = 0 AND s.amount_cents < 0
+     WHERE s.pot_id = ? AND substr(t.date, 1, 7) = ? AND t.is_transfer = 0 AND t.voided = 0 AND ${SPEND_SPLIT}
        AND s.user_id = ? AND t.user_id = ?`,
     potId,
     month,
@@ -66,7 +69,7 @@ export async function allPotSpend(
        COALESCE(SUM(CASE WHEN s.owner = 'contact' THEN -s.amount_cents ELSE 0 END), 0) AS shared
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
      WHERE s.pot_id IN (${placeholders}) AND substr(t.date, 1, 7) = ?
-       AND t.is_transfer = 0 AND t.voided = 0 AND s.amount_cents < 0
+       AND t.is_transfer = 0 AND t.voided = 0 AND ${SPEND_SPLIT}
        AND s.user_id = ? AND t.user_id = ?
      GROUP BY s.pot_id`,
     ...potIds,
@@ -97,7 +100,7 @@ export async function allPotSpendHistory(
        COALESCE(SUM(CASE WHEN s.owner = 'user' THEN -s.amount_cents ELSE 0 END), 0) AS user
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
      WHERE s.pot_id IN (${potPh}) AND substr(t.date, 1, 7) IN (${monthPh})
-       AND t.is_transfer = 0 AND t.voided = 0 AND s.amount_cents < 0
+       AND t.is_transfer = 0 AND t.voided = 0 AND ${SPEND_SPLIT}
        AND s.user_id = ? AND t.user_id = ?
      GROUP BY s.pot_id, month`,
     ...potIds,
@@ -140,7 +143,7 @@ export async function potHistory(
     `SELECT substr(t.date, 1, 7) AS month,
             COALESCE(SUM(CASE WHEN s.owner = 'user' THEN -s.amount_cents ELSE 0 END), 0) AS user
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
-     WHERE s.pot_id = ? AND t.is_transfer = 0 AND t.voided = 0 AND s.amount_cents < 0
+     WHERE s.pot_id = ? AND t.is_transfer = 0 AND t.voided = 0 AND ${SPEND_SPLIT}
        AND s.user_id = ? AND t.user_id = ?
        AND substr(t.date, 1, 7) >= ? AND substr(t.date, 1, 7) <= ?
      GROUP BY month`,
@@ -163,7 +166,7 @@ export async function potHistory(
 export async function spendTrend(db: Db, userId: number, limit = 6): Promise<TrendPoint[]> {
   const rows = await db.all<TrendPoint>(
     `SELECT substr(t.date, 1, 7) AS month,
-            COALESCE(SUM(CASE WHEN s.owner = 'user' AND s.amount_cents < 0 THEN -s.amount_cents ELSE 0 END), 0) AS spent
+            COALESCE(SUM(CASE WHEN s.owner = 'user' AND ${SPEND_SPLIT} THEN -s.amount_cents ELSE 0 END), 0) AS spent
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
      WHERE t.is_transfer = 0 AND t.voided = 0
        AND s.user_id = ? AND t.user_id = ?
@@ -210,15 +213,16 @@ export async function recentTransactions(db: Db, userId: number, limit = 10, mon
   );
 }
 
-/** The user's confirmed inflows for a month, in cents (positive).
- *  Transfers between the user's own accounts are never income. */
+/** The user's confirmed income for a month, in cents (positive): inflows
+ *  outside spending pots (RTA_INFLOW_SPLIT). Transfers between the user's
+ *  own accounts are never income. */
 export async function monthInflows(db: Db, userId: number, month: string): Promise<number> {
   const r = await db.get<{ inflow: number }>(
     `SELECT COALESCE(SUM(s.amount_cents), 0) AS inflow
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
      WHERE substr(t.date, 1, 7) = ?
        AND t.is_transfer = 0 AND t.voided = 0
-       AND s.owner = 'user' AND s.amount_cents > 0
+       AND s.owner = 'user' AND ${RTA_INFLOW_SPLIT}
        AND s.user_id = ? AND t.user_id = ?`,
     month,
     userId,

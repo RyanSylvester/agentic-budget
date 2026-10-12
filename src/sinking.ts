@@ -9,7 +9,7 @@ import type { Db } from "./db-interface";
 import type { SinkingSchedule, SinkingState, SinkingStatus } from "./api-types";
 export type { SinkingSchedule, SinkingState, SinkingStatus };
 import { tableExists } from "./db-interface";
-import { resolvePotId, validMonth } from "./money";
+import { SPEND_SPLIT, resolvePotId, validMonth } from "./money";
 import { shiftMonth } from "./close";
 
 const ROW = `SELECT s.id, s.pot_id AS potId, p.name AS potName,
@@ -110,7 +110,7 @@ export async function potBalance(db: Db, userId: number, potId: number, month: s
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
      WHERE s.pot_id = ? AND substr(t.date, 1, 7) <= ?
        AND t.is_transfer = 0 AND t.voided = 0
-       AND s.owner = 'user' AND s.amount_cents < 0
+       AND s.owner = 'user' AND ${SPEND_SPLIT}
        AND s.user_id = ? AND t.user_id = ?`,
     potId,
     month,
@@ -154,7 +154,7 @@ export async function potBalances(
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
      WHERE s.pot_id IN (${placeholders}) AND substr(t.date, 1, 7) <= ?
        AND t.is_transfer = 0 AND t.voided = 0
-       AND s.owner = 'user' AND s.amount_cents < 0
+       AND s.owner = 'user' AND ${SPEND_SPLIT}
        AND s.user_id = ? AND t.user_id = ?
      GROUP BY s.pot_id`,
     ...potIds,

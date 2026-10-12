@@ -159,10 +159,11 @@ describe("close card equation", () => {
     const db = await testDb();
     await db.exec(`INSERT INTO accounts (user_id, name, type) VALUES (1, 'Chequing','chequing')`);
     await db.exec(`INSERT INTO pots (user_id, name, pot_group, target_type, target_cents) VALUES (1, 'Housing','essentials','fixed',300000)`);
+    await db.exec(`INSERT INTO pots (user_id, name, pot_group, target_type, is_assignable) VALUES (1, 'Payroll','Income','fixed',0)`);
     const t = (await db.get<{ id: number }>(
       "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, cleared) VALUES (1, '2026-09-01', 1, 500000, 't', 'manual', 'agent', 'cleared') RETURNING id"
     ))!;
-    await db.run("INSERT INTO splits (user_id, transaction_id, pot_id, owner, amount_cents) VALUES (1, ?, 1, 'user', 500000)", t.id);
+    await db.run("INSERT INTO splits (user_id, transaction_id, pot_id, owner, amount_cents) VALUES (1, ?, 2, 'user', 500000)", t.id);
     expect((await closePreview(db, 1, "2026-09")).closed).toBe(false);
     await assignToPot(db, 1, "2026-09", 1, 500000); // every dollar assigned: RTA = 0
     await applyClose(db, 1, await closePreview(db, 1, "2026-09"));
