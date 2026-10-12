@@ -221,10 +221,9 @@ export function SplitTag({ p }: { p: Pot }) {
   );
 }
 
-// Available = assigned minus spent. Green when positive, warm red only
+// Available (see availableCents). Green when positive, warm red only
 // when overspent, muted at exactly zero.
-export function Available({ assignedCents, spentCents, className = "" }: { assignedCents: number; spentCents: number; className?: string }) {
-  const avail = assignedCents - spentCents;
+export function Available({ cents: avail, className = "" }: { cents: number; className?: string }) {
   const color = avail > 0 ? "var(--success)" : avail < 0 ? "var(--danger)" : "var(--muted)";
   return (
     <span className={`t-nums font-medium ${className}`} style={{ color }}>
@@ -436,8 +435,8 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot, onCover }: {
                     <div className="flex items-start justify-between gap-3">
                       <PotNameCell p={p} onEdit={onEditPot ? () => onEditPot(p) : undefined} />
                       <span className="shrink-0 pt-0.5">
-                        <Available assignedCents={p.assignedCents} spentCents={p.spentCents} />
-                        <span className="text-xs text-[var(--muted)]"> {p.spentCents > p.assignedCents ? "over" : "left"}</span>
+                        <Available cents={availableCents(p)} />
+                        <span className="text-xs text-[var(--muted)]"> {availableCents(p) < 0 ? "over" : "left"}</span>
                       </span>
                     </div>
                     <div className="mt-2 flex items-baseline gap-4">
@@ -461,7 +460,7 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot, onCover }: {
                       <SplitTag p={p} />
                     </span>
                     <span className="text-right">
-                      <Available assignedCents={p.assignedCents} spentCents={p.spentCents} />
+                      <Available cents={availableCents(p)} />
                     </span>
                   </div>
                   {onCover && isOverspent(p) && (
