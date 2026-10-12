@@ -85,7 +85,7 @@ export const IncomePlannedVsReceived: Story = {
     docs: {
       description: {
         story:
-          "Each income pot shows planned income (editable, via the planned cell) next to received (what has actually landed). Paycheck is short of plan, Interest matches its plan, and Side gig arrived with no plan set. Planned income never counts toward ready to assign.",
+          "Each income pot shows planned income (editable, via the planned cell) next to received (what has actually landed). Paycheck is short of plan, Interest matches its plan, and Side gig arrived with no plan set. Income sits above the spending groups. Each income pot counts toward ready to assign as the larger of planned and received (net of money out).",
       },
     },
   },

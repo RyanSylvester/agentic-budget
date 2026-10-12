@@ -55,13 +55,17 @@ export function fmtCents(cents: number): string {
   return `${sign}${Math.floor(a / 100)}.${String(a % 100).padStart(2, "0")}`;
 }
 
-/** Which splits count as spending: outflows, plus inflows on spending
- *  (assignable) pots, which net against that pot's spend as refunds and
- *  reimbursements. Inflows on income pots are income, never negative spend. */
-export const SPEND_SPLIT =
-  "(s.amount_cents < 0 OR EXISTS (SELECT 1 FROM pots sp WHERE sp.id = s.pot_id AND sp.user_id = s.user_id AND sp.is_assignable = 1))";
+const ON_SPENDING_POT = "EXISTS (SELECT 1 FROM pots sp WHERE sp.id = s.pot_id AND sp.user_id = s.user_id AND sp.is_assignable = 1)";
+const ON_INCOME_POT = "EXISTS (SELECT 1 FROM pots sp WHERE sp.id = s.pot_id AND sp.user_id = s.user_id AND sp.is_assignable = 0)";
 
-/** Which splits count as income for Ready to Assign: inflows that are not
- *  on a spending pot (those offset the pot's spend instead). */
-export const RTA_INFLOW_SPLIT =
-  "(s.amount_cents > 0 AND NOT EXISTS (SELECT 1 FROM pots sp WHERE sp.id = s.pot_id AND sp.user_id = s.user_id AND sp.is_assignable = 1))";
+/** Which splits count as spending: everything on spending (assignable) pots,
+ *  where inflows net against the pot's spend as refunds and reimbursements,
+ *  plus uncategorized outflows. Income pots never count as spend: money out
+ *  of an income pot nets against what it received. */
+export const SPEND_SPLIT = `(${ON_SPENDING_POT} OR (s.amount_cents < 0 AND NOT ${ON_INCOME_POT}))`;
+
+/** Which splits count as income for Ready to Assign: everything on income
+ *  pots, in and out, so an income pot contributes what it received net,
+ *  plus uncategorized inflows. Inflows on spending pots offset that pot's
+ *  spend instead. */
+export const RTA_INFLOW_SPLIT = `(${ON_INCOME_POT} OR (s.amount_cents > 0 AND NOT ${ON_SPENDING_POT}))`;

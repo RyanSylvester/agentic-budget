@@ -561,22 +561,24 @@ export function TrendSpark({ trend }: { trend: TrendPoint[] }) {
   );
 }
 
-/** Planned income and assignments for a month, as the budget table derives
- *  them: income pots carry planned income in their assigned amount, and only
- *  assignable pots count as assigned. */
+/** Income and assignments for a month, as the budget table derives them:
+ *  income pots carry planned income in their assigned amount and what landed
+ *  (net) in received, and only assignable pots count as assigned. Each income
+ *  pot counts toward ready to assign as the larger of planned and received,
+ *  so pendingCents is planned income still to come. */
 export function monthPlan(pots: Pot[], rtaCents: number) {
   const assignedCents = pots.reduce((a, p) => a + (p.assignable ? p.assignedCents : 0), 0);
   const plannedCents = pots.reduce((a, p) => a + (p.assignable ? 0 : p.assignedCents), 0);
-  // RTA = inflows - assigned, so inflows come back out of it.
-  const inflowsCents = rtaCents + assignedCents;
-  return { assignedCents, plannedCents, inflowsCents };
+  const pendingCents = pots.reduce((a, p) => a + (p.assignable ? 0 : Math.max(0, p.assignedCents - p.receivedCents)), 0);
+  // RTA = income - assigned, so income comes back out of it.
+  const incomeCents = rtaCents + assignedCents;
+  return { assignedCents, plannedCents, pendingCents, incomeCents };
 }
 
 export function PotsSummary({
   month,
   pots,
   rtaCents,
-  planning = "current",
   onAssign,
   onFill,
   overspent,
@@ -585,7 +587,8 @@ export function PotsSummary({
   month: string;
   pots: Pot[];
   rtaCents: number;
-  /** Where the month sits; future months are always planned, not funded. */
+  /** Where the month sits. Kept for callers; ready to assign reads the same
+   *  in every month now that planned income counts toward it. */
   planning?: "past" | "current" | "future";
   /** Takes the user to the assign controls; omitted, no button is shown. */
   onAssign?: () => void;
@@ -596,69 +599,46 @@ export function PotsSummary({
   /** Where the overspent line leads (the first overspent row). */
   onShowOverspent?: () => void;
 }) {
-  const { assignedCents, plannedCents, inflowsCents } = monthPlan(pots, rtaCents);
-  // Before the money is in (a future month, or this month's pay still on its
-  // way), inflows minus assigned only says "not here yet". Plan against
-  // planned income instead, in neutral tones. Red over-assigned is kept for
-  // real inflows that the assignments exceed.
-  const plan =
-    planning === "future" || (planning === "current" && (inflowsCents <= 0 || inflowsCents < plannedCents));
-  const left = plannedCents - assignedCents;
+  const { assignedCents, plannedCents, pendingCents, incomeCents } = monthPlan(pots, rtaCents);
 
   const action = onFill ? (
     <button onClick={onFill} className="btn-ink min-h-11 px-5 text-md">
       Fill from history
     </button>
-  ) : onAssign && (plan ? left > 0 : rtaCents !== 0) ? (
+  ) : onAssign && rtaCents !== 0 ? (
     <button onClick={onAssign} className="btn-ink min-h-11 px-5 text-md">
-      {plan || rtaCents > 0 ? "Start assigning" : "Review amounts"}
+      {rtaCents > 0 ? "Start assigning" : "Review amounts"}
     </button>
   ) : null;
 
   return (
     <section className="card mb-6 p-5" aria-label={`Summary for ${monthLabel(month)}`}>
       <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
-        {plan ? (
-          <div>
-            <div className="text-xs text-[var(--muted)]">{left < 0 ? "Planned beyond income" : "Left to plan"}</div>
-            <div className="t-nums font-serif-d mt-0.5 text-figure font-light leading-none text-[var(--ink)]">
-              {money(Math.abs(left))}
-            </div>
-            <div className="t-nums mt-1.5 text-sm text-[var(--muted)]">
-              {plannedCents === 0 && assignedCents === 0 ? (
-                "Nothing planned yet. Set planned income under Income below, then fill the pots."
-              ) : (
-                <>
-                  Planned income {money(plannedCents)} − assigned {money(assignedCents)} ={" "}
-                  {left < 0 ? `${money(-left)} more than planned` : `${money(left)} left to plan`}
-                </>
-              )}
-            </div>
-            {planning === "current" && inflowsCents > 0 && (
-              <div className="t-nums mt-1 text-sm text-[var(--muted)]">
-                {money(inflowsCents)} received so far; ready to assign follows as income lands.
-              </div>
-            )}
+        <div>
+          <div className="text-xs text-[var(--muted)]">Ready to assign</div>
+          <div
+            className={`t-nums font-serif-d mt-0.5 text-figure font-light leading-none ${
+              rtaCents > 0 ? "text-[var(--accent)]" : rtaCents < 0 ? "text-[var(--danger)]" : "text-[var(--ink)]"
+            }`}
+          >
+            {money(rtaCents)}
           </div>
-        ) : (
-          <div>
-            <div className="text-xs text-[var(--muted)]">Ready to assign</div>
-            <div
-              className={`t-nums font-serif-d mt-0.5 text-figure font-light leading-none ${
-                rtaCents > 0 ? "text-[var(--accent)]" : rtaCents < 0 ? "text-[var(--danger)]" : "text-[var(--ink)]"
-              }`}
-            >
-              {money(rtaCents)}
-            </div>
-            <div className="mt-1.5 text-sm text-[var(--muted)]">
-              {rtaCents > 0
+          <div className="mt-1.5 text-sm text-[var(--muted)]">
+            {incomeCents === 0 && assignedCents === 0 && plannedCents === 0
+              ? "Nothing planned yet. Set planned income under Income below, then fill the pots."
+              : rtaCents > 0
                 ? "Give it a job: tap any Assigned amount below."
                 : rtaCents < 0
-                  ? "More is assigned than came in. Lower an Assigned amount below."
+                  ? "More is assigned than your income. Lower an Assigned amount below."
                   : "Every dollar has a job."}
-            </div>
           </div>
-        )}
+          {(incomeCents !== 0 || assignedCents !== 0) && (
+            <div className="t-nums mt-1 text-sm text-[var(--muted)]">
+              Income {money(incomeCents)} − assigned {money(assignedCents)}
+              {pendingCents > 0 && <> · {money(pendingCents)} of it still to come</>}
+            </div>
+          )}
+        </div>
         {action}
       </div>
       {overspent && overspent.count > 0 && (

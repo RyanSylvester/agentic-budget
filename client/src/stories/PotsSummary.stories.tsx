@@ -4,6 +4,7 @@ import { PotsSummary, SpendInsights } from "../PotsTab";
 import { fixturePlannedPots, fixturePots, fixtureTrend, MONTH } from "./fixtures";
 
 const plannedAssigned = fixturePlannedPots.reduce((a, p) => a + (p.assignable ? p.assignedCents : 0), 0);
+const plannedIncome = fixturePlannedPots.reduce((a, p) => a + (p.assignable ? 0 : p.assignedCents), 0);
 
 const meta: Meta<typeof PotsSummary> = {
   title: "Tabs/PotsSummary",
@@ -13,7 +14,7 @@ const meta: Meta<typeof PotsSummary> = {
     docs: {
       description: {
         component:
-          "The first card on the Pots page, straight above the budget table: ready to assign (its one home on this screen, with a Start assigning action). While a month's income is still planned rather than received, it shows what is left to plan against planned income instead, in neutral tones.",
+          "The first card on the Pots page, straight above the budget table: ready to assign (its one home on this screen, with a Start assigning action), and the income minus assigned line behind it. Planned income counts until it lands, so the line notes how much is still to come.",
       },
     },
   },
@@ -38,16 +39,16 @@ export const AllAssigned: Story = {
 export const OverAssigned: Story = {
   args: { rtaCents: -4250 },
   parameters: {
-    docs: { description: { story: "Real inflows that the assignments exceed: the figure turns to the danger tone." } },
+    docs: { description: { story: "Assignments above income: the figure turns to the danger tone." } },
   },
 };
 
 export const FuturePlanning: Story = {
-  args: { pots: fixturePlannedPots, rtaCents: -plannedAssigned, planning: "future" },
+  args: { pots: fixturePlannedPots, rtaCents: plannedIncome - plannedAssigned, planning: "future" },
   parameters: {
     docs: {
       description: {
-        story: "A future month has no inflows: planned income minus assigned, never a red over-assigned figure.",
+        story: "A future month has nothing received yet: ready to assign is planned income minus assigned, all of it still to come.",
       },
     },
   },
@@ -56,16 +57,20 @@ export const FuturePlanning: Story = {
 export const FuturePlannedBeyondIncome: Story = {
   args: {
     pots: fixturePlannedPots.map((p) => (p.name === "Paycheck" ? { ...p, assignedCents: 450000 } : p)),
-    rtaCents: -plannedAssigned,
+    rtaCents: 450000 - plannedAssigned,
     planning: "future",
   },
   parameters: {
-    docs: { description: { story: "Assignments above planned income: still neutral, worded as more than planned." } },
+    docs: { description: { story: "Assignments above planned income: over-assigned, in the danger tone." } },
   },
 };
 
 export const PayOnTheWay: Story = {
-  args: { pots: fixturePlannedPots, rtaCents: 200000 - plannedAssigned, planning: "current" },
+  args: {
+    pots: fixturePlannedPots.map((p) => (p.assignable ? p : { ...p, receivedCents: Math.min(p.assignedCents, 200000) })),
+    rtaCents: plannedIncome - plannedAssigned,
+    planning: "current",
+  },
   parameters: {
     docs: { description: { story: "This month, with only part of the planned income received so far." } },
   },
