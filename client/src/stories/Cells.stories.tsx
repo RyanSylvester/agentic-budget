@@ -8,7 +8,7 @@ const meta: Meta = {
     docs: {
       description: {
         component:
-          "The small cells inside the budget table. Available is assigned minus spent: green when positive, red when overspent. SplitTag marks pots shared with a contact.",
+          "The small cells inside the budget table. Available is assigned minus spent (a sinking pot's saved balance): green when positive, red when overspent. SplitTag marks pots shared with a contact.",
       },
     },
   },
@@ -16,7 +16,7 @@ const meta: Meta = {
 export default meta;
 
 export const AvailablePositive: StoryObj<typeof Available> = {
-  args: { assignedCents: 60000, spentCents: 55263 },
+  args: { cents: 4737 },
   render: (args) => <Available {...args} />,
   parameters: {
     docs: { description: { story: "Spent less than assigned: green." } },
@@ -24,7 +24,7 @@ export const AvailablePositive: StoryObj<typeof Available> = {
 };
 
 export const AvailableZero: StoryObj<typeof Available> = {
-  args: { assignedCents: 15000, spentCents: 15000 },
+  args: { cents: 0 },
   render: (args) => <Available {...args} />,
   parameters: {
     docs: { description: { story: "Fully spent: neutral zero." } },
@@ -32,7 +32,7 @@ export const AvailableZero: StoryObj<typeof Available> = {
 };
 
 export const AvailableNegative: StoryObj<typeof Available> = {
-  args: { assignedCents: 20000, spentCents: 23450 },
+  args: { cents: -3450 },
   render: (args) => <Available {...args} />,
   parameters: {
     docs: { description: { story: "Overspent: red." } },
@@ -40,7 +40,7 @@ export const AvailableNegative: StoryObj<typeof Available> = {
 };
 
 export const AvailableUnassigned: StoryObj<typeof Available> = {
-  args: { assignedCents: 0, spentCents: 3210 },
+  args: { cents: -3210 },
   render: (args) => <Available {...args} />,
   parameters: {
     docs: { description: { story: "Nothing assigned yet with spending recorded: the pot needs funding." } },

@@ -4,11 +4,13 @@ import { Sheet } from "./ui";
 
 /* ---------- overspending ---------- */
 
-// A pot is overspent when its available balance (assigned minus spent) is
-// below zero. Only spending pots count: income pots are never assigned to.
+// A pot is overspent when its available balance is below zero. Only
+// spending pots count: income pots are never assigned to.
 
-/** Available balance for a pot this month. */
-export const availableCents = (p: Pot) => p.assignedCents - p.spentCents;
+/** Available balance for a pot this month: assigned minus spent, or for a
+ *  sinking pot its saved balance, since money set aside in earlier months
+ *  pays for this month's spend. */
+export const availableCents = (p: Pot) => (p.sinking ? p.sinking.balanceCents : p.assignedCents - p.spentCents);
 
 /** True for a spending pot whose available balance is negative. */
 export const isOverspent = (p: Pot) => p.assignable && availableCents(p) < 0;
