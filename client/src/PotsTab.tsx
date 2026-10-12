@@ -244,13 +244,29 @@ export function CloseSummaryCard({ month, today, onClosed, onGoMonth }: {
   );
 }
 
-/* "Start assigning": bring the budget table into view and put focus on the
- * first Assigned amount, which is where money gets a job. */
+/* "Start assigning" / "Review amounts": bring the budget table into view,
+ * put focus on the first Assigned amount, which is where money gets a job,
+ * and flash it so the click has a visible answer even when the table is
+ * already on screen (scrolling is then a no-op and a clicked focus shows no
+ * ring). */
 function focusFirstAssignCell() {
   const cell = document.querySelector<HTMLButtonElement>('#budget-table button[title^="Assign to"]');
-  const target = cell ?? document.getElementById("budget-table");
-  target?.scrollIntoView({ behavior: "smooth", block: "center" });
-  cell?.focus({ preventScroll: true });
+  if (!cell) {
+    document.getElementById("budget-table")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  cell.scrollIntoView({ behavior: "smooth", block: "center" });
+  cell.focus({ preventScroll: true });
+  const css = getComputedStyle(cell);
+  const soft = css.getPropertyValue("--accent-soft").trim();
+  const ring = css.getPropertyValue("--accent").trim();
+  if (soft && ring && typeof cell.animate === "function") {
+    const on = { backgroundColor: soft, boxShadow: `0 0 0 2px ${ring}` };
+    cell.animate([on, { ...on, offset: 0.6 }, { backgroundColor: "transparent", boxShadow: "0 0 0 2px transparent" }], {
+      duration: 1800,
+      easing: "ease-out",
+    });
+  }
 }
 
 export function PotsTab({ month, today, onGoMonth }: {
