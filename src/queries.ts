@@ -227,14 +227,15 @@ export async function monthInflows(db: Db, userId: number, month: string): Promi
   return r!.inflow;
 }
 
-/** One pot's confirmed inflows for a month, in positive cents.
+/** One pot's confirmed inflows for a month, in positive cents, excluding
+ *  transfers, which RTA also leaves out.
  *  This is what has actually landed in an income pot; compare against
  *  the pot's assignment (planned income) when filling out the month. */
 export async function potInflow(db: Db, userId: number, potId: number, month: string): Promise<number> {
   const r = await db.get<{ inflow: number }>(
     `SELECT COALESCE(SUM(CASE WHEN s.owner = 'user' THEN s.amount_cents ELSE 0 END), 0) AS inflow
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
-     WHERE s.pot_id = ? AND substr(t.date, 1, 7) = ? AND t.voided = 0 AND s.amount_cents > 0
+     WHERE s.pot_id = ? AND substr(t.date, 1, 7) = ? AND t.is_transfer = 0 AND t.voided = 0 AND s.amount_cents > 0
        AND s.user_id = ? AND t.user_id = ?`,
     potId,
     month,
@@ -259,7 +260,7 @@ export async function allPotInflow(
     `SELECT s.pot_id AS potId,
        COALESCE(SUM(CASE WHEN s.owner = 'user' THEN s.amount_cents ELSE 0 END), 0) AS inflow
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
-     WHERE s.pot_id IN (${placeholders}) AND substr(t.date, 1, 7) = ? AND t.voided = 0 AND s.amount_cents > 0
+     WHERE s.pot_id IN (${placeholders}) AND substr(t.date, 1, 7) = ? AND t.is_transfer = 0 AND t.voided = 0 AND s.amount_cents > 0
        AND s.user_id = ? AND t.user_id = ?
      GROUP BY s.pot_id`,
     ...potIds,

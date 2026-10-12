@@ -79,6 +79,20 @@ describe("batched pot queries", () => {
     expect(batched.has(3)).toBe(false);
   });
 
+  test("transfer inflows are not counted as received", async () => {
+    const db = await seed();
+    // A card payment pair that nets to zero, tagged to the income pot.
+    for (const amount of [89182, -89182]) {
+      const t = (await db.get<{ id: number }>(
+        "INSERT INTO transactions (user_id, date, account_id, amount_cents, description, source, entered_by, cleared, is_transfer) VALUES (1, '2026-09-20', 1, ?, 'card payment', 'manual', 'agent', 'cleared', 1) RETURNING id",
+        amount
+      ))!;
+      await db.run("INSERT INTO splits (user_id, transaction_id, pot_id, owner, amount_cents) VALUES (1, ?, 4, 'user', ?)", t.id, amount);
+    }
+    expect((await allPotInflow(db, 1, [4], "2026-09")).get(4)).toBe(500000);
+    expect(await potInflow(db, 1, 4, "2026-09")).toBe(500000);
+  });
+
   test("empty pot list returns empty maps without querying", async () => {
     const db = await seed();
     expect((await allPotSpend(db, 1, [], "2026-09")).size).toBe(0);
