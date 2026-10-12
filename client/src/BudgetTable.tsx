@@ -285,6 +285,63 @@ export function SinkingLine({ sinking }: { sinking: NonNullable<Pot["sinking"]> 
   );
 }
 
+// Income sits above the spending groups, as a card of its own: each income
+// pot's planned income (editable) and what it received net of money out.
+// A pot counts toward ready to assign as the larger of the two, so the
+// header total is that sum and each row says what is still to come.
+function IncomeSection({ pots, month, onAssigned, onEditPot }: {
+  pots: Pot[];
+  month: string;
+  onAssigned: () => void;
+  onEditPot?: (pot: Pot) => void;
+}) {
+  const counted = pots.reduce((a, p) => a + Math.max(p.assignedCents, p.receivedCents), 0);
+  return (
+    <section className="card mb-4 overflow-hidden" aria-label="Income">
+      <div className="flex items-baseline justify-between gap-3 px-4 pt-3 pb-1 sm:px-5">
+        <span className="text-lg font-semibold text-[var(--ink)]">Income</span>
+        <span className="t-nums text-[22px] font-semibold text-[var(--ink)]" title="Counts toward ready to assign">
+          {moneyGrouped(counted)}
+        </span>
+      </div>
+      <p className="px-4 pb-2 text-sm text-[var(--ink-2)] sm:px-5">
+        Planned income counts toward ready to assign until it lands; then what you received does.
+      </p>
+      <div className="px-4 pb-1 sm:px-5">
+        {pots.map((p) => {
+          const toCome = p.assignedCents - p.receivedCents;
+          return (
+            <div key={p.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-[var(--hairline)] py-3">
+              <div className="min-w-0">
+                <PotNameCell p={p} onEdit={onEditPot ? () => onEditPot(p) : undefined} />
+                <div className="t-nums mt-0.5 text-xs text-[var(--muted)]">
+                  {toCome > 0
+                    ? `${money(toCome)} still to come`
+                    : p.assignedCents === 0
+                      ? p.receivedCents === 0 ? "Nothing planned" : "No plan set"
+                      : toCome < 0 && p.assignedCents > 0
+                        ? `${money(-toCome)} more than planned`
+                        : "All in"}
+                </div>
+              </div>
+              <div className="flex shrink-0 items-baseline gap-4">
+                <span className="flex items-baseline gap-1.5">
+                  <span className="text-xs text-[var(--muted)]">Planned</span>
+                  <AssignCell pot={p} month={month} onAssigned={onAssigned} purpose="planned" />
+                </span>
+                <span className="t-nums whitespace-nowrap text-md text-[var(--ink)]">
+                  <span className="text-xs text-[var(--muted)]">Received </span>
+                  {money(p.receivedCents)}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export function BudgetTable({ pots, month, onAssigned, onEditPot, onCover }: {
   pots: Pot[];
   month: string;
@@ -314,6 +371,7 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot, onCover }: {
 
   return (
     <div>
+      {income.length > 0 && <IncomeSection pots={income} month={month} onAssigned={onAssigned} onEditPot={onEditPot} />}
       <div className="hidden grid-cols-[minmax(0,1fr)_130px_170px_120px] gap-3 border-b border-[var(--hairline-strong)] px-4 pb-2 sm:grid sm:px-5">
         <span className="eyebrow">Pot</span>
         <span className="eyebrow">Assigned <span className="whitespace-nowrap text-[var(--muted)]" style={{ textTransform: "none", letterSpacing: "normal", fontWeight: 400 }}>(tap to edit)</span></span>
@@ -444,27 +502,6 @@ export function BudgetTable({ pots, month, onAssigned, onEditPot, onCover }: {
         );
       })}
       </div>
-      {income.length > 0 && (
-        <div className="mt-8">
-          <div className="mb-1 text-md font-semibold">Income</div>
-          <p className="mb-2 text-sm text-[var(--muted)]">Money in. Set planned income when you fill out the month; received shows what has actually landed. Planned income is just your expectation; only actual inflows become ready to assign.</p>
-          {income.map((p) => (
-            <div key={p.id} className="flex items-center justify-between gap-3 border-b border-[var(--hairline)] py-3">
-              <PotNameCell p={p} onEdit={onEditPot ? () => onEditPot(p) : undefined} />
-              <div className="flex shrink-0 items-center gap-4">
-                <span className="flex items-baseline gap-1.5">
-                  <span className="text-xs text-[var(--muted)]">planned</span>
-                  <AssignCell pot={p} month={month} onAssigned={onAssigned} purpose="planned" />
-                </span>
-                <span className="t-nums whitespace-nowrap text-sm text-[var(--muted)]">
-                  <span className="text-xs text-[var(--muted)]">received </span>
-                  {money(p.receivedCents)}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

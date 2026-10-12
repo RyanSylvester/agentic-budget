@@ -231,15 +231,17 @@ export async function monthInflows(db: Db, userId: number, month: string): Promi
   return r!.inflow;
 }
 
-/** One pot's confirmed inflows for a month, in positive cents, excluding
- *  transfers, which RTA also leaves out.
- *  This is what has actually landed in an income pot; compare against
- *  the pot's assignment (planned income) when filling out the month. */
+/** One pot's confirmed inflows for a month, excluding transfers, which RTA
+ *  also leaves out. On an income pot this is net (money in minus money out),
+ *  matching what the pot adds to Ready to Assign; on a spending pot it is
+ *  the inflows alone. Compare an income pot's figure against its assignment
+ *  (planned income) when filling out the month. */
 export async function potInflow(db: Db, userId: number, potId: number, month: string): Promise<number> {
   const r = await db.get<{ inflow: number }>(
     `SELECT COALESCE(SUM(CASE WHEN s.owner = 'user' THEN s.amount_cents ELSE 0 END), 0) AS inflow
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
-     WHERE s.pot_id = ? AND substr(t.date, 1, 7) = ? AND t.is_transfer = 0 AND t.voided = 0 AND s.amount_cents > 0
+     WHERE s.pot_id = ? AND substr(t.date, 1, 7) = ? AND t.is_transfer = 0 AND t.voided = 0
+       AND (s.amount_cents > 0 OR EXISTS (SELECT 1 FROM pots ip WHERE ip.id = s.pot_id AND ip.user_id = s.user_id AND ip.is_assignable = 0))
        AND s.user_id = ? AND t.user_id = ?`,
     potId,
     month,
@@ -264,7 +266,8 @@ export async function allPotInflow(
     `SELECT s.pot_id AS potId,
        COALESCE(SUM(CASE WHEN s.owner = 'user' THEN s.amount_cents ELSE 0 END), 0) AS inflow
      FROM splits s JOIN transactions t ON t.id = s.transaction_id
-     WHERE s.pot_id IN (${placeholders}) AND substr(t.date, 1, 7) = ? AND t.is_transfer = 0 AND t.voided = 0 AND s.amount_cents > 0
+     WHERE s.pot_id IN (${placeholders}) AND substr(t.date, 1, 7) = ? AND t.is_transfer = 0 AND t.voided = 0
+       AND (s.amount_cents > 0 OR EXISTS (SELECT 1 FROM pots ip WHERE ip.id = s.pot_id AND ip.user_id = s.user_id AND ip.is_assignable = 0))
        AND s.user_id = ? AND t.user_id = ?
      GROUP BY s.pot_id`,
     ...potIds,
@@ -279,7 +282,7 @@ export async function allPotInflow(
 /** What the agent assigned to pots for a month, in cents.
  *  The assignments ledger is the source of truth; pot target_cents is only
  *  the wireframe template. Only spending pots count: assignments to income
- *  pots are planned income and never reduce ready-to-assign. */
+ *  pots are planned income, which adds to ready-to-assign (rtaCents). */
 export async function assignedTotal(db: Db, userId: number, month: string): Promise<number> {
   const r = await db.get<{ total: number }>(
     `SELECT COALESCE(SUM(a.cents), 0) AS total
@@ -293,10 +296,33 @@ export async function assignedTotal(db: Db, userId: number, month: string): Prom
   return r!.total;
 }
 
-/** Ready-to-assign for a month: inflows minus assignments. The month ends
- *  when this is exactly 0. */
+/** Planned income not yet received for a month, in cents: for each visible
+ *  income pot, its planned income (assignment) beyond what it has received
+ *  net, floored at 0. An income pot that received more than planned adds
+ *  nothing here; the surplus is already in monthInflows. */
+export async function pendingPlannedIncome(db: Db, userId: number, month: string): Promise<number> {
+  const r = await db.get<{ pending: number }>(
+    `SELECT COALESCE(SUM(MAX(0, a.cents - COALESCE((
+       SELECT SUM(s.amount_cents) FROM splits s JOIN transactions t ON t.id = s.transaction_id
+       WHERE s.pot_id = p.id AND substr(t.date, 1, 7) = a.month AND t.is_transfer = 0 AND t.voided = 0
+         AND s.owner = 'user' AND s.user_id = p.user_id AND t.user_id = p.user_id
+     ), 0))), 0) AS pending
+     FROM assignments a JOIN pots p ON p.id = a.pot_id
+     WHERE a.month = ? AND p.hidden = 0 AND p.is_assignable = 0
+       AND a.user_id = ? AND p.user_id = ?`,
+    month,
+    userId,
+    userId
+  );
+  return r!.pending;
+}
+
+/** Ready-to-assign for a month: income minus assignments, where income is
+ *  what each income pot received net, or its planned income while that is
+ *  higher, plus uncategorized inflows. The month ends when this is exactly 0. */
 export async function rtaCents(db: Db, userId: number, month: string): Promise<number> {
-  return (await monthInflows(db, userId, month)) - (await assignedTotal(db, userId, month));
+  const income = (await monthInflows(db, userId, month)) + (await pendingPlannedIncome(db, userId, month));
+  return income - (await assignedTotal(db, userId, month));
 }
 
 

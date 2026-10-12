@@ -69,10 +69,13 @@ for `wrangler dev`). Deploying is `bun run --cwd client build` followed by
   never assigned to.
 - **Assignments**: income arrives, then every dollar is assigned to a pot
   (`budget assign --month YYYY-MM --pot <id|name> --cents N`, idempotent).
-  Ready-to-Assign = inflows − assignments; the month ends with RTA at exactly
-  $0, and the close refuses to apply otherwise. Only inflows outside spending
-  pots count here: an inflow on a spending pot (a refund or reimbursement)
-  nets against that pot's spend instead.
+  Ready-to-Assign = income − assignments; the month ends with RTA at exactly
+  $0, and the close refuses to apply otherwise. Each income pot counts as the
+  larger of its planned income (its assignment) and what it received net of
+  money out of it, so planned pay counts before it lands. Uncategorized
+  inflows count too. An inflow on a spending pot (a refund or reimbursement)
+  nets against that pot's spend instead, and money out of an income pot nets
+  against what it received rather than counting as spend.
   Spending pots also take negative assignments for offsets a mirrored budget
   balances with, such as a pay-yourself bridge or a contact's reimbursed half
   of a bill (`--cents -514946`); they hand dollars back to RTA. Income pots

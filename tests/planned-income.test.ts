@@ -31,13 +31,31 @@ describe("planned income on income pots", () => {
     expect(await assignedTotal(db, 1, "2026-09")).toBe(60000);
   });
 
-  test("planned income does not change RTA; only actual inflows and spending assignments do", async () => {
+  test("planned income counts toward RTA until it is received", async () => {
     const db = await seed();
     await assignToPot(db, 1, "2026-09", "Paycheck", 520000);
     await assignToPot(db, 1, "2026-09", "Groceries", 60000);
+    // Nothing in yet: the whole plan is income.
+    expect(await rtaCents(db, 1, "2026-09")).toBe(520000 - 60000);
+    // Part of it lands: still the plan, since 500000 < 520000.
     await createTransaction(db, 1, { date: "2026-09-15", accountId: 1, potId: 2, amountCents: 500000, description: "Pay" });
-    // RTA = actual inflows - spending-pot assignments; the 520000 planned is ignored.
-    expect(await rtaCents(db, 1, "2026-09")).toBe(500000 - 60000);
+    expect(await rtaCents(db, 1, "2026-09")).toBe(520000 - 60000);
+    // More than planned lands: the actual figure wins.
+    await createTransaction(db, 1, { date: "2026-09-29", accountId: 1, potId: 2, amountCents: 30000, description: "Bonus" });
+    expect(await rtaCents(db, 1, "2026-09")).toBe(530000 - 60000);
+  });
+
+  test("income with no plan counts as received", async () => {
+    const db = await seed();
+    await createTransaction(db, 1, { date: "2026-09-20", accountId: 1, potId: 3, amountCents: 1200, description: "Interest" });
+    expect(await rtaCents(db, 1, "2026-09")).toBe(1200);
+  });
+
+  test("planned income on a hidden pot does not count", async () => {
+    const db = await seed();
+    await assignToPot(db, 1, "2026-09", "Paycheck", 520000);
+    await db.run("UPDATE pots SET hidden = 1 WHERE name = 'Paycheck'");
+    expect(await rtaCents(db, 1, "2026-09")).toBe(0);
   });
 
   test("potInflow reports what actually landed per income pot", async () => {
